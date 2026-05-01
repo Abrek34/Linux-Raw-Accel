@@ -140,7 +140,7 @@ private:
 
     // IPC server state
     std::thread         ipc_thread_;
-    int                 ipc_sock_fd_  = -1;    // listening socket
+    std::atomic<int>    ipc_sock_fd_  { -1 };  // listening socket (atomic: shared with ipc_thread_)
     std::string         ipc_sock_path_;
     std::atomic<bool>   ipc_running_  { false };
 

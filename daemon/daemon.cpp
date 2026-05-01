@@ -988,8 +988,8 @@ bool AccelDaemon::start_ipc_server(const std::string& sock_path) {
     // Remove stale socket file
     unlink(sock_path.c_str());
 
-    ipc_sock_fd_ = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    if (ipc_sock_fd_ < 0) {
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) {
         log("IPC: socket() failed: " + std::string(strerror(errno)));
         return false;
     }
@@ -998,14 +998,14 @@ bool AccelDaemon::start_ipc_server(const std::string& sock_path) {
     addr.sun_family = AF_UNIX;
     if (sock_path.size() >= sizeof(addr.sun_path)) {
         log("IPC: socket path too long: " + sock_path);
-        close(ipc_sock_fd_); ipc_sock_fd_ = -1;
+        close(fd);
         return false;
     }
     strncpy(addr.sun_path, sock_path.c_str(), sizeof(addr.sun_path) - 1);
 
-    if (bind(ipc_sock_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         log("IPC: bind() failed: " + std::string(strerror(errno)));
-        close(ipc_sock_fd_); ipc_sock_fd_ = -1;
+        close(fd);
         return false;
     }
     // Allow the 'input' group to connect (normal users added by the installer).
@@ -1021,11 +1021,12 @@ bool AccelDaemon::start_ipc_server(const std::string& sock_path) {
         }
     }
 
-    if (listen(ipc_sock_fd_, 8) < 0) {
+    if (listen(fd, 8) < 0) {
         log("IPC: listen() failed: " + std::string(strerror(errno)));
-        close(ipc_sock_fd_); ipc_sock_fd_ = -1;
+        close(fd);
         return false;
     }
+    ipc_sock_fd_.store(fd);
 
     ipc_running_.store(true);
     ipc_thread_ = std::thread([this] { ipc_serve_loop(); });
@@ -1035,10 +1036,10 @@ bool AccelDaemon::start_ipc_server(const std::string& sock_path) {
 
 void AccelDaemon::stop_ipc_server() {
     ipc_running_.store(false);
-    if (ipc_sock_fd_ >= 0) {
-        shutdown(ipc_sock_fd_, SHUT_RDWR);
-        close(ipc_sock_fd_);
-        ipc_sock_fd_ = -1;
+    int fd = ipc_sock_fd_.exchange(-1);
+    if (fd >= 0) {
+        shutdown(fd, SHUT_RDWR);
+        close(fd);
     }
     if (ipc_thread_.joinable()) ipc_thread_.join();
     if (!ipc_sock_path_.empty()) {
@@ -1050,7 +1051,7 @@ void AccelDaemon::stop_ipc_server() {
 void AccelDaemon::ipc_serve_loop() {
     while (ipc_running_.load()) {
         // Guard: stop_ipc_server() may close the fd before we exit.
-        int fd = ipc_sock_fd_;
+        int fd = ipc_sock_fd_.load();
         if (fd < 0) break;
 
         // Use poll() instead of select() to avoid FD_SETSIZE overflow when fd >= 1024.
