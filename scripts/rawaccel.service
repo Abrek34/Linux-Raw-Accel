@@ -1,0 +1,54 @@
+[Unit]
+Description=RawAccel Linux Mouse Acceleration Daemon
+# Start after udevd so that udev rules (99-rawaccel.rules) are already loaded.
+# No dependency on network.target — this is an input daemon.
+# On KDE Wayland sessions, KWin must be up before mice are grabbed so that
+# the virtual uinput device is visible to the compositor.  We cannot hard-depend
+# on plasma-kwin_wayland here (not present on X11), so we use Wants= + After=
+# to express a soft ordering: start after KWin if it is running, skip otherwise.
+After=systemd-udevd.service
+Wants=plasma-kwin_wayland.service
+After=plasma-kwin_wayland.service
+Documentation=https://github.com/rawaccel-linux/rawaccel-linux
+
+[Service]
+Type=simple
+# Config is stored in /etc/rawaccel/settings.json when running as a system service.
+# The GUI/CLI store settings in ~/.config/rawaccel/settings.json for the user;
+# run `rawaccel-cli` or the GUI to create/edit profiles, then they are copied to
+# /etc/rawaccel/ by the install script or symlinked via ExecStartPre below.
+ExecStart=/usr/local/bin/rawaccel-daemon -c /etc/rawaccel/settings.json
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=3
+PIDFile=/run/rawaccel.pid
+
+# Security hardening
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+NoNewPrivileges=true
+ReadWritePaths=/etc/rawaccel /run
+
+# Network: daemon does not use any network sockets.
+# AF_UNIX for potential future D-Bus; AF_NETLINK for kernel udev events.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+# Needs access to input devices (uinput virtual device creation required)
+SupplementaryGroups=input
+DeviceAllow=/dev/input rw
+DeviceAllow=/dev/uinput rw
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rawaccel
+
+[Install]
+WantedBy=multi-user.target
