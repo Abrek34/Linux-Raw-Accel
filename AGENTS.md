@@ -31,7 +31,7 @@ Test file: `tests/test_accel.cpp`
 - No external dependencies (standard C++20 + project headers)
 - Each `SECTION()` is an independent test group
 - Assertions use `EXPECT` / `EXPECT_NEAR` macros
-- 98 test functions, 771 runtime assertions covering: algorithms, JSON round-trips,
+- 99 test functions, 783 runtime assertions covering: algorithms, JSON round-trips,
   file I/O, input validation, multi-profile round-trip, atomic write, IPC JSON,
   config error paths, LUT sort, int overflow guard, NaN/Inf remainder guard,
   accel_args sanitize, fuzz tests, extreme speeds, EMA stability, subpixel
@@ -50,7 +50,8 @@ Test file: `tests/test_accel.cpp`
   EMA coefficient=0 path, directional weight cos/sin blend,
   speed clamp min/max, dir mul negative direction, synchronous power<1 guard,
   natural legacy (non-gain) mode, output_dpi NaN sanitize,
-  lat_stats move semantics, dpi_factor pre-compute consistency
+  lat_stats move semantics, dpi_factor pre-compute consistency,
+  magnitude hypot overflow safety
 
 ## Fuzz Testing
 
@@ -98,7 +99,7 @@ Changing it automatically propagates to the daemon, CLI, and GUI.
 | `gui/widgets_sync.inl` | Widget ↔ profile sync, GTK callbacks |
 | `gui/profile_mgr.inl` | Profile CRUD dialogs |
 | `gui/ui_builder.inl` | Layout helpers, build_ui(), window-close, on_activate() |
-| `tests/test_accel.cpp` | Unit + integration tests (771 assertions, 98 functions) |
+| `tests/test_accel.cpp` | Unit + integration tests (783 assertions, 99 functions) |
 | `tests/fuzz_config.cpp` | libFuzzer harness — config JSON parsing |
 | `tests/fuzz_accel.cpp` | libFuzzer harness — acceleration pipeline |
 | `tests/run_fuzz.sh` | Fuzz test runner (both harnesses) |
@@ -125,6 +126,7 @@ Changing it automatically propagates to the daemon, CLI, and GUI.
 - **Duplicate device_id warning**: GUI warns on startup and on save if multiple profiles share the same device_id (first-match-wins in daemon)
 - **lat_stats move safety**: move constructor/assignment lock the source mutex before copying data (defense-in-depth against concurrent record() during vector reallocation)
 - **Pre-computed dpi_factor**: `mouse_device::dpi_factor` is computed once in `apply_profile()` instead of dividing on every mouse event — eliminates a floating-point division from the hot path
+- **Overflow-safe magnitude**: `magnitude()` uses `std::hypot(x,y)` instead of `sqrt(x*x+y*y)` — prevents intermediate overflow/underflow for extreme delta values
 - **Unified clock source**: both `now_ms()` and `now_ns()` use `CLOCK_MONOTONIC_RAW` — eliminates drift between timing sources and reduces syscalls per event from 3 to 2
 - **Y-axis unlinked field sync**: when X/Y axes are unlinked, fields without dedicated Y widgets (cap_mode, exponent_power, decay_rate, scale, output_offset, motivity, gamma, smooth, sync_speed) are copied from X to prevent stale values
 - **Widget sensitivity refactor**: raw passthrough grey-out logic extracted to `update_raw_sensitivity()` — single source of truth for 18 widget enable/disable calls

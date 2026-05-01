@@ -9,7 +9,7 @@ struct vec2d {
 };
 
 inline double magnitude(vec2d v) {
-    return std::sqrt(v.x * v.x + v.y * v.y);
+    return std::hypot(v.x, v.y);
 }
 
 inline double lp_distance(vec2d v, double p) {

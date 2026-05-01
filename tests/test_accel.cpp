@@ -4604,6 +4604,41 @@ static void test_dpi_factor_precompute() {
     }
 }
 
+// R14 — magnitude() uses std::hypot (overflow-safe)
+static void test_magnitude_hypot() {
+    SECTION("R14 — magnitude uses hypot (overflow-safe)");
+
+    // Normal values — must match manual sqrt(x^2 + y^2)
+    EXPECT_NEAR(magnitude({3.0, 4.0}), 5.0, 1e-12);
+    EXPECT_NEAR(magnitude({0.0, 0.0}), 0.0, 1e-12);
+    EXPECT_NEAR(magnitude({1.0, 0.0}), 1.0, 1e-12);
+    EXPECT_NEAR(magnitude({0.0, -7.0}), 7.0, 1e-12);
+
+    // Typical mouse deltas
+    EXPECT_NEAR(magnitude({5.0, 12.0}), 13.0, 1e-12);
+    EXPECT_NEAR(magnitude({-8.0, 6.0}), 10.0, 1e-12);
+
+    // Large values that would overflow with naive sqrt(x*x+y*y):
+    // DBL_MAX ≈ 1.8e308, so x*x would be inf for x > ~1.34e154
+    double big = 1e200;
+    double result = magnitude({big, big});
+    EXPECT(std::isfinite(result));
+    EXPECT_NEAR(result, big * std::sqrt(2.0), big * 1e-12);
+
+    // Very small values (subnormal territory) — must not underflow to zero
+    double tiny = 1e-300;
+    double tiny_result = magnitude({tiny, tiny});
+    EXPECT(tiny_result > 0.0);
+    EXPECT(std::isfinite(tiny_result));
+    EXPECT_NEAR(tiny_result, tiny * std::sqrt(2.0), tiny * 1e-6);
+
+    // Verify magnitude is used correctly in rawaccel pipeline
+    // (modifier speed calculation uses magnitude on mouse deltas)
+    vec2d delta = {10.0, 10.0};
+    double speed = magnitude(delta);
+    EXPECT_NEAR(speed, 10.0 * std::sqrt(2.0), 1e-10);
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 
 int main() {
@@ -4723,6 +4758,9 @@ int main() {
     // R13 — lat_stats move safety + dpi_factor pre-compute
     test_lat_stats_move_semantics();
     test_dpi_factor_precompute();
+
+    // R14 — magnitude hypot overflow safety
+    test_magnitude_hypot();
 
     std::printf("\n=== Sonuç: %d/%d geçti", g_passed, g_tests);
     if (g_failed) std::printf(", %d BAŞARISIZ", g_failed);
