@@ -4639,6 +4639,504 @@ static void test_magnitude_hypot() {
     EXPECT_NEAR(speed, 10.0 * std::sqrt(2.0), 1e-10);
 }
 
+// ── R15: Comprehensive hardening tests ───────────────────────────────────────
+
+/// Test LUT binary search boundary conditions exhaustively.
+static void test_lut_binary_search_boundaries() {
+    SECTION("R15 — LUT binary search boundary exhaustive");
+
+    // 2-point LUT: linear interpolation between exactly 2 points
+    {
+        accel_args a = make_args(accel_mode::lookup);
+        a.data[0] = 10.0f; a.data[1] = 1.0f;  // speed=10 → gain=1.0
+        a.data[2] = 50.0f; a.data[3] = 3.0f;  // speed=50 → gain=3.0
+        a.length = 4;
+        accel_union au; au.init(a);
+
+        // Below first point → clamp to first gain
+        EXPECT_NEAR(au.apply(0.0, a), 1.0, 1e-9);
+        EXPECT_NEAR(au.apply(5.0, a), 1.0, 1e-9);
+        EXPECT_NEAR(au.apply(10.0, a), 1.0, 1e-9);
+
+        // Exact midpoint: speed=30 → gain=2.0 (linear interp)
+        EXPECT_NEAR(au.apply(30.0, a), 2.0, 1e-9);
+
+        // At second point exactly
+        EXPECT_NEAR(au.apply(50.0, a), 3.0, 1e-9);
+
+        // Above last point → clamp to last gain
+        EXPECT_NEAR(au.apply(100.0, a), 3.0, 1e-9);
+        EXPECT_NEAR(au.apply(1e6, a), 3.0, 1e-9);
+    }
+
+    // 3-point LUT: binary search mid calculation
+    {
+        accel_args a = make_args(accel_mode::lookup);
+        a.data[0] = 0.0f;  a.data[1] = 1.0f;
+        a.data[2] = 25.0f; a.data[3] = 2.0f;
+        a.data[4] = 50.0f; a.data[5] = 4.0f;
+        a.length = 6;
+        accel_union au; au.init(a);
+
+        // Verify each segment
+        EXPECT_NEAR(au.apply(0.0, a), 1.0, 1e-9);
+        EXPECT_NEAR(au.apply(12.5, a), 1.5, 1e-9);  // midpoint seg 1
+        EXPECT_NEAR(au.apply(25.0, a), 2.0, 1e-9);
+        EXPECT_NEAR(au.apply(37.5, a), 3.0, 1e-9);  // midpoint seg 2
+        EXPECT_NEAR(au.apply(50.0, a), 4.0, 1e-9);
+    }
+
+    // Max capacity LUT: fill all 257 points and verify endpoints
+    {
+        accel_args a = make_args(accel_mode::lookup);
+        int cap = (int)LUT_POINTS_CAPACITY;
+        a.length = cap * 2;
+        for (int i = 0; i < cap; i++) {
+            a.data[i * 2]     = static_cast<float>(i);       // speed = i
+            a.data[i * 2 + 1] = 1.0f + static_cast<float>(i) * 0.01f;  // gain = 1 + i*0.01
+        }
+        accel_union au; au.init(a);
+
+        // First point
+        EXPECT_NEAR(au.apply(0.0, a), 1.0, 1e-4);
+        // Last point
+        EXPECT_NEAR(au.apply(cap - 1, a), 1.0 + (cap - 1) * 0.01, 0.01);
+        // Beyond last
+        EXPECT_NEAR(au.apply(1000.0, a), 1.0 + (cap - 1) * 0.01, 0.01);
+        // Mid-point interpolation
+        EXPECT_NEAR(au.apply(128.5, a), 1.0 + 128.5 * 0.01, 0.01);
+    }
+}
+
+/// Test the full modifier pipeline with every feature flag enabled simultaneously.
+static void test_modifier_full_pipeline_stress() {
+    SECTION("R15 — modifier full pipeline: all features enabled simultaneously");
+
+    profile p{};
+    p.accel_x.mode = accel_mode::classic;
+    p.accel_x.gain = true;
+    p.accel_x.acceleration = 0.01;
+    p.accel_x.exponent_classic = 2.0;
+    p.accel_x.limit = 2.0;
+    p.accel_x.input_offset = 5.0;
+    p.accel_x.cap = {15, 1.8};
+    p.accel_x.cap_mode_val = cap_mode::io;
+
+    p.accel_y = p.accel_x;
+    p.accel_y.mode = accel_mode::natural;
+    p.accel_y.decay_rate = 0.1;
+
+    p.degrees_rotation = 30.0;
+    p.degrees_snap = 10.0;
+    p.speed_min = 2.0;
+    p.speed_max = 100.0;
+    p.output_dpi = 1600;
+    p.lr_output_dpi_ratio = 1.2;
+    p.ud_output_dpi_ratio = 0.8;
+    p.speed_processor_args.whole = true;
+    p.speed_processor_args.lp_norm = 2.0;
+    p.speed_processor_args.input_speed_smooth_halflife = 5.0;
+    p.speed_processor_args.scale_smooth_halflife = 3.0;
+
+    modifier_settings ms; ms.prof = p; init_settings(ms);
+    speed_processor   sp; sp.init(p.speed_processor_args);
+    modifier          mod;
+    double dpi_factor = 1600.0 / NORMALIZED_DPI;
+
+    // Run 10000 events through the pipeline
+    double rem_x = 0, rem_y = 0;
+    double total_out_x = 0, total_out_y = 0;
+    for (int i = 0; i < 10000; i++) {
+        double dx = 3.0 + std::sin(i * 0.1) * 2.0;
+        double dy = 2.0 + std::cos(i * 0.1) * 1.5;
+        double time_ms = 1.0; // 1000 Hz
+
+        vec2d in = {dx, dy};
+        mod.modify(in, sp, ms, dpi_factor, time_ms);
+
+        // Every output must be finite
+        EXPECT(std::isfinite(in.x));
+        EXPECT(std::isfinite(in.y));
+
+        // Apply subpixel accumulation
+        double out_x_d = in.x + rem_x;
+        double out_y_d = in.y + rem_y;
+        int ox = (int)(out_x_d >= 0 ? out_x_d + 0.5 : out_x_d - 0.5);
+        int oy = (int)(out_y_d >= 0 ? out_y_d + 0.5 : out_y_d - 0.5);
+        rem_x = out_x_d - ox;
+        rem_y = out_y_d - oy;
+
+        total_out_x += ox;
+        total_out_y += oy;
+    }
+
+    // Verify some motion actually occurred (not stuck at zero)
+    EXPECT(std::fabs(total_out_x) > 100.0);
+    EXPECT(std::fabs(total_out_y) > 100.0);
+
+    // Verify remainder stays bounded
+    EXPECT(std::fabs(rem_x) < 1.0);
+    EXPECT(std::fabs(rem_y) < 1.0);
+}
+
+/// Test EMA smoother numerical stability over very long sequences.
+static void test_ema_long_sequence_stability() {
+    SECTION("R15 — EMA smoother: 100K iterations, no drift or divergence");
+
+    // simple_ema_smoother: feed constant speed → must converge
+    {
+        simple_ema_smoother sm;
+        sm.init(10.0); // halflife=10ms
+        double last = 0;
+        for (int i = 0; i < 100000; i++) {
+            last = sm.smooth(5.0, 1.0); // dt=1ms
+        }
+        EXPECT_NEAR(last, 5.0, 1e-3);
+    }
+
+    // simple_ema_smoother: alternating values → output stays bounded
+    {
+        simple_ema_smoother sm;
+        sm.init(10.0);
+        double last = 0;
+        for (int i = 0; i < 100000; i++) {
+            double v = (i % 2 == 0) ? 10.0 : 0.0;
+            last = sm.smooth(v, 1.0);
+        }
+        EXPECT(std::isfinite(last));
+        EXPECT(last >= 0.0 && last <= 10.0);
+    }
+
+    // linear_ema_smoother: convergence test
+    {
+        linear_ema_smoother lm;
+        lm.init(10.0, 10.0 * linear_ema_smoother::trendDampening);
+        double last = 0;
+        for (int i = 0; i < 100000; i++) {
+            last = lm.smooth(5.0, 1.0);
+        }
+        EXPECT_NEAR(last, 5.0, 0.1);
+    }
+
+    // halflife=0 (no smoothing) — output tracks input
+    {
+        simple_ema_smoother sm;
+        sm.init(0.0); // coefficient=0 → no smoothing
+        for (int i = 0; i < 100; i++) sm.smooth(42.0, 1.0);
+        double v = sm.smooth(99.0, 1.0);
+        // With halflife=0, coefficient=0 → smooth returns min(window,cutoff)
+        // which should be close to the input
+        EXPECT(std::isfinite(v));
+    }
+}
+
+/// Test config round-trip with every field at exact boundary values.
+static void test_config_boundary_roundtrip() {
+    SECTION("R15 — config round-trip: all fields at boundary values");
+
+    device_profile dp;
+    dp.name = "boundary-test";
+    dp.device_id = "usb:1234:5678:serial";
+    dp.dev_cfg.dpi = 32000;         // max
+    dp.dev_cfg.polling_rate = 8000; // max
+
+    auto& p = dp.prof;
+    p.degrees_rotation = 359.99; // not 360: sanitize does fmod(360,360)=0
+    p.degrees_snap = 45.0;
+    p.speed_min = 0.0;
+    p.speed_max = 500.0;
+    p.output_dpi = 32000.0;
+    p.lr_output_dpi_ratio = 100.0;
+    p.ud_output_dpi_ratio = 0.01;
+    p.raw_passthrough = false;
+
+    auto& ax = p.accel_x;
+    ax.mode = accel_mode::classic;
+    ax.gain = true;
+    ax.acceleration = 20.0;
+    ax.exponent_classic = 10.0;
+    ax.exponent_power = 5.0;
+    ax.limit = 100.0;
+    ax.input_offset = 100.0;
+    ax.output_offset = 100.0;
+    ax.decay_rate = 10.0;
+    ax.scale = 100.0;
+    ax.motivity = 10.0;
+    ax.gamma = 10.0;
+    ax.sync_speed = 100.0;
+    ax.smooth = 1.0;
+    ax.cap = {500, 100};
+    ax.cap_mode_val = cap_mode::io;
+
+    p.accel_y = ax;
+    p.accel_y.mode = accel_mode::natural;
+
+    auto& sp = p.speed_processor_args;
+    sp.whole = true;
+    sp.lp_norm = 32.0;
+    sp.input_speed_smooth_halflife = 200.0;
+    sp.scale_smooth_halflife = 200.0;
+    sp.output_speed_smooth_halflife = 200.0;
+
+    // Serialize → deserialize
+    std::string json = profile_to_json(dp);
+    device_profile dp2 = profile_from_json(json);
+
+    // Verify every field
+    EXPECT(dp2.name == dp.name);
+    EXPECT(dp2.device_id == dp.device_id);
+    EXPECT(dp2.dev_cfg.dpi == dp.dev_cfg.dpi);
+    EXPECT(dp2.dev_cfg.polling_rate == dp.dev_cfg.polling_rate);
+    EXPECT_NEAR(dp2.prof.degrees_rotation, 359.99, 1e-9);
+    EXPECT_NEAR(dp2.prof.degrees_snap, p.degrees_snap, 1e-9);
+    EXPECT_NEAR(dp2.prof.speed_min, p.speed_min, 1e-9);
+    EXPECT_NEAR(dp2.prof.speed_max, p.speed_max, 1e-9);
+    EXPECT_NEAR(dp2.prof.output_dpi, p.output_dpi, 1e-9);
+    EXPECT_NEAR(dp2.prof.lr_output_dpi_ratio, p.lr_output_dpi_ratio, 1e-9);
+    EXPECT_NEAR(dp2.prof.ud_output_dpi_ratio, p.ud_output_dpi_ratio, 1e-9);
+    EXPECT(dp2.prof.raw_passthrough == false);
+
+    auto& ax2 = dp2.prof.accel_x;
+    EXPECT(ax2.mode == accel_mode::classic);
+    EXPECT(ax2.gain == true);
+    EXPECT_NEAR(ax2.acceleration, 20.0, 1e-9);
+    EXPECT_NEAR(ax2.exponent_classic, 10.0, 1e-9);
+    EXPECT_NEAR(ax2.limit, 100.0, 1e-9);
+    EXPECT_NEAR(ax2.input_offset, 100.0, 1e-9);
+    EXPECT_NEAR(ax2.output_offset, 100.0, 1e-9);
+    EXPECT_NEAR(ax2.scale, 100.0, 1e-9);
+    EXPECT_NEAR(ax2.cap.x, 500.0, 1e-3);
+    EXPECT_NEAR(ax2.cap.y, 100.0, 1e-3);
+
+    EXPECT(dp2.prof.accel_y.mode == accel_mode::natural);
+
+    EXPECT_NEAR(dp2.prof.speed_processor_args.lp_norm, 32.0, 1e-9);
+    EXPECT_NEAR(dp2.prof.speed_processor_args.input_speed_smooth_halflife, 200.0, 1e-9);
+}
+
+/// Test rotate() + direction() mathematical identity: rotate by θ then -θ = identity.
+static void test_rotate_direction_identity() {
+    SECTION("R15 — rotate/direction identity and edge cases");
+
+    // Rotate 0° = identity
+    vec2d v = {3.0, 4.0};
+    vec2d r0 = rotate(v, direction(0.0));
+    EXPECT_NEAR(r0.x, 3.0, 1e-12);
+    EXPECT_NEAR(r0.y, 4.0, 1e-12);
+
+    // Rotate 360° = identity
+    vec2d r360 = rotate(v, direction(360.0));
+    EXPECT_NEAR(r360.x, 3.0, 1e-9);
+    EXPECT_NEAR(r360.y, 4.0, 1e-9);
+
+    // Rotate 90° then -90° = identity
+    vec2d r90 = rotate(v, direction(90.0));
+    vec2d back = rotate(r90, direction(-90.0));
+    EXPECT_NEAR(back.x, 3.0, 1e-9);
+    EXPECT_NEAR(back.y, 4.0, 1e-9);
+
+    // Rotate 90°: (1,0) → (0,1)
+    vec2d unit_x = {1.0, 0.0};
+    vec2d rot90 = rotate(unit_x, direction(90.0));
+    EXPECT_NEAR(rot90.x, 0.0, 1e-12);
+    EXPECT_NEAR(rot90.y, 1.0, 1e-12);
+
+    // Rotate 180°: (1,0) → (-1,0)
+    vec2d rot180 = rotate(unit_x, direction(180.0));
+    EXPECT_NEAR(rot180.x, -1.0, 1e-12);
+    EXPECT_NEAR(rot180.y, 0.0, 1e-12);
+
+    // Magnitude preserved under rotation
+    for (double deg = 0; deg < 360; deg += 17.3) {
+        vec2d rv = rotate(v, direction(deg));
+        EXPECT_NEAR(magnitude(rv), magnitude(v), 1e-9);
+    }
+}
+
+/// Test all helper functions in math-vec2.hpp thoroughly.
+static void test_vec2_helpers_exhaustive() {
+    SECTION("R15 — vec2 helpers: maxsd, minsd, clampsd, lp_distance");
+
+    EXPECT_NEAR(maxsd(3.0, 7.0), 7.0, 1e-15);
+    EXPECT_NEAR(maxsd(-1.0, -5.0), -1.0, 1e-15);
+    EXPECT_NEAR(maxsd(0.0, 0.0), 0.0, 1e-15);
+
+    EXPECT_NEAR(minsd(3.0, 7.0), 3.0, 1e-15);
+    EXPECT_NEAR(minsd(-1.0, -5.0), -5.0, 1e-15);
+
+    EXPECT_NEAR(clampsd(5.0, 0.0, 10.0), 5.0, 1e-15);
+    EXPECT_NEAR(clampsd(-5.0, 0.0, 10.0), 0.0, 1e-15);
+    EXPECT_NEAR(clampsd(15.0, 0.0, 10.0), 10.0, 1e-15);
+    EXPECT_NEAR(clampsd(0.0, 0.0, 0.0), 0.0, 1e-15);
+
+    // lp_distance for various norms
+    vec2d v = {3.0, 4.0};
+    EXPECT_NEAR(lp_distance(v, 2.0), 5.0, 1e-9);   // L2 = euclidean
+    EXPECT_NEAR(lp_distance(v, 1.0), 7.0, 1e-9);   // L1 = manhattan
+    // L∞ approximation (large p)
+    EXPECT_NEAR(lp_distance(v, 100.0), 4.0, 0.01); // → max(3,4) = 4
+
+    // lp_distance with zero vector (R6 fix)
+    EXPECT_NEAR(lp_distance({0, 0}, 2.0), 0.0, 1e-15);
+    EXPECT_NEAR(lp_distance({0, 0}, 0.5), 0.0, 1e-15);
+    EXPECT_NEAR(lp_distance({0, 0}, -1.0), 0.0, 1e-15);
+}
+
+/// Concurrent-like stress test for lat_stats — rapid record/snapshot cycles.
+static void test_lat_stats_stress() {
+    SECTION("R15 — lat_stats stress: 1M records + periodic snapshots");
+
+    lat_stats ls;
+
+    // Record 1M values
+    for (int i = 0; i < 1000000; i++) {
+        ls.record(static_cast<double>(i % 1000));
+    }
+    EXPECT(ls.count == 1000000);
+    EXPECT_NEAR(ls.min_us, 0.0, 1e-9);
+    EXPECT_NEAR(ls.max_us, 999.0, 1e-9);
+    EXPECT_NEAR(ls.sum_us / ls.count, 499.5, 0.01); // avg of 0..999 repeated
+
+    // Snapshot and reset
+    auto snap = ls.snapshot_and_reset();
+    EXPECT(snap.count == 1000000);
+    EXPECT(ls.count == 0);
+
+    // Histogram bucket coverage: bucket = int(lat_us / 0.5)
+    // Value 0µs → bucket 0, value 249µs → bucket 498, values ≥500µs → over
+    EXPECT(snap.hist[0] > 0);   // bucket 0: [0.0, 0.5) — hit by value 0
+    EXPECT(snap.hist[998] > 0); // bucket 998: [499.0, 499.5) — hit by value 499
+    EXPECT(snap.over > 0);      // values 500–999 go to over
+
+    // Record after reset — works correctly
+    ls.record(42.0);
+    EXPECT(ls.count == 1);
+    EXPECT_NEAR(ls.min_us, 42.0, 1e-9);
+    EXPECT_NEAR(ls.max_us, 42.0, 1e-9);
+}
+
+/// Test all 7 accel modes through sanitize → init → apply for consistency.
+static void test_all_modes_sanitize_init_apply() {
+    SECTION("R15 — all modes: sanitize → init → apply cycle");
+
+    accel_mode modes[] = {
+        accel_mode::noaccel, accel_mode::classic, accel_mode::power,
+        accel_mode::natural, accel_mode::jump, accel_mode::synchronous,
+        accel_mode::lookup
+    };
+
+    for (auto m : modes) {
+        device_profile dp;
+        dp.name = "test";
+        dp.dev_cfg.dpi = 800;
+        dp.dev_cfg.polling_rate = 1000;
+        auto& a = dp.prof.accel_x;
+        a.mode = m;
+        a.gain = true;
+        a.acceleration = 0.01;
+        a.exponent_classic = 2.0;
+        a.exponent_power = 0.5;
+        a.limit = 2.0;
+        a.decay_rate = 0.1;
+        a.scale = 1.0;
+        a.motivity = 1.5;
+        a.gamma = 1.0;
+        a.sync_speed = 5.0;
+        a.smooth = 0.5;
+        a.cap = {15, 1.8};
+        a.cap_mode_val = cap_mode::out;
+
+        if (m == accel_mode::lookup) {
+            a.data[0] = 0; a.data[1] = 1.0f;
+            a.data[2] = 50; a.data[3] = 2.0f;
+            a.length = 4;
+        }
+
+        dp.prof.accel_y = a;
+
+        // Sanitize via device_profile (the public API)
+        sanitize_device_profile(dp);
+
+        // Init + apply at various speeds
+        accel_union au;
+        au.init(dp.prof.accel_x);
+        for (double spd = 0.0; spd <= 200.0; spd += 5.0) {
+            double g = au.apply(spd, dp.prof.accel_x);
+            EXPECT(std::isfinite(g));
+            EXPECT(g >= 0.0); // gain must never be negative
+        }
+    }
+}
+
+/// Test config save/load with Unicode profile names and device IDs.
+static void test_config_unicode_names() {
+    SECTION("R15 — config round-trip: Unicode profile names");
+
+    app_config cfg;
+    device_profile dp;
+    dp.name = "Oyun Profili \xC3\xB6zel";  // "özel" in UTF-8
+    dp.device_id = "usb:04d9:a0cd:\xE4\xB8\xAD\xE6\x96\x87"; // Chinese chars
+    dp.dev_cfg.dpi = 1600;
+    dp.dev_cfg.polling_rate = 1000;
+    cfg.profiles.push_back(dp);
+    cfg.active_profile = dp.name;
+
+    // Save to temp file
+    std::string tmp = "/tmp/rawaccel_test_unicode.json";
+    save_config(cfg, tmp);
+
+    // Load back
+    app_config cfg2 = load_config(tmp);
+    EXPECT(cfg2.profiles.size() == 1);
+    EXPECT(cfg2.profiles[0].name == dp.name);
+    EXPECT(cfg2.profiles[0].device_id == dp.device_id);
+    EXPECT(cfg2.active_profile == dp.name);
+
+    std::remove(tmp.c_str());
+}
+
+/// Test synchronous mode edge cases: sc=0, power boundary, speed near sync_speed.
+static void test_synchronous_edge_cases() {
+    SECTION("R15 — synchronous edge cases: near sync_speed, extreme power");
+
+    // Speed exactly at sync_speed
+    {
+        accel_args a = make_args(accel_mode::synchronous);
+        a.sync_speed = 10.0;
+        a.acceleration = 0.5;
+        a.gain = true;
+        accel_union au; au.init(a);
+        double g = au.apply(10.0, a);
+        EXPECT(std::isfinite(g));
+        EXPECT(g > 0.0);
+    }
+
+    // Speed just above and below sync_speed
+    {
+        accel_args a = make_args(accel_mode::synchronous);
+        a.sync_speed = 10.0;
+        a.acceleration = 0.5;
+        a.gain = true;
+        accel_union au; au.init(a);
+
+        double g_below = au.apply(9.999, a);
+        double g_above = au.apply(10.001, a);
+        EXPECT(std::isfinite(g_below));
+        EXPECT(std::isfinite(g_above));
+        // Gain should be continuous near sync_speed
+        EXPECT(std::fabs(g_below - g_above) < 0.1);
+    }
+
+    // Zero acceleration → gain = 1.0
+    {
+        accel_args a = make_args(accel_mode::synchronous);
+        a.acceleration = 0.0;
+        a.gain = true;
+        accel_union au; au.init(a);
+        EXPECT_NEAR(au.apply(5.0, a), 1.0, 1e-6);
+    }
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 
 int main() {
@@ -4761,6 +5259,18 @@ int main() {
 
     // R14 — magnitude hypot overflow safety
     test_magnitude_hypot();
+
+    // R15 — comprehensive hardening tests
+    test_lut_binary_search_boundaries();
+    test_modifier_full_pipeline_stress();
+    test_ema_long_sequence_stability();
+    test_config_boundary_roundtrip();
+    test_rotate_direction_identity();
+    test_vec2_helpers_exhaustive();
+    test_lat_stats_stress();
+    test_all_modes_sanitize_init_apply();
+    test_config_unicode_names();
+    test_synchronous_edge_cases();
 
     std::printf("\n=== Sonuç: %d/%d geçti", g_passed, g_tests);
     if (g_failed) std::printf(", %d BAŞARISIZ", g_failed);

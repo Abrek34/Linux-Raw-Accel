@@ -113,7 +113,7 @@ static bool validate_config_path(const std::string& path) {
                           << "' is not a regular file.\n";
                 return false;
             }
-            constexpr off_t MAX_CONFIG_BYTES = 4 * 1024 * 1024; // 4 MB
+            constexpr off_t MAX_CONFIG_BYTES = 4L * 1024L * 1024L; // 4 MB
             if (st.st_size > MAX_CONFIG_BYTES) {
                 std::cerr << "[rawaccel] Config file is too large ("
                           << st.st_size << " bytes, max " << MAX_CONFIG_BYTES << ").\n";
@@ -200,7 +200,9 @@ int main(int argc, char* argv[]) {
             ssize_t n = read(fd, buf, sizeof(buf) - 1);
             close(fd);
             if (n <= 0) { unlink(path); return false; }
-            pid_t pid = (pid_t)atoi(buf);
+            char* end = nullptr;
+            long val = std::strtol(buf, &end, 10);
+            pid_t pid = (end > buf && val > 0) ? static_cast<pid_t>(val) : 0;
             if (pid > 0 && kill(pid, 0) != 0 && errno == ESRCH) {
                 // Process does not exist — remove the stale PID file
                 unlink(path);

@@ -554,7 +554,12 @@ int main(int argc, char* argv[]) {
         dp.dev_cfg.dpi = 800;
         dp.dev_cfg.polling_rate = 1000;
         cfg.profiles.push_back(dp);
-        try { save_config(cfg, config_path); } catch (...) {}
+        try { save_config(cfg, config_path); }
+        catch (const std::exception& e) {
+            std::cerr << "Warning: could not save default config: " << e.what() << "\n";
+        } catch (...) {
+            std::cerr << "Warning: could not save default config.\n";
+        }
     }
 
     const std::string& cmd = args[0];

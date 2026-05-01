@@ -62,10 +62,13 @@ static int event_num_from_path(const std::string& path) {
 static int sysfs_read_int(const std::string& sysfs_path) {
     FILE* f = fopen(sysfs_path.c_str(), "r");
     if (!f) return -1;
-    int val = -1;
-    fscanf(f, "%d", &val);
+    char buf[32] = {};
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
     fclose(f);
-    return val;
+    if (n == 0) return -1;
+    char* end = nullptr;
+    long val = std::strtol(buf, &end, 10);
+    return (end > buf) ? static_cast<int>(val) : -1;
 }
 
 /// Detect mouse polling rate (Hz) from sysfs.

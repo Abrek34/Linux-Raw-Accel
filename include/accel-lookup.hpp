@@ -25,7 +25,7 @@ struct lookup {
         if (point_count <= 0) return 1.0;
 
         const float* pts = args.data;
-        int n = point_count;
+        const size_t n = static_cast<size_t>(point_count);
 
         // Cast to double explicitly to avoid -Wdouble-promotion warnings
         // Below first point
@@ -35,15 +35,15 @@ struct lookup {
             return static_cast<double>(pts[(n - 1) * 2 + 1]);
 
         // Binary search for segment
-        int lo = 0, hi = n - 1;
+        size_t lo = 0, hi = n - 1;
         while (hi - lo > 1) {
-            int mid = (lo + hi) / 2;
+            size_t mid = (lo + hi) / 2;
             if (static_cast<double>(pts[mid * 2]) <= speed) lo = mid;
             else                                             hi = mid;
         }
 
-        double x0 = pts[lo * 2],     y0 = pts[lo * 2 + 1];
-        double x1 = pts[(lo+1) * 2], y1 = pts[(lo+1) * 2 + 1];
+        double x0 = pts[lo * 2],       y0 = pts[lo * 2 + 1];
+        double x1 = pts[(lo + 1) * 2], y1 = pts[(lo + 1) * 2 + 1];
 
         double dx = x1 - x0;
         if (dx <= 0) return y0; // guard: duplicate/misordered points
