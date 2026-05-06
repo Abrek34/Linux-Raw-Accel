@@ -936,58 +936,11 @@ static void kde_upsert_section(std::vector<std::string>& lines,
     lines.insert(lines.begin() + (long)start + 1, body.begin(), body.end());
 }
 
-/// Write the [Libinput] section AND per-device overrides for every active
-/// (RawAccel) virtual device into kwinrc, disabling KDE pointer acceleration.
-/// KDE Plasma 6 stores per-device libinput config as nested headers like
-/// [Libinput][bus][vendor][product][Device Name] which take priority over the
-/// global [Libinput] section — we must write both to avoid double-acceleration
-/// on systems where Plasma already created a per-device entry.
-/// Generic across any mouse / any host (vendor/product/name read from kernel).
-static bool kde_write_flat_accel() {
-    std::string kwinrc_path;
-    const char* xdg_cfg = std::getenv("XDG_CONFIG_HOME");
-    if (xdg_cfg && xdg_cfg[0] != '\0') {
-        kwinrc_path = std::string(xdg_cfg) + "/kwinrc";
-    } else {
-        const char* home = std::getenv("HOME");
-        if (!home || home[0] == '\0') return false;
-        kwinrc_path = std::string(home) + "/.config/kwinrc";
-    }
-
-    // Read existing file
-    std::vector<std::string> lines;
-    {
-        FILE* f = fopen(kwinrc_path.c_str(), "r");
-        if (f) {
-            char line[1024];
-            while (fgets(line, sizeof(line), f)) {
-                size_t n = strlen(line);
-                while (n > 0 && (line[n-1] == '\n' || line[n-1] == '\r')) line[--n] = '\0';
-                lines.emplace_back(line);
-            }
-            fclose(f);
-        }
-    }
-
-    const std::vector<std::pair<std::string, std::string>> kv = {
-        {"PointerAccelerationProfile", "1"},  // 1 = Flat
-        {"PointerAcceleration",        "0"},
-    };
-
-    // 1) Global section — fallback for any device without specific override
-    kde_upsert_section(lines, "[Libinput]", kv);
-
-    // 2) Per-device override for every (RawAccel) virtual mouse currently up
-    auto devs = kde_enumerate_rawaccel_devices();
-    for (auto& d : devs) {
-        std::string header = "[Libinput][" + std::to_string(d.bus) + "][" +
-                             std::to_string(d.vendor) + "][" +
-                             std::to_string(d.product) + "][" + d.name + "]";
-        kde_upsert_section(lines, header, kv);
-    }
-
-    // Atomic write (tmp → rename)
-    std::string tmp = kwinrc_path + ".tmp";
+/// Atomically write a kwinrc-style INI file (with possibly nested sections)
+/// from the in-memory line buffer.
+static bool kde_atomic_write(const std::string& path,
+                             const std::vector<std::string>& lines) {
+    std::string tmp = path + ".tmp";
     FILE* fw = fopen(tmp.c_str(), "w");
     if (!fw) return false;
     for (auto& l : lines) {
@@ -995,26 +948,146 @@ static bool kde_write_flat_accel() {
         fputc('\n', fw);
     }
     fclose(fw);
-    return (rename(tmp.c_str(), kwinrc_path.c_str()) == 0);
+    return (rename(tmp.c_str(), path.c_str()) == 0);
 }
 
-/// Reload KDE input settings at runtime via kwin D-Bus (no logout needed).
-static void kde_reload_input_settings() {
-    // qdbus org.kde.KWin /KWin reconfigure
-    // Use fork+exec to avoid shell injection
+/// Read all lines (without trailing CR/LF) from path. Empty vector if missing.
+static std::vector<std::string> kde_read_lines(const std::string& path) {
+    std::vector<std::string> lines;
+    FILE* f = fopen(path.c_str(), "r");
+    if (!f) return lines;
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        size_t n = strlen(line);
+        while (n > 0 && (line[n-1] == '\n' || line[n-1] == '\r')) line[--n] = '\0';
+        lines.emplace_back(line);
+    }
+    fclose(f);
+    return lines;
+}
+
+/// Resolve $XDG_CONFIG_HOME/<name> or ~/.config/<name>.
+static std::string kde_xdg_path(const char* name) {
+    const char* xdg = std::getenv("XDG_CONFIG_HOME");
+    if (xdg && xdg[0] != '\0') return std::string(xdg) + "/" + name;
+    const char* home = std::getenv("HOME");
+    if (!home || home[0] == '\0') return {};
+    return std::string(home) + "/.config/" + name;
+}
+
+/// Write [Libinput] global + per-device overrides into kwinrc and kcminputrc,
+/// with the requested acceleration profile (1 = Flat, 2 = Adaptive).
+///
+/// KEY INSIGHT — Plasma 6 split-brain storage:
+///   • kwinrc    → KWin compositor reads on startup/reconfigure
+///                 Section format includes bus: [Libinput][bus][vid][pid][Name]
+///   • kcminputrc → System Settings KCM (kcm_mouse) reads + applies via libinput
+///                 Section format omits bus: [Libinput][vid][pid][Name]
+///                 Only key written is `PointerAccelerationProfile`
+/// Manual toggle in System Settings only updates kcminputrc and calls
+/// libinput's runtime API directly. Writing kwinrc alone is not enough on
+/// Plasma 6 — we MUST also write kcminputrc and trigger KCM init.
+static bool kde_write_kwinrc_accel(const char* profile, const char* accel) {
+    auto devs = kde_enumerate_rawaccel_devices();
+
+    // ── kwinrc (compositor-level config) ─────────────────────────────────────
+    std::string kwinrc_path = kde_xdg_path("kwinrc");
+    if (kwinrc_path.empty()) return false;
+    auto kwinrc_lines = kde_read_lines(kwinrc_path);
+
+    const std::vector<std::pair<std::string, std::string>> kv_kwin = {
+        {"PointerAccelerationProfile", profile},
+        {"PointerAcceleration",        accel},
+    };
+    kde_upsert_section(kwinrc_lines, "[Libinput]", kv_kwin);
+    for (auto& d : devs) {
+        std::string header = "[Libinput][" + std::to_string(d.bus) + "][" +
+                             std::to_string(d.vendor) + "][" +
+                             std::to_string(d.product) + "][" + d.name + "]";
+        kde_upsert_section(kwinrc_lines, header, kv_kwin);
+    }
+    if (!kde_atomic_write(kwinrc_path, kwinrc_lines)) return false;
+
+    // ── kcminputrc (KCM-applied per-device config — the one libinput uses) ──
+    std::string kcm_path = kde_xdg_path("kcminputrc");
+    if (kcm_path.empty()) return true; // kwinrc done — kcminputrc is bonus
+    auto kcm_lines = kde_read_lines(kcm_path);
+
+    // KCM only writes the profile key — match its format exactly.
+    const std::vector<std::pair<std::string, std::string>> kv_kcm = {
+        {"PointerAccelerationProfile", profile},
+    };
+    for (auto& d : devs) {
+        // KCM section header omits the bus index.
+        std::string header = "[Libinput][" + std::to_string(d.vendor) + "][" +
+                             std::to_string(d.product) + "][" + d.name + "]";
+        kde_upsert_section(kcm_lines, header, kv_kcm);
+    }
+    kde_atomic_write(kcm_path, kcm_lines); // best-effort
+    return true;
+}
+
+// Forward declaration — defined below
+static void kde_reload_input_settings();
+
+/// Apply Flat acceleration (no acceleration) to KDE Plasma libinput config
+/// for the global section AND every active (RawAccel) virtual mouse.
+///
+/// IMPLEMENTATION NOTE — KWin per-device libinput "toggle dance":
+/// Empirically on Plasma 6, writing kwinrc + `KWin reconfigure` does NOT
+/// always re-apply per-device libinput settings to a device that's already
+/// running. The KCM (System Settings → Mouse) bypasses kwinrc entirely and
+/// calls libinput's runtime API; toggling the checkbox there fixes it.
+/// To replicate that "applied" state without user interaction we:
+///   1. Write Adaptive (profile=2) → reconfigure → small sleep
+///   2. Write Flat     (profile=1) → reconfigure
+/// KWin observes a real change between snapshots and forces re-application.
+/// Idempotent: the final on-disk state is always Flat.
+///
+/// Generic across any mouse / any host (vendor/product/name read from kernel).
+static bool kde_write_flat_accel() {
+    // Step 1: temporarily set Adaptive so the next reconfigure sees a delta
+    if (!kde_write_kwinrc_accel("2", "0")) return false;
+    kde_reload_input_settings();
+    // Brief pause so KWin processes the first reconfigure before the second.
+    // 250 ms is enough on every machine I've tested without making startup
+    // noticeably slower.
+    struct timespec ts = { 0, 250 * 1000 * 1000 };
+    nanosleep(&ts, nullptr);
+    // Step 2: settle on Flat — this is the kept state.
+    return kde_write_kwinrc_accel("1", "0");
+}
+
+/// Run a single command via fork+exec, waiting for completion. Returns true
+/// if the child exited with status 0.
+static bool kde_run_cmd(const char* const* argv) {
     pid_t pid = fork();
     if (pid == 0) {
-        // Try qdbus6 first (Plasma 6), then qdbus (Plasma 5)
-        const char* cmds[][5] = {
-            {"qdbus6", "org.kde.KWin", "/KWin", "reconfigure", nullptr},
-            {"qdbus",  "org.kde.KWin", "/KWin", "reconfigure", nullptr},
-        };
-        for (auto& cmd : cmds) {
-            execvp(cmd[0], const_cast<char* const*>(cmd));
-        }
-        _exit(0); // if qdbus not found — kwin reload on next session is fine too
-    } else if (pid > 0) {
-        waitpid(pid, nullptr, 0);
+        execvp(argv[0], const_cast<char* const*>(argv));
+        _exit(127);
+    }
+    if (pid < 0) return false;
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+/// Reload KDE input settings at runtime: tells KWin compositor to re-read
+/// kwinrc AND tells KCM to re-apply kcminputrc to libinput devices. Both are
+/// needed on Plasma 6 (split-brain config — see kde_write_kwinrc_accel).
+static void kde_reload_input_settings() {
+    // 1) Compositor: qdbus reconfigure (Plasma 6 first, then 5 fallback)
+    {
+        const char* a1[] = {"qdbus6", "org.kde.KWin", "/KWin", "reconfigure", nullptr};
+        const char* a2[] = {"qdbus",  "org.kde.KWin", "/KWin", "reconfigure", nullptr};
+        if (!kde_run_cmd(a1)) kde_run_cmd(a2);
+    }
+    // 2) KCM init: forces kcm_mouse plugin to read kcminputrc and call
+    //    libinput's runtime API on every active device — replicates the
+    //    "click → apply → close" the user does manually in System Settings.
+    {
+        const char* args[] = {"kcminit", "kcm_mouse", nullptr};
+        kde_run_cmd(args);
     }
 }
 

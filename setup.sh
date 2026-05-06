@@ -211,6 +211,15 @@ do_install() {
     udevadm control --reload-rules
     udevadm trigger
 
+    # libinput quirk: RawAccel sanal cihazını "trackball" olarak işaretle
+    # → libinput kendi accel curve'ünü uygulamaz (ModelTrackball=1 → flat default).
+    # Compositor-agnostik: KDE/GNOME/sway/X11 hepsi libinput kullanıyor.
+    if [[ -d /etc/libinput ]] || [[ -d /usr/share/libinput ]]; then
+        install -Dm644 "$ROOT/scripts/rawaccel.quirks" \
+            /etc/libinput/local-overrides.quirks
+        ok "libinput quirk yüklendi: /etc/libinput/local-overrides.quirks"
+    fi
+
     # polkit
     install -Dm644 "$ROOT/scripts/polkit/org.rawaccel.policy" \
         /usr/share/polkit-1/actions/org.rawaccel.policy
@@ -287,6 +296,26 @@ fix_kde_plasma() {
 print_summary() {
     say "[7/7] Kurulum tamamlandı."
     echo ""
+    # KDE Plasma 6 için tek-seferlik manuel adım (mimari sınır)
+    if command -v kwin_wayland &>/dev/null || command -v plasmashell &>/dev/null; then
+        echo "${C_BOLD}${C_Y}═══════════════════════════════════════════════════════════════${C_RESET}"
+        echo "${C_BOLD}${C_Y}  ÖNEMLİ — KDE Plasma 6 için TEK SEFERLİK manuel adım${C_RESET}"
+        echo "${C_BOLD}${C_Y}═══════════════════════════════════════════════════════════════${C_RESET}"
+        echo ""
+        echo "  KDE, yeni keşfedilen sanal mouse'a kendi acceleration'ını uyguluyor."
+        echo "  Bunu kapatmak için ${C_BOLD}bir kere${C_RESET} şu adımı yapın:"
+        echo ""
+        echo "    1. ${C_BOLD}System Settings → Fare ve Dokunmatik Yüzey${C_RESET}"
+        echo "    2. Aygıt seç → ${C_BOLD}\"... (RawAccel)\"${C_RESET}"
+        echo "    3. ${C_BOLD}\"İşaretçi ivmelendirmesini etkinleştir\"${C_RESET} → AÇ → KAPAT → Uygula"
+        echo ""
+        echo "  Bu ayar ${C_BOLD}kalıcıdır${C_RESET} — reboot/restart sonrası kaybolmaz."
+        echo "  RawAccel zaten doğru kcminputrc'yi yazdı, KWin'in okumasını"
+        echo "  bir kere tetiklemek için bu manuel toggle gerekiyor."
+        echo ""
+        echo "${C_BOLD}${C_Y}═══════════════════════════════════════════════════════════════${C_RESET}"
+        echo ""
+    fi
     echo "${C_BOLD}Komutlar:${C_RESET}"
     echo "  rawaccel-gui              — GUI'yi aç"
     echo "  rawaccel-cli list         — profilleri listele"
