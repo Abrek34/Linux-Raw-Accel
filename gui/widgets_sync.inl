@@ -274,10 +274,46 @@ void profile_to_widgets(AppState* S) {
 
 // ── Callbacks ─────────────────────────────────────────────────────────────────
 
+static bool has_systemd_rawaccel_unit() {
+    return fs::exists("/etc/systemd/system/rawaccel.service") ||
+           fs::exists("/usr/lib/systemd/system/rawaccel.service");
+}
+
+static bool pkexec_systemctl_async(const char* action, std::string* err_out = nullptr) {
+    pid_t pid = fork();
+    if (pid < 0) {
+        if (err_out) *err_out = "fork() failed.";
+        return false;
+    }
+    if (pid == 0) {
+        setsid();
+        execlp("pkexec", "pkexec", "systemctl", action, "rawaccel", (char*)nullptr);
+        _exit(127);
+    }
+    pid_t* pid_ptr = new pid_t(pid);
+    g_timeout_add(3000, [](gpointer p) -> gboolean {
+        pid_t* pp = static_cast<pid_t*>(p);
+        int status;
+        waitpid(*pp, &status, WNOHANG);
+        delete pp;
+        return G_SOURCE_REMOVE;
+    }, pid_ptr);
+    if (err_out) err_out->clear();
+    return false;
+}
+
 void on_param_changed(GtkWidget*, gpointer user_data) {
     auto* S = static_cast<AppState*>(user_data);
     widgets_to_profile(S);
     update_lut_visibility(S); // show/hide the LUT panel when the mode changes
+}
+
+// "notify::<prop>" signals use a 3-argument callback signature
+// (GObject*, GParamSpec*, gpointer). Calling the 2-arg on_param_changed
+// directly via G_CALLBACK corrupts user_data (it receives the GParamSpec*
+// instead of AppState*), causing SIGSEGV on dropdown changes (Mode/Mouse).
+void on_notify_param_changed(GObject*, GParamSpec*, gpointer user_data) {
+    on_param_changed(nullptr, user_data);
 }
 
 void on_profile_changed(GtkDropDown* dd, GParamSpec*, gpointer user_data) {
@@ -374,6 +410,19 @@ void on_apply_clicked(GtkButton*, gpointer user_data) {
 
 void on_daemon_start(GtkButton*, gpointer user_data) {
     auto* S = static_cast<AppState*>(user_data);
+    if (has_systemd_rawaccel_unit()) {
+        std::string err;
+        if (pkexec_systemctl_async("start", &err)) {
+            g_timeout_add(1000, [](gpointer p) -> gboolean {
+                update_daemon_status(static_cast<AppState*>(p));
+                return G_SOURCE_REMOVE;
+            }, S);
+            set_status(S, "Starting daemon via systemd...");
+            return;
+        }
+        set_status(S, err + " Falling back to direct daemon start...");
+    }
+
     // Candidate paths in preference order
     static const char* candidates[] = {
         "/usr/local/bin/rawaccel-daemon",
@@ -444,6 +493,17 @@ void on_daemon_start(GtkButton*, gpointer user_data) {
 
 void on_daemon_stop(GtkButton*, gpointer user_data) {
     auto* S = static_cast<AppState*>(user_data);
+    if (has_systemd_rawaccel_unit()) {
+        std::string err;
+        if (pkexec_systemctl_async("stop", &err)) {
+            g_timeout_add(800, [](gpointer p) -> gboolean {
+                update_daemon_status(static_cast<AppState*>(p));
+                return G_SOURCE_REMOVE;
+            }, S);
+            set_status(S, "Stopping daemon via systemd...");
+            return;
+        }
+    }
     std::string err;
     if (!daemon_send_signal(SIGTERM, &err)) {
         set_status(S, err);
@@ -467,8 +527,19 @@ void on_daemon_reload(GtkButton*, gpointer user_data) {
     }
     std::string err;
     if (!daemon_send_signal(SIGHUP, &err)) {
-        set_status(S, err);
-        return;
+        if (has_systemd_rawaccel_unit()) {
+            std::string serr;
+            if (pkexec_systemctl_async("reload", &serr)) {
+                set_status(S, "Daemon reloaded (systemd).");
+                update_daemon_status(S);
+                return;
+            }
+            set_status(S, err + " | " + serr);
+            return;
+        } else {
+            set_status(S, err);
+            return;
+        }
     }
     set_status(S, "Daemon reloaded (SIGHUP).");
     update_daemon_status(S);

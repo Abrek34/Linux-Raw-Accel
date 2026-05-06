@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <limits.h>
 #include <pwd.h>
 #include <vector>
 
@@ -280,6 +281,10 @@ int main(int argc, char* argv[]) {
                   << "  - Add yourself to 'input' group: sudo usermod -aG input $USER\n"
                   << "  - Load uinput: sudo modprobe uinput\n"
                   << "  - Stop abrek if running: sudo systemctl stop abrek\n";
+        // IPC server was started before start() — must be stopped to join its thread.
+        // Otherwise the daemon destructor sees a still-running thread and SIGABRTs.
+        daemon.stop_ipc_server();
+        g_daemon.store(nullptr);
         remove_pid();
         return 1;
     }

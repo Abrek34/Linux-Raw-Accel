@@ -41,10 +41,14 @@ ReadWritePaths=/etc/rawaccel /run
 # AF_UNIX for potential future D-Bus; AF_NETLINK for kernel udev events.
 RestrictAddressFamilies=AF_UNIX AF_NETLINK
 
-# Needs access to input devices (uinput virtual device creation required)
+# Needs access to input devices (uinput virtual device creation required).
+# DeviceAllow= is intentionally NOT set: when it is, systemd switches to a
+# strict device cgroup policy that, on some kernels (notably with cachyos /
+# bpf-based device cgroups), prevents the daemon from listing /dev/input/event*
+# and results in "No physical mice found" even when running as root.
+# The service still drops privileges to the input group via SupplementaryGroups
+# and the udev rule (99-rawaccel.rules) keeps /dev/uinput accessible.
 SupplementaryGroups=input
-DeviceAllow=/dev/input rw
-DeviceAllow=/dev/uinput rw
 
 StandardOutput=journal
 StandardError=journal

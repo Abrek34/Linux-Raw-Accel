@@ -200,6 +200,10 @@ static std::vector<std::string> find_mice() {
 AccelDaemon::AccelDaemon() = default;
 
 AccelDaemon::~AccelDaemon() {
+    // Stop IPC thread first — otherwise if start() failed and the user
+    // forgot to call stop_ipc_server(), the std::thread destructor would
+    // call std::terminate() (cannot join a still-running thread).
+    stop_ipc_server();
     stop();
 }
 
@@ -723,8 +727,15 @@ static bool flush_motion(mouse_device& dev, libevdev_uinput* uidev,
     // No rotation, no snap, no speed clamp, no weights, no subpixel accumulation.
     // dx/dy are already integer counts from the kernel — write them directly.
     if (dev.settings.prof.raw_passthrough) {
-        int ix = static_cast<int>(dx);
-        int iy = static_cast<int>(dy);
+        // Defense-in-depth: clamp to INT range before casting (mirrors the
+        // guard in motion_math.hpp). A pathological event batch with millions
+        // of REL_X events in one SYN frame would otherwise be UB on cast.
+        constexpr double INT_LO = static_cast<double>(INT_MIN);
+        constexpr double INT_HI = static_cast<double>(INT_MAX);
+        if (!std::isfinite(dx)) dx = 0;
+        if (!std::isfinite(dy)) dy = 0;
+        int ix = static_cast<int>(std::clamp(dx, INT_LO, INT_HI));
+        int iy = static_cast<int>(std::clamp(dy, INT_LO, INT_HI));
         if (ix != 0 && !uinput_write(uidev, EV_REL, REL_X, ix)) return false;
         if (iy != 0 && !uinput_write(uidev, EV_REL, REL_Y, iy)) return false;
         double lat_us = static_cast<double>(now_ns() - t_start) / 1000.0;

@@ -94,11 +94,18 @@ std::string check_duplicate_device_ids(const app_config& cfg) {
 int main(int argc, char* argv[]) {
     // Suppress harmless GTK4 GtkGizmo size warnings (known GTK4 cosmetic bug
     // where sliders briefly report negative min-size during layout).
-    g_log_set_handler("Gtk", G_LOG_LEVEL_WARNING,
-        [](const gchar*, GLogLevelFlags, const gchar* msg, gpointer) {
-            if (msg && std::strstr(msg, "GtkGizmo")) return; // suppress
-            g_printerr("%s\n", msg);
-        }, nullptr);
+    // GTK4 uses structured logging, so g_log_set_handler() is bypassed —
+    // we must install a writer func instead.
+    g_log_set_writer_func(
+        [](GLogLevelFlags level, const GLogField* fields, gsize n_fields, gpointer) -> GLogWriterOutput {
+            for (gsize i = 0; i < n_fields; ++i) {
+                if (g_strcmp0(fields[i].key, "MESSAGE") == 0 && fields[i].value) {
+                    const char* msg = static_cast<const char*>(fields[i].value);
+                    if (std::strstr(msg, "GtkGizmo")) return G_LOG_WRITER_HANDLED;
+                }
+            }
+            return g_log_writer_default(level, fields, n_fields, nullptr);
+        }, nullptr, nullptr);
 
     AppState state;
 

@@ -44,28 +44,89 @@ write_kwinrc() {
     # Create backup
     [[ -f "$KWINRC" ]] && cp "$KWINRC" "$KWINRC.rawaccel-backup.$(date +%Y%m%d-%H%M%S)"
 
-    # Use python3 for clean INI manipulation (preserves comments/sections)
+    # Use python3 for clean INI manipulation (preserves comments/sections).
+    # We write BOTH the global [Libinput] section AND per-device overrides
+    # for any "(RawAccel)" virtual device found in /proc/bus/input/devices —
+    # KDE Plasma 6 stores per-device libinput config as nested sections like
+    # [Libinput][bustype][vendor_decimal][product_decimal][Device Name],
+    # which override the global setting.
     if command -v python3 &>/dev/null; then
         python3 - "$KWINRC" "$profile" "$accel" << 'PYEOF'
-import sys, os, configparser
+import sys, os, re
 
 kwinrc, profile, accel = sys.argv[1], sys.argv[2], sys.argv[3]
-cfg = configparser.RawConfigParser()
-cfg.optionxform = str  # preserve key case
 
+# Read existing file (if any) as raw text so nested [Libinput][a][b]...
+# sections (which configparser cannot represent) are preserved.
+text = ""
 if os.path.exists(kwinrc):
-    cfg.read(kwinrc)
+    with open(kwinrc) as f:
+        text = f.read()
 
-if "Libinput" not in cfg:
-    cfg["Libinput"] = {}
-cfg["Libinput"]["PointerAccelerationProfile"] = profile
-cfg["Libinput"]["PointerAcceleration"] = accel
+# 1) Enumerate live RawAccel virtual devices from /proc/bus/input/devices.
+devices = []
+try:
+    with open("/proc/bus/input/devices") as f:
+        block = {}
+        for line in f:
+            line = line.rstrip("\n")
+            if not line:
+                if block.get("name", "").endswith("(RawAccel)"):
+                    devices.append(block)
+                block = {}
+                continue
+            m = re.match(r"I: Bus=([0-9a-fA-F]+) Vendor=([0-9a-fA-F]+) Product=([0-9a-fA-F]+)", line)
+            if m:
+                block["bus"]     = int(m.group(1), 16)
+                block["vendor"]  = int(m.group(2), 16)
+                block["product"] = int(m.group(3), 16)
+            elif line.startswith('N: Name="'):
+                block["name"] = line[len('N: Name="'):-1]
+        if block.get("name", "").endswith("(RawAccel)"):
+            devices.append(block)
+except FileNotFoundError:
+    pass
 
+def upsert_section(text, section_header, kv):
+    """Replace or append [section_header] block with the given key=value pairs.
+    section_header includes the brackets, e.g. '[Libinput]' or '[Libinput][3][1133][...]'.
+    kv is a list of (key, value) tuples preserving order.
+    """
+    # Match this section up to the next top-level (non-nested) section header.
+    # Sections in kwinrc are line-anchored.
+    esc = re.escape(section_header)
+    pattern = rf"(?ms)^{esc}\s*\n(.*?)(?=^\[|\Z)"
+    body_lines = "".join(f"{k}={v}\n" for k, v in kv)
+    new_block = f"{section_header}\n{body_lines}"
+    if re.search(pattern, text):
+        return re.sub(pattern, new_block, text, count=1)
+    sep = "" if text.endswith("\n") or not text else "\n"
+    return text + sep + "\n" + new_block
+
+kv = [("PointerAccelerationProfile", profile), ("PointerAcceleration", accel)]
+
+# 2) Global section (fallback for any device without a specific override)
+text = upsert_section(text, "[Libinput]", kv)
+
+# 3) Per-device override for every RawAccel virtual device.
+#    Plasma stores these as nested headers like [Libinput][3][1133][50498][Name]
+for d in devices:
+    header = f"[Libinput][{d['bus']}][{d['vendor']}][{d['product']}][{d['name']}]"
+    text = upsert_section(text, header, kv)
+
+# Atomic rename
 tmp = kwinrc + ".tmp"
 with open(tmp, "w") as f:
-    cfg.write(f, space_around_delimiters=False)
+    f.write(text)
 os.rename(tmp, kwinrc)
+
 print(f"  Updated {kwinrc}")
+print(f"  + global [Libinput] → profile={profile}")
+if devices:
+    for d in devices:
+        print(f"  + per-device: {d['name']} (bus={d['bus']}, vid={d['vendor']}, pid={d['product']})")
+else:
+    print("  (No (RawAccel) virtual devices found — start the daemon first, then re-run.)")
 PYEOF
     else
         # Fallback: manual INI editing with sed + append

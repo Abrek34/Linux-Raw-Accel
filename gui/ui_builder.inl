@@ -172,7 +172,7 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     GtkStringList* msl = gtk_string_list_new(mode_names);
     S->mode_combo = gtk_drop_down_new(G_LIST_MODEL(msl), nullptr);
     gtk_widget_set_hexpand(S->mode_combo, TRUE);
-    g_signal_connect(S->mode_combo, "notify::selected", G_CALLBACK(on_param_changed), S);
+    g_signal_connect(S->mode_combo, "notify::selected", G_CALLBACK(on_notify_param_changed), S);
     grid_row(ag, 0, "Mode:", S->mode_combo);
 
     S->gain_check = gtk_check_button_new_with_label("Gain mode (recommended)");
@@ -206,7 +206,7 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     GtkStringList* csl = gtk_string_list_new(cap_names);
     S->cap_mode_combo = gtk_drop_down_new(G_LIST_MODEL(csl), nullptr);
     gtk_widget_set_hexpand(S->cap_mode_combo, TRUE);
-    g_signal_connect(S->cap_mode_combo, "notify::selected", G_CALLBACK(on_param_changed), S);
+    g_signal_connect(S->cap_mode_combo, "notify::selected", G_CALLBACK(on_notify_param_changed), S);
 
     // Wrap normal parameter widgets in a frame (hidden in LUT mode)
     S->accel_params_frame = gtk_frame_new(nullptr);
@@ -310,7 +310,7 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     GtkStringList* msl2 = gtk_string_list_new(mode_names);
     S->mode_combo_y = gtk_drop_down_new(G_LIST_MODEL(msl2), nullptr);
     gtk_widget_set_hexpand(S->mode_combo_y, TRUE);
-    g_signal_connect(S->mode_combo_y, "notify::selected", G_CALLBACK(on_param_changed), S);
+    g_signal_connect(S->mode_combo_y, "notify::selected", G_CALLBACK(on_notify_param_changed), S);
 
     S->accel_spin_y      = make_spin(0,   20,   0.001, 0.005);
     S->exponent_spin_y   = make_spin(1,   10,   0.05,  2.0);
@@ -375,7 +375,7 @@ void build_ui(AppState* S, GtkApplication* gapp) {
         GtkStringList* dsl = gtk_string_list_new(dist_names);
         S->dist_mode_combo = gtk_drop_down_new(G_LIST_MODEL(dsl), nullptr);
         gtk_widget_set_hexpand(S->dist_mode_combo, TRUE);
-        g_signal_connect(S->dist_mode_combo, "notify::selected", G_CALLBACK(on_param_changed), S);
+        g_signal_connect(S->dist_mode_combo, "notify::selected", G_CALLBACK(on_notify_param_changed), S);
         gtk_widget_set_tooltip_text(S->dist_mode_combo,
             "How speed is calculated from X/Y input:\n"
             "  Euclidean — √(x²+y²)  (default)\n"
@@ -457,7 +457,7 @@ void build_ui(AppState* S, GtkApplication* gapp) {
         S->device_id_combo = gtk_drop_down_new(G_LIST_MODEL(mlist), nullptr);
         gtk_widget_set_hexpand(S->device_id_combo, TRUE);
         g_signal_connect(S->device_id_combo, "notify::selected",
-                         G_CALLBACK(on_param_changed), S);
+                         G_CALLBACK(on_notify_param_changed), S);
 
         GtkWidget* da_grid = append_grid();
         grid_row(da_grid, 0, "Mouse:", S->device_id_combo);
@@ -861,10 +861,88 @@ static void register_shortcuts(AppState* S, GtkApplication* gapp) {
 
 // ── KDE double-acceleration fix helpers ──────────────────────────────────────
 
-/// Write the [Libinput] section into kwinrc to disable KDE pointer acceleration.
-/// This mirrors what KDE System Settings → Input Devices → Mouse →
-///   Pointer Acceleration = Flat  does internally.
-/// Returns true on success.
+/// Enumerate currently-active RawAccel virtual mouse devices from
+/// /proc/bus/input/devices.  Returns a vector of (bus, vendor, product, name).
+/// Vendor/product/bus are decimal (Plasma stores them in decimal in kwinrc).
+struct rawaccel_dev_t {
+    int bus, vendor, product;
+    std::string name;
+};
+static std::vector<rawaccel_dev_t> kde_enumerate_rawaccel_devices() {
+    std::vector<rawaccel_dev_t> out;
+    FILE* f = fopen("/proc/bus/input/devices", "r");
+    if (!f) return out;
+    char line[1024];
+    rawaccel_dev_t cur{};
+    bool have_id = false;
+    auto flush_block = [&]() {
+        if (have_id && cur.name.size() >= 10 &&
+            cur.name.compare(cur.name.size() - 10, 10, "(RawAccel)") == 0) {
+            out.push_back(cur);
+        }
+        cur = rawaccel_dev_t{};
+        have_id = false;
+    };
+    while (fgets(line, sizeof(line), f)) {
+        size_t n = strlen(line);
+        while (n > 0 && (line[n-1] == '\n' || line[n-1] == '\r')) line[--n] = '\0';
+        if (n == 0) { flush_block(); continue; }
+        // I: Bus=0003 Vendor=046d Product=c542 Version=0111
+        if (line[0] == 'I' && line[1] == ':') {
+            unsigned bus = 0, ven = 0, prod = 0;
+            if (sscanf(line, "I: Bus=%x Vendor=%x Product=%x", &bus, &ven, &prod) == 3) {
+                cur.bus = (int)bus; cur.vendor = (int)ven; cur.product = (int)prod;
+                have_id = true;
+            }
+        } else if (line[0] == 'N' && strncmp(line, "N: Name=\"", 9) == 0) {
+            std::string s(line + 9);
+            if (!s.empty() && s.back() == '"') s.pop_back();
+            cur.name = s;
+        }
+    }
+    flush_block();
+    fclose(f);
+    return out;
+}
+
+/// Replace or append a section [header] with the given key=value lines.
+/// `header` includes the brackets, e.g. "[Libinput]" or
+/// "[Libinput][3][1133][50498][Logitech ... (RawAccel)]".
+/// Section ends at the next line starting with '['.
+static void kde_upsert_section(std::vector<std::string>& lines,
+                               const std::string& header,
+                               const std::vector<std::pair<std::string, std::string>>& kv) {
+    // Find existing section
+    size_t start = std::string::npos;
+    for (size_t i = 0; i < lines.size(); i++) {
+        if (lines[i] == header) { start = i; break; }
+    }
+    std::vector<std::string> body;
+    body.reserve(kv.size());
+    for (auto& [k, v] : kv) body.push_back(k + "=" + v);
+
+    if (start == std::string::npos) {
+        // Append at end (with blank separator if file isn't empty)
+        if (!lines.empty() && !lines.back().empty()) lines.emplace_back();
+        lines.push_back(header);
+        for (auto& l : body) lines.push_back(l);
+        return;
+    }
+    // Find end of section (next '[' line or EOF)
+    size_t end = start + 1;
+    while (end < lines.size() && (lines[end].empty() || lines[end][0] != '[')) end++;
+    // Replace [start+1, end) with body
+    lines.erase(lines.begin() + (long)start + 1, lines.begin() + (long)end);
+    lines.insert(lines.begin() + (long)start + 1, body.begin(), body.end());
+}
+
+/// Write the [Libinput] section AND per-device overrides for every active
+/// (RawAccel) virtual device into kwinrc, disabling KDE pointer acceleration.
+/// KDE Plasma 6 stores per-device libinput config as nested headers like
+/// [Libinput][bus][vendor][product][Device Name] which take priority over the
+/// global [Libinput] section — we must write both to avoid double-acceleration
+/// on systems where Plasma already created a per-device entry.
+/// Generic across any mouse / any host (vendor/product/name read from kernel).
 static bool kde_write_flat_accel() {
     std::string kwinrc_path;
     const char* xdg_cfg = std::getenv("XDG_CONFIG_HOME");
@@ -881,7 +959,7 @@ static bool kde_write_flat_accel() {
     {
         FILE* f = fopen(kwinrc_path.c_str(), "r");
         if (f) {
-            char line[512];
+            char line[1024];
             while (fgets(line, sizeof(line), f)) {
                 size_t n = strlen(line);
                 while (n > 0 && (line[n-1] == '\n' || line[n-1] == '\r')) line[--n] = '\0';
@@ -891,44 +969,24 @@ static bool kde_write_flat_accel() {
         }
     }
 
-    // Find or create [Libinput] section
-    bool in_libinput = false;
-    bool found_profile = false, found_accel = false, found_section = false;
-    for (size_t i = 0; i < lines.size(); i++) {
-        if (lines[i][0] == '[') {
-            if (in_libinput) break; // left the section
-            in_libinput = (lines[i] == "[Libinput]");
-            if (in_libinput) found_section = true;
-            continue;
-        }
-        if (!in_libinput) continue;
-        if (lines[i].rfind("PointerAccelerationProfile=", 0) == 0) {
-            lines[i] = "PointerAccelerationProfile=1"; found_profile = true;
-        }
-        if (lines[i].rfind("PointerAcceleration=", 0) == 0) {
-            lines[i] = "PointerAcceleration=0"; found_accel = true;
-        }
+    const std::vector<std::pair<std::string, std::string>> kv = {
+        {"PointerAccelerationProfile", "1"},  // 1 = Flat
+        {"PointerAcceleration",        "0"},
+    };
+
+    // 1) Global section — fallback for any device without specific override
+    kde_upsert_section(lines, "[Libinput]", kv);
+
+    // 2) Per-device override for every (RawAccel) virtual mouse currently up
+    auto devs = kde_enumerate_rawaccel_devices();
+    for (auto& d : devs) {
+        std::string header = "[Libinput][" + std::to_string(d.bus) + "][" +
+                             std::to_string(d.vendor) + "][" +
+                             std::to_string(d.product) + "][" + d.name + "]";
+        kde_upsert_section(lines, header, kv);
     }
 
-    if (!found_section) {
-        lines.push_back("[Libinput]");
-        lines.push_back("PointerAccelerationProfile=1");
-        lines.push_back("PointerAcceleration=0");
-    } else {
-        // Section exists but keys missing — insert after [Libinput] header
-        if (!found_profile || !found_accel) {
-            for (size_t i = 0; i < lines.size(); i++) {
-                if (lines[i] == "[Libinput]") {
-                    size_t ins = i + 1;
-                    if (!found_accel)  lines.insert(lines.begin() + ins, "PointerAcceleration=0");
-                    if (!found_profile) lines.insert(lines.begin() + ins, "PointerAccelerationProfile=1");
-                    break;
-                }
-            }
-        }
-    }
-
-    // Write back (atomic: tmp → rename)
+    // Atomic write (tmp → rename)
     std::string tmp = kwinrc_path + ".tmp";
     FILE* fw = fopen(tmp.c_str(), "w");
     if (!fw) return false;
@@ -1036,6 +1094,18 @@ void on_activate(GtkApplication* gapp, gpointer user_data) {
 
     register_shortcuts(S, gapp);
     build_ui(S, gapp);
+
+    // Auto-fix KDE acceleration on every GUI startup (idempotent).
+    // This catches newly hot-plugged mice — daemon creates a "(RawAccel)"
+    // virtual device for each, and kde_write_flat_accel() reads
+    // /proc/bus/input/devices to write per-device kwinrc overrides.
+    // Generic across hosts and mice (vendor/product/name auto-detected).
+    if (S->is_kde) {
+        if (kde_write_flat_accel()) {
+            kde_reload_input_settings();
+            S->kde_accel_ok = true;
+        }
+    }
 
     // Warn on startup if multiple profiles share the same device_id
     std::string dup_warn = check_duplicate_device_ids(S->config);
