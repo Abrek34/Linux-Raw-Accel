@@ -45,8 +45,15 @@ struct classic {
                 double ar = std::pow(args.acceleration, args.exponent_classic - 1);
                 accel_raised = std::isfinite(ar) ? ar : 0.0; // NaN guard: neg accel + non-int exp
             }
-            if (args.cap.x > 0) {
+            // BUG-9: when cap.x <= input_offset, base_fn computes
+            // pow(negative_base, exp) which yields NaN for non-integer
+            // exponents.  That NaN then poisons every operator() call
+            // (`min(finite, NaN)` returns NaN per IEEE 754 ordering).
+            // Treat the degenerate config as "no input cap" so output
+            // remains finite.
+            if (args.cap.x > 0 && args.cap.x > args.input_offset) {
                 cap = base_fn(args.cap.x, accel_raised, args);
+                if (!std::isfinite(cap)) cap = DBL_MAX;
             }
             break;
         case cap_mode::out:

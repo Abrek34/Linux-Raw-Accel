@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <limits.h>
+#include <cerrno>
 #include <pwd.h>
 #include <vector>
 
@@ -36,7 +37,26 @@ static bool write_pid(const std::string& path) {
     if (fd < 0) return false; // EEXIST → daemon already running
     char buf[32];
     int n = snprintf(buf, sizeof(buf), "%d\n", (int)getpid());
-    (void)write(fd, buf, (size_t)n);
+    // Write the full PID; if anything goes wrong (ENOSPC, EIO) remove the
+    // half-written file so the next startup doesn't see a stale empty PID.
+    ssize_t written = 0;
+    while (written < n) {
+        ssize_t w = write(fd, buf + written, (size_t)(n - written));
+        if (w < 0) {
+            if (errno == EINTR) continue;
+            close(fd);
+            unlink(path.c_str());
+            return false;
+        }
+        if (w == 0) break; // shouldn't happen for a regular file
+        written += w;
+    }
+    if (written != n) {
+        close(fd);
+        unlink(path.c_str());
+        return false;
+    }
+    fsync(fd); // ensure PID hits disk before another instance probes it
     close(fd);
     g_pid_file = path;
     return true;
@@ -201,9 +221,13 @@ int main(int argc, char* argv[]) {
             ssize_t n = read(fd, buf, sizeof(buf) - 1);
             close(fd);
             if (n <= 0) { unlink(path); return false; }
+            errno = 0;
             char* end = nullptr;
             long val = std::strtol(buf, &end, 10);
-            pid_t pid = (end > buf && val > 0) ? static_cast<pid_t>(val) : 0;
+            // BUG-7: long → pid_t (int) cast UB if val out of int range.
+            // A corrupted PID file should never let us cast garbage to int.
+            pid_t pid = (end > buf && errno == 0 && val > 0 &&
+                         val <= INT_MAX) ? static_cast<pid_t>(val) : 0;
             if (pid > 0 && kill(pid, 0) != 0 && errno == ESRCH) {
                 // Process does not exist — remove the stale PID file
                 unlink(path);
@@ -237,10 +261,24 @@ int main(int argc, char* argv[]) {
     });
     daemon.set_verbose(verbose);
 
-    std::signal(SIGINT,  handle_signal);
-    std::signal(SIGTERM, handle_signal);
-    std::signal(SIGHUP,  handle_signal);
-    std::signal(SIGUSR1, handle_signal); // latency stats dump
+    // Use sigaction (POSIX) instead of std::signal (implementation-defined).
+    // SA_RESTART makes blocking syscalls (read/recv/poll) restart automatically
+    // instead of failing with EINTR, simplifying the loop's error handling.
+    struct sigaction sa{};
+    sa.sa_handler = handle_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sigaction(SIGINT,  &sa, nullptr);
+    sigaction(SIGTERM, &sa, nullptr);
+    sigaction(SIGHUP,  &sa, nullptr);
+    sigaction(SIGUSR1, &sa, nullptr); // latency stats dump
+    // Ignore SIGPIPE so a broken IPC client connection just returns EPIPE
+    // from send() instead of killing the daemon.  (MSG_NOSIGNAL also covers
+    // this on the send-site, but defending in depth is cheap.)
+    struct sigaction sa_ign{};
+    sa_ign.sa_handler = SIG_IGN;
+    sigemptyset(&sa_ign.sa_mask);
+    sigaction(SIGPIPE, &sa_ign, nullptr);
 
     std::cout << "RawAccel Linux Daemon v" << VERSION << "\n";
 
@@ -291,9 +329,13 @@ int main(int argc, char* argv[]) {
 
     // Main thread: spin until signal sets running_ = false, then do clean shutdown.
     // Also handles SIGUSR1 (latency dump) which cannot safely use cout from a signal handler.
+    // BUG-4: input-group users can't kill(root_daemon, SIGUSR1) — they get EPERM.
+    // The IPC server (input-group writable socket) accepts a "latency" command
+    // that sets daemon.latency_dump_flag_; we drain it here on the same path.
     while (daemon.is_running()) {
         sleep(1);
-        if (g_dump_latency.exchange(false))
+        if (g_dump_latency.exchange(false) ||
+            daemon.consume_latency_dump_request())
             daemon.dump_latency_stats();
     }
     // request_stop() was called from signal handler; now safe to join the loop thread.

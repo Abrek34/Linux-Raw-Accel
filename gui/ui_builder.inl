@@ -938,17 +938,32 @@ static void kde_upsert_section(std::vector<std::string>& lines,
 
 /// Atomically write a kwinrc-style INI file (with possibly nested sections)
 /// from the in-memory line buffer.
+///
+/// BUG-8: previously fputs/fputc/fclose return values were ignored — a full
+/// disk (ENOSPC) or I/O error could silently truncate the temp file, then
+/// rename() would publish the corrupt content as the user's kwinrc.  Now we
+/// detect any write/flush failure, drop the temp file, and signal an error
+/// to the caller so the original kwinrc is preserved.
 static bool kde_atomic_write(const std::string& path,
                              const std::vector<std::string>& lines) {
     std::string tmp = path + ".tmp";
     FILE* fw = fopen(tmp.c_str(), "w");
     if (!fw) return false;
     for (auto& l : lines) {
-        fputs(l.c_str(), fw);
-        fputc('\n', fw);
+        if (fputs(l.c_str(), fw) == EOF || fputc('\n', fw) == EOF) {
+            fclose(fw); unlink(tmp.c_str());
+            return false;
+        }
     }
-    fclose(fw);
-    return (rename(tmp.c_str(), path.c_str()) == 0);
+    if (fflush(fw) != 0 || ferror(fw) || fclose(fw) != 0) {
+        unlink(tmp.c_str());
+        return false;
+    }
+    if (rename(tmp.c_str(), path.c_str()) != 0) {
+        unlink(tmp.c_str());
+        return false;
+    }
+    return true;
 }
 
 /// Read all lines (without trailing CR/LF) from path. Empty vector if missing.

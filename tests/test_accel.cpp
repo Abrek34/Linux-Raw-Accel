@@ -25,25 +25,52 @@
 #include <cstring>
 #include <fstream>
 #include <random>
+#include <regex>
 #include <string>
 #include <vector>
 
 using namespace rawaccel;
 
 // ── Test altyapısı ────────────────────────────────────────────────────────────
+//
+// CLI seçenekleri (R16 — test framework filtreleme desteği):
+//   --filter <regex>   Yalnızca section adı regex ile eşleşenleri çalıştır
+//   --list             Section adlarını basıp çık (assertion çalıştırma)
+//   --quiet            PASS satırlarını bastırma; sadece FAIL ve özet göster
+//   --help             Kullanım bilgisini bas
 
 static int  g_tests  = 0;
 static int  g_passed = 0;
 static int  g_failed = 0;
+static int  g_skipped_sections = 0;
 static const char* g_section = "";
 
-#define SECTION(name) do { g_section = name; std::printf("\n[%s]\n", name); } while(0)
+static bool        g_section_active = true;   // current section runs assertions
+static bool        g_list_only      = false;  // --list: print names, skip asserts
+static bool        g_quiet          = false;  // --quiet: suppress PASS lines
+static bool        g_have_filter    = false;
+static std::regex  g_filter_regex;
+
+#define SECTION(name) do { \
+    g_section = name; \
+    if (g_list_only) { \
+        std::printf("%s\n", name); \
+        g_section_active = false; \
+    } else if (g_have_filter && !std::regex_search(std::string(name), g_filter_regex)) { \
+        g_section_active = false; \
+        g_skipped_sections++; \
+    } else { \
+        g_section_active = true; \
+        std::printf("\n[%s]\n", name); \
+    } \
+} while(0)
 
 #define EXPECT(cond) do { \
+    if (!g_section_active) break; \
     g_tests++; \
     if (cond) { \
         g_passed++; \
-        std::printf("  PASS  %s\n", #cond); \
+        if (!g_quiet) std::printf("  PASS  %s\n", #cond); \
     } else { \
         g_failed++; \
         std::fprintf(stderr, "  FAIL  %s:%d  %s  (section: %s)\n", \
@@ -52,11 +79,12 @@ static const char* g_section = "";
 } while(0)
 
 #define EXPECT_NEAR(a, b, tol) do { \
+    if (!g_section_active) break; \
     g_tests++; \
     double _a = (a), _b = (b), _t = (tol); \
     if (std::fabs(_a - _b) <= _t) { \
         g_passed++; \
-        std::printf("  PASS  %s ≈ %s  (%.6g ≈ %.6g)\n", #a, #b, _a, _b); \
+        if (!g_quiet) std::printf("  PASS  %s ≈ %s  (%.6g ≈ %.6g)\n", #a, #b, _a, _b); \
     } else { \
         g_failed++; \
         std::fprintf(stderr, "  FAIL  %s:%d  |%s - %s| = %.6g > %.6g  (section: %s)\n", \
@@ -457,10 +485,11 @@ static void test_monotonic() {
             if (g < prev - 1e-9) { monotonic = false; break; }
             prev = g;
         }
+        if (!g_section_active) continue;
         g_tests++;
         if (monotonic) {
             g_passed++;
-            std::printf("  PASS  %s gain monotonic\n", tc.name);
+            if (!g_quiet) std::printf("  PASS  %s gain monotonic\n", tc.name);
         } else {
             g_failed++;
             std::fprintf(stderr, "  FAIL  %s gain NOT monotonic\n", tc.name);
@@ -3095,6 +3124,43 @@ static void test_classic_io_degenerate_cap() {
     EXPECT(std::isfinite(r));
 }
 
+// ── BUG-9: classic cap_mode::in with cap.x <= input_offset ──────────────────
+// Property fuzz (Tur 4) caught this: pow(negative_base, fractional_exp) → NaN
+// when the cap's pre-offset point is inside the offset region.  The NaN poisons
+// every operator() return.
+
+static void test_classic_in_degenerate_cap_naninf() {
+    SECTION("BUG-9 — classic cap_mode::in: cap.x <= input_offset stays finite");
+
+    // Real fuzz seed that previously produced NaN
+    accel_args args;
+    args.mode = accel_mode::classic;
+    args.acceleration = 1.889;
+    args.exponent_classic = 3.728;
+    args.cap_mode_val = cap_mode::in;
+    args.cap.x = 0.2624;
+    args.cap.y = 2.418;
+    args.input_offset = 2.409; // > cap.x
+    args.gain = true;
+    classic c(args);
+    for (double s : {0.0, 0.5, 1.0, 1.5, 2.0, 5.0, 100.0, 1e6}) {
+        double g = c(s, args);
+        EXPECT(std::isfinite(g));
+        EXPECT(g >= 0.0);
+    }
+
+    // Boundary case: cap.x == input_offset
+    args.cap.x = 2.409;
+    classic c2(args);
+    for (double s : {0.0, 1.0, 2.409, 5.0, 100.0}) EXPECT(std::isfinite(c2(s, args)));
+
+    // Reverse direction: cap.x > input_offset (normal config) stays finite too
+    args.cap.x = 5.0;
+    args.input_offset = 1.0;
+    classic c3(args);
+    for (double s : {0.0, 1.0, 5.0, 100.0, 1e6}) EXPECT(std::isfinite(c3(s, args)));
+}
+
 // ── R7: power mode with output_offset > 0 ───────────────────────────────────
 
 static void test_power_output_offset() {
@@ -4540,6 +4606,134 @@ static void test_config_output_dpi_sanitize() {
     EXPECT(dp3.prof.output_dpi <= 32000.0);
 }
 
+// ── BUG-5: JSON int extraction must not trigger UB on out-of-range doubles ───
+// libFuzzer + UBSan caught nlohmann::json::get<int>() invoking
+// "X is outside the range of representable values of type 'int'" UB when
+// the JSON value was a float like 1e26.  All int-typed fields now go
+// through json_get_int_safe() which clamps and casts defensively.
+
+static void test_json_int_overflow_safe() {
+    SECTION("BUG-5 — JSON parse rejects out-of-range numbers without UB");
+
+    // 1e26 in dpi field — must be clamped to 32000 (sanitize) without
+    // ever performing the UB int-cast that triggered the UBSan warning.
+    {
+        std::string js = R"({"profiles":[{"name":"x","dpi":1e26,"polling_rate":1e26,
+                          "profile":{"accel_x":{"mode":"classic"}}}]})";
+        std::string tmp = "/tmp/rawaccel_test_bug5.json";
+        { std::ofstream f(tmp); f << js; }
+        app_config cfg = load_config(tmp);
+        std::remove(tmp.c_str());
+        EXPECT(cfg.profiles.size() == 1);
+        EXPECT(cfg.profiles[0].dev_cfg.dpi == 32000);              // upper clamp
+        EXPECT(cfg.profiles[0].dev_cfg.polling_rate == 8000);       // upper clamp
+    }
+    // -1e30 → INT_MIN clamp path → sanitize → 1
+    {
+        std::string js = R"({"profiles":[{"name":"y","dpi":-1e30,"polling_rate":-1e30,
+                          "profile":{}}]})";
+        std::string tmp = "/tmp/rawaccel_test_bug5b.json";
+        { std::ofstream f(tmp); f << js; }
+        app_config cfg = load_config(tmp);
+        std::remove(tmp.c_str());
+        EXPECT(cfg.profiles[0].dev_cfg.dpi == 1);
+        EXPECT(cfg.profiles[0].dev_cfg.polling_rate == 125);
+    }
+    // Non-numeric dpi (string) → fallback default
+    {
+        std::string js = R"({"profiles":[{"name":"z","dpi":"not a number",
+                          "polling_rate":true,"profile":{}}]})";
+        std::string tmp = "/tmp/rawaccel_test_bug5c.json";
+        { std::ofstream f(tmp); f << js; }
+        app_config cfg = load_config(tmp);
+        std::remove(tmp.c_str());
+        // Fallback was 800 / 1000, both within sanitize range.
+        EXPECT(cfg.profiles[0].dev_cfg.dpi == 800);
+        EXPECT(cfg.profiles[0].dev_cfg.polling_rate == 1000);
+    }
+    // lut_length 1e26 — must not UB and must clamp under LUT capacity.
+    {
+        std::string js = R"({"profiles":[{"name":"l",
+                          "profile":{"accel_x":{"mode":"lookup","lut_length":1e26,
+                                                 "lut_data":[1.0,1.0]}}}]})";
+        std::string tmp = "/tmp/rawaccel_test_bug5d.json";
+        { std::ofstream f(tmp); f << js; }
+        app_config cfg = load_config(tmp);
+        std::remove(tmp.c_str());
+        EXPECT(cfg.profiles[0].prof.accel_x.length <=
+               (int)LUT_RAW_DATA_CAPACITY);
+        EXPECT(cfg.profiles[0].prof.accel_x.length >= 0);
+    }
+}
+
+// ── BUG-1: rotation negative normalization preserves direction ───────────────
+
+static void test_rotation_negative_normalization() {
+    SECTION("BUG-1 — sanitize_profile: negative rotation maps to mathematical equivalent");
+
+    // -45° (CCW 45) must become +315°, NOT +45° (which would flip direction).
+    {
+        device_profile dp;
+        dp.prof.degrees_rotation = -45.0;
+        sanitize_device_profile(dp);
+        EXPECT_NEAR(dp.prof.degrees_rotation, 315.0, 1e-9);
+    }
+    // -90° → 270°
+    {
+        device_profile dp;
+        dp.prof.degrees_rotation = -90.0;
+        sanitize_device_profile(dp);
+        EXPECT_NEAR(dp.prof.degrees_rotation, 270.0, 1e-9);
+    }
+    // -179.5° → 180.5°
+    {
+        device_profile dp;
+        dp.prof.degrees_rotation = -179.5;
+        sanitize_device_profile(dp);
+        EXPECT_NEAR(dp.prof.degrees_rotation, 180.5, 1e-9);
+    }
+    // Multi-period wrap: -720° → 0°
+    {
+        device_profile dp;
+        dp.prof.degrees_rotation = -720.0;
+        sanitize_device_profile(dp);
+        EXPECT_NEAR(dp.prof.degrees_rotation, 0.0, 1e-9);
+    }
+    // -725° → -725 mod 360 = -5 → +355
+    {
+        device_profile dp;
+        dp.prof.degrees_rotation = -725.0;
+        sanitize_device_profile(dp);
+        EXPECT_NEAR(dp.prof.degrees_rotation, 355.0, 1e-9);
+    }
+    // Positive values must still wrap into [0,360): 720 → 0, 405 → 45.
+    {
+        device_profile dp;
+        dp.prof.degrees_rotation = 720.0;
+        sanitize_device_profile(dp);
+        EXPECT_NEAR(dp.prof.degrees_rotation, 0.0, 1e-9);
+    }
+    {
+        device_profile dp;
+        dp.prof.degrees_rotation = 405.0;
+        sanitize_device_profile(dp);
+        EXPECT_NEAR(dp.prof.degrees_rotation, 45.0, 1e-9);
+    }
+    // Direction preservation property: rotating by sanitize(-θ) must
+    // produce the same vector as rotating by 360-θ.
+    {
+        device_profile dp_neg, dp_pos;
+        dp_neg.prof.degrees_rotation = -30.0;
+        dp_pos.prof.degrees_rotation = 330.0;
+        sanitize_device_profile(dp_neg);
+        sanitize_device_profile(dp_pos);
+        vec2d d_neg = direction(dp_neg.prof.degrees_rotation);
+        vec2d d_pos = direction(dp_pos.prof.degrees_rotation);
+        EXPECT_NEAR(d_neg.x, d_pos.x, 1e-12);
+        EXPECT_NEAR(d_neg.y, d_pos.y, 1e-12);
+    }
+}
+
 // ── R13 — lat_stats move + dpi_factor pre-compute ────────────────────────────
 
 static void test_lat_stats_move_semantics() {
@@ -5139,8 +5333,49 @@ static void test_synchronous_edge_cases() {
 
 // ── main ─────────────────────────────────────────────────────────────────────
 
-int main() {
-    std::printf("=== RawAccel Linux Birim Testleri ===\n");
+static void print_usage(const char* argv0) {
+    std::printf(
+        "RawAccel Linux — birim testleri\n"
+        "\n"
+        "Kullanım: %s [SEÇENEKLER]\n"
+        "  --filter <regex>   Yalnızca section adı regex ile eşleşenleri çalıştır\n"
+        "                     (örn. --filter 'classic|natural')\n"
+        "  --list             Tüm section adlarını listele ve çık\n"
+        "  --quiet            PASS satırlarını bastırma; sadece FAIL ve özet göster\n"
+        "  -h, --help         Bu yardım metnini göster\n",
+        argv0);
+}
+
+int main(int argc, char** argv) {
+    for (int i = 1; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "-h" || a == "--help") {
+            print_usage(argv[0]);
+            return 0;
+        } else if (a == "--list") {
+            g_list_only = true;
+        } else if (a == "--quiet") {
+            g_quiet = true;
+        } else if (a == "--filter") {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "Hata: --filter <regex> argümanı gerekli\n");
+                return 2;
+            }
+            try {
+                g_filter_regex = std::regex(argv[++i], std::regex::ECMAScript);
+                g_have_filter = true;
+            } catch (const std::regex_error& e) {
+                std::fprintf(stderr, "Hata: geçersiz regex '%s': %s\n", argv[i], e.what());
+                return 2;
+            }
+        } else {
+            std::fprintf(stderr, "Hata: bilinmeyen argüman '%s'\n", argv[i]);
+            print_usage(argv[0]);
+            return 2;
+        }
+    }
+
+    if (!g_list_only) std::printf("=== RawAccel Linux Birim Testleri ===\n");
 
     test_noaccel();
     test_classic();
@@ -5209,6 +5444,7 @@ int main() {
     test_ema_extreme_halflife();
     test_pipeline_nan_injection();
     test_classic_io_degenerate_cap();
+    test_classic_in_degenerate_cap_naninf();
     test_power_output_offset();
     test_directional_weight_boundary();
 
@@ -5252,6 +5488,8 @@ int main() {
     test_synchronous_power_lt_one();
     test_natural_legacy_mode();
     test_config_output_dpi_sanitize();
+    test_rotation_negative_normalization();
+    test_json_int_overflow_safe();
 
     // R13 — lat_stats move safety + dpi_factor pre-compute
     test_lat_stats_move_semantics();
@@ -5272,8 +5510,11 @@ int main() {
     test_config_unicode_names();
     test_synchronous_edge_cases();
 
+    if (g_list_only) return 0;
+
     std::printf("\n=== Sonuç: %d/%d geçti", g_passed, g_tests);
     if (g_failed) std::printf(", %d BAŞARISIZ", g_failed);
+    if (g_skipped_sections) std::printf(" (%d section atlandı, --filter)", g_skipped_sections);
     std::printf(" ===\n");
 
     return g_failed ? 1 : 0;

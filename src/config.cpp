@@ -4,6 +4,8 @@
 #include <sstream>
 #include <cstdlib>
 #include <cstring>
+#include <climits>
+#include <limits>
 #include <filesystem>
 #include <stdexcept>
 #include <vector>
@@ -109,12 +111,28 @@ static accel_args accel_args_from_json(const json& j) {
     }
     if (j.contains("cap_mode"))  a.cap_mode_val = str_to_cap(j["cap_mode"].get<std::string>());
     if (j.contains("lut_data") && j.contains("lut_length")) {
-        int raw_len = j["lut_length"].get<int>();
-        if (raw_len < 0) raw_len = 0;
-        a.length = std::min(raw_len, (int)LUT_RAW_DATA_CAPACITY);
+        // BUG-5: nlohmann::json::get<int>() invokes UB when the JSON value
+        // doesn't fit in `int` (libFuzzer + UBSan caught this with payloads
+        // like `"lut_length": 1e26`).  Read as a double first, range-clamp,
+        // then cast — the cast is now defined.
+        double raw = j["lut_length"].is_number()
+                     ? j["lut_length"].get<double>() : 0.0;
+        if (!std::isfinite(raw) || raw < 0) raw = 0;
+        if (raw > (double)LUT_RAW_DATA_CAPACITY) raw = LUT_RAW_DATA_CAPACITY;
+        a.length = static_cast<int>(raw);
         auto& pts = j["lut_data"];
         int n = std::min((int)pts.size(), a.length);
-        for (int i = 0; i < n; i++) a.data[i] = pts[i].get<float>();
+        for (int i = 0; i < n; i++) {
+            // Same defence on the LUT entries themselves.
+            double v = pts[i].is_number() ? pts[i].get<double>() : 0.0;
+            if (!std::isfinite(v)) v = 0;
+            // double → float overflow yields ±Inf which corrupts the LUT
+            // binary search.  Clamp to the float-representable range first.
+            constexpr double FLT_HI = static_cast<double>(std::numeric_limits<float>::max());
+            if (v > FLT_HI)  v = FLT_HI;
+            if (v < -FLT_HI) v = -FLT_HI;
+            a.data[i] = static_cast<float>(v);
+        }
     }
     return a;
 }
@@ -155,6 +173,10 @@ static profile profile_from_json_obj(const json& j) {
     if (j.contains("name")) {
         auto s = j["name"].get<std::string>();
         std::strncpy(p.name, s.c_str(), MAX_NAME_LEN - 1);
+        // strncpy doesn't write a null terminator when src ≥ N.  Default
+        // construction zero-fills the array, but defend in depth in case
+        // the caller passes a previously-populated profile.
+        p.name[MAX_NAME_LEN - 1] = '\0';
     }
     if (j.contains("raw_passthrough")) p.raw_passthrough = j["raw_passthrough"].get<bool>();
     if (j.contains("domain_weights")) {
@@ -323,8 +345,14 @@ static void sanitize_profile(profile& p) {
     p.speed_processor_args.output_speed_smooth_halflife =
         finite_or(p.speed_processor_args.output_speed_smooth_halflife, 0);
 
-    // Rotation: 0–360 degrees
-    p.degrees_rotation = std::fmod(std::fabs(p.degrees_rotation), 360.0);
+    // Rotation: normalize into [0, 360) preserving direction.
+    // Using fabs() would map -45° → 45° (wrong direction); the correct
+    // mathematical equivalent of -45° is +315°.  fmod() preserves sign,
+    // so we add 360 to push negative residues into the positive half.
+    p.degrees_rotation = std::fmod(p.degrees_rotation, 360.0);
+    if (p.degrees_rotation < 0)         p.degrees_rotation += 360.0;
+    if (p.degrees_rotation == 0.0)      p.degrees_rotation  = 0.0;     // clear -0.0 sign
+    if (p.degrees_rotation >= 360.0)    p.degrees_rotation  = 0.0;     // FP rounding edge
     // Snap: 0–45 degrees (meaningful range)
     if (p.degrees_snap < 0)  p.degrees_snap = 0;
     if (p.degrees_snap > 45) p.degrees_snap = 45;
@@ -364,13 +392,27 @@ static void sanitize_profile(profile& p) {
     sort_lut_data(p.accel_y);
 }
 
+/// Safely extract an integer from a JSON node.  nlohmann's `get<int>()`
+/// triggers UndefinedBehaviorSanitizer when the underlying number doesn't
+/// fit in `int` (libFuzzer caught a 1e26 input).  Reading via double, then
+/// clamping, then casting avoids that UB regardless of the input.
+static int json_get_int_safe(const json& v, int fallback) {
+    if (!v.is_number()) return fallback;
+    double d = v.get<double>();
+    if (!std::isfinite(d)) return fallback;
+    if (d < (double)INT_MIN) return INT_MIN;
+    if (d > (double)INT_MAX) return INT_MAX;
+    return static_cast<int>(d);
+}
+
 static device_profile device_profile_from_json(const json& j) {
     device_profile dp;
     if (j.contains("name"))         dp.name          = j["name"].get<std::string>();
     if (j.contains("device_id"))    dp.device_id     = j["device_id"].get<std::string>();
-    if (j.contains("dpi"))          dp.dev_cfg.dpi   = j["dpi"].get<int>();
-    if (j.contains("polling_rate")) dp.dev_cfg.polling_rate = j["polling_rate"].get<int>();
-    if (j.contains("disable"))      dp.dev_cfg.disable = j["disable"].get<bool>();
+    if (j.contains("dpi"))          dp.dev_cfg.dpi   = json_get_int_safe(j["dpi"], 800);
+    if (j.contains("polling_rate")) dp.dev_cfg.polling_rate = json_get_int_safe(j["polling_rate"], 1000);
+    if (j.contains("disable"))      dp.dev_cfg.disable = j["disable"].is_boolean()
+                                                         ? j["disable"].get<bool>() : false;
     if (j.contains("profile"))      dp.prof          = profile_from_json_obj(j["profile"]);
     // Clamp to safe ranges after loading
     sanitize_device_config(dp.dev_cfg);

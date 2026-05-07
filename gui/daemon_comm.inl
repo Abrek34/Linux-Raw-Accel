@@ -1,6 +1,8 @@
 // ── Daemon communication: PID lookup, status display, signal sending ──────────
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <cerrno>
+#include <climits>
 
 // ── KDE / libinput acceleration detection ────────────────────────────────────
 
@@ -62,9 +64,16 @@ static int kde_libinput_accel_state() {
 
         // PointerAccelerationProfile=1  (1=flat/none, 2=adaptive)
         if (strncmp(line, "PointerAccelerationProfile=", 27) == 0) {
-            int val = atoi(line + 27);
+            // BUG-6: atoi() invokes UB on out-of-range input (a malicious
+            // kwinrc with "1e26" would propagate UB through the GUI).
+            // strtol with explicit range/errno handling is safe.
+            errno = 0;
+            char* end = nullptr;
+            long val = strtol(line + 27, &end, 10);
+            int v = (end != line + 27 && errno == 0 &&
+                     val >= INT_MIN && val <= INT_MAX) ? (int)val : 0;
             // 1 = flat (disabled) — good; 2 = adaptive (enabled) — bad
-            result = (val == 1) ? 0 : 1;
+            result = (v == 1) ? 0 : 1;
         }
         // PointerAcceleration=0  (0 = no extra gain on top of flat)
         if (strncmp(line, "PointerAcceleration=", 20) == 0) {
@@ -78,45 +87,55 @@ static int kde_libinput_accel_state() {
     return result;
 }
 
-/// Return the IPC socket path (mirrors AccelDaemon::ipc_sock_path()).
-static std::string daemon_sock_path() {
+/// Candidate IPC socket paths.  Same rationale as in cli/main.cpp:
+/// when the daemon is a *system* service it doesn't have XDG_RUNTIME_DIR
+/// set so it lands on /run/rawaccel.sock, while the GUI is started from a
+/// user session that *does* have XDG_RUNTIME_DIR — without walking both,
+/// the GUI's IPC reload silently failed and fell back to SIGHUP (which
+/// itself fails with EPERM against a root daemon).
+static std::vector<std::string> daemon_sock_candidates() {
+    std::vector<std::string> v;
     const char* xdg = std::getenv("XDG_RUNTIME_DIR");
-    if (xdg && xdg[0] != '\0') return std::string(xdg) + "/rawaccel.sock";
-    return "/run/rawaccel.sock";
+    if (xdg && xdg[0] != '\0') v.push_back(std::string(xdg) + "/rawaccel.sock");
+    v.push_back("/run/rawaccel.sock");
+    return v;
 }
 
 /// Send a one-line command to the daemon socket and return the response.
 /// Returns an empty string on failure.
 static std::string daemon_ipc_query(const std::string& cmd) {
-    std::string sock = daemon_sock_path();
-    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    if (fd < 0) return {};
+    for (const auto& sock : daemon_sock_candidates()) {
+        int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        if (fd < 0) continue;
 
-    struct timeval tv { .tv_sec = 0, .tv_usec = 100000 }; // 100 ms
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        struct timeval tv { .tv_sec = 0, .tv_usec = 100000 }; // 100 ms
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, sock.c_str(), sizeof(addr.sun_path) - 1);
-    if (connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        close(fd); return {};
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        if (sock.size() >= sizeof(addr.sun_path)) { close(fd); continue; }
+        strncpy(addr.sun_path, sock.c_str(), sizeof(addr.sun_path) - 1);
+        if (connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+            close(fd); continue; // try the next candidate
+        }
+
+        std::string req = cmd + "\n";
+        send(fd, req.c_str(), req.size(), MSG_NOSIGNAL);
+
+        // Read response (up to 64KB)
+        std::string resp;
+        char buf[4096];
+        while (true) {
+            ssize_t n = recv(fd, buf, sizeof(buf), 0);
+            if (n <= 0) break;
+            resp.append(buf, (size_t)n);
+            if (resp.size() > 65536) break; // safety cap
+        }
+        close(fd);
+        return resp;
     }
-
-    std::string req = cmd + "\n";
-    send(fd, req.c_str(), req.size(), MSG_NOSIGNAL);
-
-    // Read response (up to 64KB)
-    std::string resp;
-    char buf[4096];
-    while (true) {
-        ssize_t n = recv(fd, buf, sizeof(buf), 0);
-        if (n <= 0) break;
-        resp.append(buf, (size_t)n);
-        if (resp.size() > 65536) break; // safety cap
-    }
-    close(fd);
-    return resp;
+    return {};
 }
 
 pid_t read_daemon_pid() {
@@ -132,7 +151,10 @@ pid_t read_daemon_pid() {
         FILE* fp = fopen(path.c_str(), "r");
         if (!fp) continue;
         pid_t pid = 0;
-        fscanf(fp, "%d", &pid);
+        // Empty / malformed PID file → fscanf returns 0 or EOF and `pid`
+        // stays 0; the `pid > 0` guard below filters those out.  We keep
+        // the unused result silent for -Wunused-result + _FORTIFY_SOURCE.
+        (void)!fscanf(fp, "%d", &pid);
         fclose(fp);
         if (pid > 0 && kill(pid, 0) == 0) return pid;
     }
@@ -153,16 +175,27 @@ pid_t read_daemon_pid() {
             FILE* cf = fopen(comm_path.c_str(), "r");
             if (!cf) continue;
             char comm[64] = {};
-            fgets(comm, sizeof(comm), cf);
+            // Zero-init guarantees a NUL terminator even if fgets yields nothing.
+            (void)!fgets(comm, sizeof(comm), cf);
             fclose(cf);
             // strip newline
             size_t len = strlen(comm);
             if (len > 0 && comm[len-1] == '\n') comm[len-1] = '\0';
 
             if (strcmp(comm, "rawaccel-daemon") == 0) {
-                pid_t pid = (pid_t)atoi(ent->d_name);
-                closedir(proc);
-                return pid;
+                // BUG-6: atoi(d_name) is UB if the directory name doesn't
+                // fit in `int`.  /proc only exposes numeric PIDs (pid_t,
+                // typically 4194304 max) but be defensive — strtol +
+                // range check before the pid_t cast.
+                errno = 0;
+                char* end = nullptr;
+                long v = strtol(ent->d_name, &end, 10);
+                if (end != ent->d_name && errno == 0 && v > 0 &&
+                    v <= INT_MAX) {
+                    pid_t pid = static_cast<pid_t>(v);
+                    closedir(proc);
+                    return pid;
+                }
             }
         }
         closedir(proc);

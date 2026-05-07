@@ -52,9 +52,12 @@ static int event_num_from_path(const std::string& path) {
     const char* ev = strstr(p, "event");
     if (!ev) return -1;
     ev += 5; // skip "event"
+    errno = 0;
     char* end = nullptr;
     long n = strtol(ev, &end, 10);
-    if (end == ev || n < 0) return -1;
+    // BUG-7: long → int cast UB if n out of int range. Linux event numbers
+    // are <1000 in practice, but be defensive.
+    if (end == ev || errno != 0 || n < 0 || n > INT_MAX) return -1;
     return static_cast<int>(n);
 }
 
@@ -66,9 +69,14 @@ static int sysfs_read_int(const std::string& sysfs_path) {
     size_t n = fread(buf, 1, sizeof(buf) - 1, f);
     fclose(f);
     if (n == 0) return -1;
+    errno = 0;
     char* end = nullptr;
     long val = std::strtol(buf, &end, 10);
-    return (end > buf) ? static_cast<int>(val) : -1;
+    // BUG-7: long → int cast UB if val out of int range.  Sysfs may
+    // legitimately expose values like 0xffffffff for some properties.
+    if (end == buf || errno != 0 || val < INT_MIN || val > INT_MAX)
+        return -1;
+    return static_cast<int>(val);
 }
 
 /// Detect mouse polling rate (Hz) from sysfs.
@@ -116,8 +124,13 @@ static int detect_dpi_sysfs(int event_n) {
     snprintf(buf, sizeof(buf), "/sys/class/input/event%d/device/resolution", event_n);
     int res_counts_per_mm = sysfs_read_int(buf);
     if (res_counts_per_mm > 0) {
-        int dpi = static_cast<int>(res_counts_per_mm * 25.4);
-        return std::clamp(dpi, 100, 32000);
+        // BUG-7-2: float → int cast UB if res * 25.4 exceeds INT_MAX.
+        // sysfs_read_int already clamps to [INT_MIN, INT_MAX] so the
+        // multiplication here can overflow into ~5.4e10 for INT_MAX
+        // input.  Compute in double then clamp before the cast.
+        double dpi_f = static_cast<double>(res_counts_per_mm) * 25.4;
+        dpi_f = std::clamp(dpi_f, 100.0, 32000.0);
+        return static_cast<int>(dpi_f);
     }
     return 0;
 }
@@ -245,8 +258,13 @@ bool AccelDaemon::start(const std::string& config_path) {
             epoll_event ev{};
             ev.events   = EPOLLIN;
             ev.data.fd  = inotify_fd_;
-            epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, inotify_fd_, &ev);
-            log("Hot-plug: watching /dev/input via inotify.", true);
+            if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, inotify_fd_, &ev) < 0) {
+                log("epoll_ctl(inotify) failed: " + std::string(strerror(errno)) +
+                    " — hot-plug disabled.");
+                close(inotify_fd_); inotify_fd_ = -1; inotify_wd_ = -1;
+            } else {
+                log("Hot-plug: watching /dev/input via inotify.", true);
+            }
         } else {
             log("inotify_add_watch failed — hot-plug disabled.");
         }
@@ -412,7 +430,14 @@ bool AccelDaemon::setup_devices() {
         epoll_event ev{};
         ev.events  = EPOLLIN;
         ev.data.fd = dev.fd_in;
-        epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, dev.fd_in, &ev);
+        if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, dev.fd_in, &ev) < 0) {
+            log("epoll_ctl(add) failed for " + dev.path + ": " +
+                strerror(errno) + " — skipping device.");
+            if (dev.uidev) libevdev_uinput_destroy(dev.uidev);
+            ioctl(dev.fd_in, EVIOCGRAB, 0);
+            close(dev.fd_in);
+            continue;
+        }
 
         opened_paths_.insert(path);
         {
@@ -534,7 +559,14 @@ void AccelDaemon::do_hotplug_scan() {
         epoll_event eev{};
         eev.events  = EPOLLIN;
         eev.data.fd = dev.fd_in;
-        epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, dev.fd_in, &eev);
+        if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, dev.fd_in, &eev) < 0) {
+            log("Hot-plug: epoll_ctl(add) failed for " + dev.path + ": " +
+                strerror(errno) + " — skipping device.");
+            if (dev.uidev) libevdev_uinput_destroy(dev.uidev);
+            ioctl(dev.fd_in, EVIOCGRAB, 0);
+            close(dev.fd_in);
+            continue;
+        }
 
         opened_paths_.insert(path);
         {
@@ -788,6 +820,12 @@ void AccelDaemon::process_device(mouse_device& dev) {
                 log("Device error (" + std::string(strerror(errno)) +
                     "), marking for removal: " + dev.name);
                 dev.disconnected = true;
+            } else {
+                // Unexpected errno (EINTR/EFAULT/EINVAL/etc.) — log so we
+                // don't silently drop events.  Default policy: keep the
+                // device, the next loop iteration will retry.
+                log("read() unexpected errno=" + std::to_string(errno) +
+                    " (" + strerror(errno) + ") on " + dev.name, true);
             }
             break;
         }
@@ -829,9 +867,23 @@ void AccelDaemon::process_device(mouse_device& dev) {
             // next SYN_REPORT clears the dropped flag.
             continue;
         } else if (ev.type == EV_REL) {
-            if      (ev.code == REL_X) { dx += ev.value; has_motion = true; }
-            else if (ev.code == REL_Y) { dy += ev.value; has_motion = true; }
-            else {
+            if (ev.code == REL_X || ev.code == REL_Y) {
+                // Raw passthrough fast path: forward each REL_X/REL_Y event
+                // INDIVIDUALLY (no batching) so the byte-stream written to
+                // uinput is bit-identical to a "dumb" 1:1 forwarder like
+                // abrek. libinput's adaptive accel treats batched vs split
+                // events differently (single +15 vs 5×+3), and we noticed
+                // this caused subtly different cursor feel even in raw mode.
+                // Skip accumulation entirely in this mode.
+                if (dev.settings.prof.raw_passthrough) {
+                    if (!uinput_write(uidev, ev.type, ev.code, ev.value))
+                        { dev.disconnected = true; return; }
+                } else if (ev.code == REL_X) {
+                    dx += ev.value; has_motion = true;
+                } else {
+                    dy += ev.value; has_motion = true;
+                }
+            } else {
                 // Pass through other REL events (wheel, tilt, etc.)
                 if (!uinput_write(uidev, ev.type, ev.code, ev.value))
                     { dev.disconnected = true; return; }
@@ -1025,7 +1077,11 @@ bool AccelDaemon::start_ipc_server(const std::string& sock_path) {
     {
         struct group* grp = getgrnam("input");
         if (grp) {
-            chown(sock_path.c_str(), 0, grp->gr_gid);
+            // Best-effort group ownership; if chown fails (e.g. unprivileged
+            // start) we fall through to chmod which still tightens permissions.
+            if (chown(sock_path.c_str(), 0, grp->gr_gid) != 0)
+                log("IPC: chown(input group) failed: " + std::string(strerror(errno)) +
+                    " — proceeding with default ownership.", true);
             chmod(sock_path.c_str(), 0660);
         } else {
             chmod(sock_path.c_str(), 0600); // fallback: owner only
@@ -1101,6 +1157,12 @@ void AccelDaemon::handle_ipc_client(int client_fd) {
     } else if (strcmp(buf, "reload") == 0) {
         reload_flag_.store(true);
         response = "{\"ok\":true,\"message\":\"config reload scheduled\"}\n";
+    } else if (strcmp(buf, "latency") == 0) {
+        // Same effect as SIGUSR1, but accessible to any input-group user
+        // even when the daemon runs as root via systemd (kill() returns
+        // EPERM in that case).  Set a flag the main thread polls.
+        latency_dump_flag_.store(true);
+        response = "{\"ok\":true,\"message\":\"latency dump scheduled\"}\n";
     } else {
         response = "{\"error\":\"unknown command\"}\n";
     }
