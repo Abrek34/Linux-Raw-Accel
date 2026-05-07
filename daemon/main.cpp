@@ -57,6 +57,13 @@ static bool write_pid(const std::string& path) {
         return false;
     }
     fsync(fd); // ensure PID hits disk before another instance probes it
+    // BUG-17: open()'s mode argument is masked by the process umask.  When
+    // the systemd unit sets UMask=0077 (default-private files), our 0644
+    // becomes 0600 — root-only — and rawaccel-cli running as a normal
+    // user can no longer read the PID to display "running" status.
+    // The PID number is not sensitive (visible in /proc anyway), so force
+    // 0644 explicitly via fchmod() which ignores the umask.
+    fchmod(fd, 0644);
     close(fd);
     g_pid_file = path;
     return true;
