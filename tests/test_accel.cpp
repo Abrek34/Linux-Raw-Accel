@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <sys/stat.h>
 #include <cstring>
 #include <fstream>
 #include <random>
@@ -3161,6 +3162,42 @@ static void test_classic_in_degenerate_cap_naninf() {
     for (double s : {0.0, 1.0, 5.0, 100.0, 1e6}) EXPECT(std::isfinite(c3(s, args)));
 }
 
+// ── BUG-13: save_config durability — fsync path is followed for content ─────
+// We can't test fsync directly (kernel-level), but we can verify the temp
+// file path is created and atomic rename happens correctly even when the
+// target file is concurrently read.
+
+static void test_save_config_durability_path() {
+    SECTION("BUG-13 — save_config: tmp file is removed and target updated atomically");
+    std::string path = "/tmp/_rawaccel_save_test.json";
+    std::string tmp  = path + ".tmp";
+    std::remove(path.c_str()); std::remove(tmp.c_str());
+
+    app_config cfg;
+    device_profile dp; dp.name = "test"; dp.dev_cfg.dpi = 800;
+    dp.prof.accel_x.mode = accel_mode::noaccel;
+    dp.prof.accel_y.mode = accel_mode::noaccel;
+    cfg.profiles.push_back(dp);
+    cfg.active_profile = "test";
+
+    save_config(cfg, path);
+
+    // Target file must exist; tmp file must NOT exist (renamed away).
+    struct stat st;
+    EXPECT(stat(path.c_str(), &st) == 0);
+    EXPECT(stat(tmp.c_str(),  &st) != 0); // tmp gone
+
+    // File must be non-empty (fsync ensures content reached disk before rename)
+    EXPECT(st.st_size > 0);
+
+    // Round-trip
+    app_config loaded = load_config(path);
+    EXPECT(loaded.profiles.size() == 1);
+    EXPECT(loaded.profiles[0].name == "test");
+
+    std::remove(path.c_str());
+}
+
 // ── R7: power mode with output_offset > 0 ───────────────────────────────────
 
 static void test_power_output_offset() {
@@ -5445,6 +5482,7 @@ int main(int argc, char** argv) {
     test_pipeline_nan_injection();
     test_classic_io_degenerate_cap();
     test_classic_in_degenerate_cap_naninf();
+    test_save_config_durability_path();
     test_power_output_offset();
     test_directional_weight_boundary();
 

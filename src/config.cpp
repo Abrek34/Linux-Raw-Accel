@@ -10,6 +10,9 @@
 #include <stdexcept>
 #include <vector>
 #include <pwd.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h>
 
 namespace fs = std::filesystem;
 using json   = nlohmann::json;
@@ -454,13 +457,41 @@ void save_config(const app_config& cfg, const std::string& path) {
 
     // Write to a temp file first, then rename — atomic on Linux (same filesystem).
     // This prevents the daemon from reading a half-written/truncated JSON.
+    //
+    // BUG-13: ofstream::flush() only pushes the userspace buffer to the kernel
+    // page cache.  rename() is atomic with respect to other readers on the same
+    // FS, but on a power loss the new directory entry may point at a file
+    // whose pages were never committed → user finds an empty file after reboot.
+    // Cure: fsync() the file before rename, then fsync() the parent directory
+    // so the rename itself is durable.
     std::string tmp_path = path + ".tmp";
     {
-        std::ofstream f(tmp_path);
-        if (!f.is_open()) throw std::runtime_error("Cannot write temp config: " + tmp_path);
-        f << j.dump(4) << "\n";
-        f.flush();
-        if (!f.good()) throw std::runtime_error("Write error on temp config: " + tmp_path);
+        std::string content = j.dump(4) + "\n";
+        int fd = ::open(tmp_path.c_str(),
+                        O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+        if (fd < 0)
+            throw std::runtime_error("Cannot write temp config: " + tmp_path +
+                                     " (" + std::strerror(errno) + ")");
+        const char* p = content.c_str();
+        size_t left = content.size();
+        while (left > 0) {
+            ssize_t w = ::write(fd, p, left);
+            if (w < 0) {
+                if (errno == EINTR) continue;
+                int err = errno;
+                ::close(fd); ::unlink(tmp_path.c_str());
+                throw std::runtime_error("Write error on temp config: " +
+                                         tmp_path + " (" + std::strerror(err) + ")");
+            }
+            p += w; left -= (size_t)w;
+        }
+        if (::fsync(fd) != 0) {
+            int err = errno;
+            ::close(fd); ::unlink(tmp_path.c_str());
+            throw std::runtime_error("fsync(temp config) failed: " +
+                                     tmp_path + " (" + std::strerror(err) + ")");
+        }
+        ::close(fd);
     }
 
     std::error_code ec;
@@ -475,6 +506,20 @@ void save_config(const app_config& cfg, const std::string& path) {
         if (ec_copy)
             throw std::runtime_error("Cannot replace config file: " + path +
                                      " (" + ec_copy.message() + ")");
+    }
+
+    // BUG-13 (cont.): fsync the parent directory so the rename is durable.
+    // Without this, a power loss between rename() and a kernel writeback
+    // could leave the directory entry pointing nowhere.  Best-effort —
+    // some filesystems (e.g. NFS) may not honour directory fsync.
+    {
+        std::string parent = fs::path(path).parent_path().string();
+        if (parent.empty()) parent = ".";
+        int dfd = ::open(parent.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (dfd >= 0) {
+            (void)::fsync(dfd);
+            ::close(dfd);
+        }
     }
 }
 

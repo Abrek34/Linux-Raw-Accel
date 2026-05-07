@@ -8,9 +8,14 @@
 #include <vector>
 #include <iomanip>
 #include <cmath>
+#include <cctype>
 #include <csignal>
+#include <algorithm>
+#include <cerrno>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 // Version number comes from RAWACCEL_VERSION in rawaccel-base.hpp (single source of truth).
 static constexpr const char* VERSION = rawaccel::RAWACCEL_VERSION;
@@ -30,7 +35,14 @@ static bool pid_alive(pid_t pid) {
     return stat(proc_path.c_str(), &st) == 0;
 }
 
-static bool send_signal_to_daemon(int sig) {
+/// Result codes from a daemon-signal attempt — lets the caller distinguish
+/// "daemon not running" from "running but I lack permission" (the daemon
+/// runs as root via systemd, and `kill()` from an unprivileged user returns
+/// EPERM).  This was previously squashed into a single bool, producing the
+/// misleading "is it running?" message even when the daemon was up.
+enum class signal_result { sent, not_running, permission_denied, other };
+
+static signal_result send_signal_to_daemon(int sig) {
     // N6: daemon prefers $XDG_RUNTIME_DIR/rawaccel.pid — check it first.
     std::vector<std::string> paths;
     const char* xdg = std::getenv("XDG_RUNTIME_DIR");
@@ -44,9 +56,95 @@ static bool send_signal_to_daemon(int sig) {
         pid_t pid = 0;
         f >> pid;
         if (!pid_alive(pid)) continue;
-        return kill(pid, sig) == 0;
+        if (kill(pid, sig) == 0) return signal_result::sent;
+        if (errno == EPERM)      return signal_result::permission_denied;
+        return signal_result::other;
     }
-    return false;
+    return signal_result::not_running;
+}
+
+// ── Daemon IPC (Unix socket) ──────────────────────────────────────────────────
+
+/// Candidate IPC socket paths, in the order the daemon tries them.
+/// The daemon writes the *first* one it can bind: $XDG_RUNTIME_DIR (only set
+/// for user services), then /run (system service — what systemd uses).
+/// CLI is invoked from a user shell, where XDG_RUNTIME_DIR *is* set, so a
+/// naive `daemon_sock_path()` would point at /run/user/1000/rawaccel.sock
+/// while the system daemon listens on /run/rawaccel.sock.  Walk the whole
+/// list so both deployments work.
+static std::vector<std::string> daemon_sock_candidates() {
+    std::vector<std::string> v;
+    const char* xdg = std::getenv("XDG_RUNTIME_DIR");
+    if (xdg && xdg[0] != '\0') v.push_back(std::string(xdg) + "/rawaccel.sock");
+    v.push_back("/run/rawaccel.sock");
+    return v;
+}
+
+/// Send a one-line command to the daemon socket and return the response.
+/// Empty string on failure.  Used so unprivileged users (in the input group)
+/// can ask the root-owned daemon to reload without needing kill() permission.
+static std::string daemon_ipc_query(const std::string& cmd) {
+    for (const auto& sock : daemon_sock_candidates()) {
+        int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        if (fd < 0) continue;
+
+        struct timeval tv { .tv_sec = 0, .tv_usec = 200000 }; // 200 ms
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        if (sock.size() >= sizeof(addr.sun_path)) { close(fd); continue; }
+        std::strncpy(addr.sun_path, sock.c_str(), sizeof(addr.sun_path) - 1);
+        if (connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+            close(fd); continue; // try the next candidate
+        }
+
+        std::string req = cmd + "\n";
+        (void)!send(fd, req.c_str(), req.size(), MSG_NOSIGNAL);
+
+        std::string resp;
+        char buf[4096];
+        while (true) {
+            ssize_t n = recv(fd, buf, sizeof(buf), 0);
+            if (n <= 0) break;
+            resp.append(buf, (size_t)n);
+            if (resp.size() > 65536) break;
+        }
+        close(fd);
+        return resp;
+    }
+    return {};
+}
+
+/// Ask the daemon to reload its config.  Tries the IPC socket first (works
+/// for any user in the input group regardless of who the daemon runs as),
+/// then falls back to SIGHUP for older daemons that don't speak IPC.
+/// @return  true if either path succeeded.
+static bool daemon_reload_via_any_path() {
+    std::string resp = daemon_ipc_query("reload");
+    if (resp.find("\"ok\":true") != std::string::npos) return true;
+    return send_signal_to_daemon(SIGHUP) == signal_result::sent;
+}
+
+/// Print a uniform "couldn't reach daemon" diagnostic.  Suggests the right
+/// remediation based on whether kill() failed with EPERM (sudo / systemctl)
+/// or because the PID file simply isn't there.
+static void print_signal_failure(signal_result r, const char* action) {
+    switch (r) {
+    case signal_result::permission_denied:
+        std::cerr << "Permission denied while trying to " << action << " the daemon.\n"
+                  << "The daemon is running as root via systemd; signal it with:\n"
+                  << "  sudo systemctl " << action << " rawaccel    (preferred)\n"
+                  << "  sudo kill -HUP $(cat /run/rawaccel.pid)\n";
+        break;
+    case signal_result::not_running:
+        std::cerr << "Daemon is not running.  Start it with: sudo systemctl start rawaccel\n";
+        break;
+    default:
+        std::cerr << "Could not " << action << " the daemon (errno=" << errno << ").\n";
+        break;
+    }
 }
 
 // ── Profile display ────────────────────────────────────────────────────────────
@@ -104,8 +202,11 @@ static void print_profile(const device_profile& dp) {
     std::cout << "  polling_rate: " << dp.dev_cfg.polling_rate << "\n";
     std::cout << "  rotation:     " << p.degrees_rotation      << "°\n";
     std::cout << "  snap:         " << p.degrees_snap          << "°\n";
-    std::cout << "  speed_min:    " << p.speed_min << (p.speed_min == 0 ? "  (disabled)" : "") << "\n";
-    std::cout << "  speed_max:    " << p.speed_max << (p.speed_max == 0 ? "  (disabled)" : "") << "\n";
+    // Use epsilon comparison: sub-ULP residue from JSON round-trip can leave
+    // speed_min as e.g. 1e-17 even when the user typed "0", which would print
+    // without the "(disabled)" hint and confuse status output.
+    std::cout << "  speed_min:    " << p.speed_min << (std::fabs(p.speed_min) < 1e-9 ? "  (disabled)" : "") << "\n";
+    std::cout << "  speed_max:    " << p.speed_max << (std::fabs(p.speed_max) < 1e-9 ? "  (disabled)" : "") << "\n";
     std::cout << "  output_dpi:   " << p.output_dpi << (std::fabs(p.output_dpi - NORMALIZED_DPI) < 1e-9 ? "  (default 1000)" : "") << "\n";
     std::cout << "  lr_ratio:     " << p.lr_output_dpi_ratio << (std::fabs(p.lr_output_dpi_ratio - 1.0) < 1e-9 ? "  (off)" : "") << "\n";
     std::cout << "  ud_ratio:     " << p.ud_output_dpi_ratio << (std::fabs(p.ud_output_dpi_ratio - 1.0) < 1e-9 ? "  (off)" : "") << "\n";
@@ -162,7 +263,7 @@ static int cmd_set(app_config& cfg, const std::string& config_path, const std::s
             save_config(cfg, config_path);
             std::cout << "Active profile set to: " << name << "\n";
             // Signal daemon to reload
-            if (send_signal_to_daemon(SIGHUP)) {
+            if (daemon_reload_via_any_path()) {
                 std::cout << "Daemon reloaded.\n";
             } else {
                 std::cout << "Note: daemon not running or not signaled.\n";
@@ -175,6 +276,13 @@ static int cmd_set(app_config& cfg, const std::string& config_path, const std::s
 }
 
 static int cmd_create(app_config& cfg, const std::string& config_path, const std::string& name) {
+    // BUG-12: empty profile name has no useful semantics — every later
+    // command (`delete ""`, `show ""`, `set-param "" ...`) would target the
+    // first nameless profile creating ambiguity.  Reject up front.
+    if (name.empty()) {
+        std::cerr << "Profile name must not be empty.\n";
+        return 1;
+    }
     // Check duplicate
     for (auto& dp : cfg.profiles) {
         if (dp.name == name) {
@@ -191,7 +299,7 @@ static int cmd_create(app_config& cfg, const std::string& config_path, const std
     cfg.profiles.push_back(dp);
     save_config(cfg, config_path);
     std::cout << "Created profile: " << name << "\n";
-    if (send_signal_to_daemon(SIGHUP))
+    if (daemon_reload_via_any_path())
         std::cout << "Daemon reloaded.\n";
     return 0;
 }
@@ -211,7 +319,7 @@ static int cmd_delete(app_config& cfg, const std::string& config_path, const std
     std::cout << "Deleted profile: " << name << "\n";
     if (cfg.active_profile != name)
         std::cout << "Active profile is now: " << cfg.active_profile << "\n";
-    if (send_signal_to_daemon(SIGHUP))
+    if (daemon_reload_via_any_path())
         std::cout << "Daemon reloaded.\n";
     return 0;
 }
@@ -247,8 +355,30 @@ static int cmd_set_param(app_config& cfg, const std::string& config_path,
     bool need_numeric = true;
     for (auto& nk : non_numeric_keys) if (nk == key) { need_numeric = false; break; }
     if (need_numeric) {
-        try { v = std::stod(val); }
-        catch (...) { std::cerr << "Invalid numeric value: " << val << "\n"; return 1; }
+        // BUG-11: std::stod("1.5junk") happily returns 1.5 and silently drops
+        // the trailing garbage — a typo would slip through unnoticed.  Use the
+        // optional `pos` out-param and require it to consume the entire string
+        // (allowing only trailing whitespace).
+        try {
+            size_t pos = 0;
+            v = std::stod(val, &pos);
+            // Skip trailing whitespace
+            while (pos < val.size() &&
+                   std::isspace(static_cast<unsigned char>(val[pos]))) ++pos;
+            if (pos != val.size()) {
+                std::cerr << "Invalid numeric value: " << val
+                          << " (trailing garbage)\n";
+                return 1;
+            }
+        } catch (...) { std::cerr << "Invalid numeric value: " << val << "\n"; return 1; }
+        // BUG-10: NaN/Inf passed straight through to JSON storage as "NaN"/
+        // "Infinity" — non-portable per the JSON spec.  Daemon would sanitize
+        // on load but the file itself is malformed.  Reject before persisting.
+        if (!std::isfinite(v)) {
+            std::cerr << "Invalid numeric value: " << val
+                      << " (NaN/Inf not allowed)\n";
+            return 1;
+        }
     }
 
     // For boolean keys accept "1"/"true"/"yes" as true, anything else as false
@@ -303,7 +433,7 @@ static int cmd_set_param(app_config& cfg, const std::string& config_path,
         sanitize_device_profile(*dp);
         save_config(cfg, config_path);
         std::cout << "Set " << key << " = " << val << " in profile '" << profile_name << "'\n";
-        if (send_signal_to_daemon(SIGHUP))
+        if (daemon_reload_via_any_path())
             std::cout << "Daemon reloaded.\n";
     }
     return ok ? 0 : 1;
@@ -350,26 +480,27 @@ static int cmd_import(app_config& cfg, const std::string& config_path, const std
         return 1;
     }
     std::cout << "Imported profile: " << dp.name << "\n";
-    if (send_signal_to_daemon(SIGHUP))
+    if (daemon_reload_via_any_path())
         std::cout << "Daemon reloaded.\n";
     return 0;
 }
 
 static int cmd_reload() {
-    if (send_signal_to_daemon(SIGHUP)) {
+    if (daemon_reload_via_any_path()) {
         std::cout << "Daemon reloaded.\n";
         return 0;
     }
-    std::cerr << "Could not signal daemon (is it running?)\n";
+    print_signal_failure(send_signal_to_daemon(SIGHUP), "reload");
     return 1;
 }
 
 static int cmd_stop() {
-    if (send_signal_to_daemon(SIGTERM)) {
+    auto r = send_signal_to_daemon(SIGTERM);
+    if (r == signal_result::sent) {
         std::cout << "Daemon stopped.\n";
         return 0;
     }
-    std::cerr << "Could not signal daemon (is it running?)\n";
+    print_signal_failure(r, "stop");
     return 1;
 }
 
@@ -534,13 +665,21 @@ int main(int argc, char* argv[]) {
     if (args[0] == "stop")   return cmd_stop();
     if (args[0] == "status") return cmd_status(config_path);
     if (args[0] == "latency") {
-        // Send SIGUSR1 to daemon to dump latency stats to its stdout (journald)
-        if (!send_signal_to_daemon(SIGUSR1)) {
-            std::cerr << "Daemon not running or no PID file found.\n";
-            return 1;
+        // Try the IPC "latency" command first — works for any user in the
+        // input group regardless of who owns the daemon.  Falls back to
+        // SIGUSR1 if the running daemon doesn't speak that command yet.
+        std::string ipc_resp = daemon_ipc_query("latency");
+        if (ipc_resp.find("\"ok\":true") != std::string::npos) {
+            std::cout << "Latency dump scheduled. View it with: journalctl -u rawaccel -n 30\n";
+            return 0;
         }
-        std::cout << "SIGUSR1 sent. View stats with: journalctl -u rawaccel -n 30\n";
-        return 0;
+        auto r = send_signal_to_daemon(SIGUSR1);
+        if (r == signal_result::sent) {
+            std::cout << "SIGUSR1 sent. View stats with: journalctl -u rawaccel -n 30\n";
+            return 0;
+        }
+        print_signal_failure(r, "signal");
+        return 1;
     }
 
     // Load config (create default if missing)

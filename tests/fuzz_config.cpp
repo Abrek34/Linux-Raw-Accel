@@ -22,6 +22,7 @@
 #include <string>
 #include <fstream>
 #include <filesystem>
+#include <unistd.h>
 
 using namespace rawaccel;
 
@@ -45,24 +46,37 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     }
 
     // ── Path 2: load_config (full config file round-trip) ───────────────────
-    try {
-        // Write fuzz input to a temp file and load it.
-        std::string tmp = "/tmp/.rawaccel_fuzz_" +
-                          std::to_string(reinterpret_cast<uintptr_t>(data)) + ".json";
-        {
-            std::ofstream f(tmp, std::ios::binary);
-            f.write(input.c_str(), input.size());
-        }
-        app_config cfg = load_config(tmp);
-        std::filesystem::remove(tmp);
+    //
+    // BUG-14: previously this used the input data pointer (which changes every
+    // libFuzzer iteration) for the temp filename, AND the std::filesystem::remove
+    // call was placed AFTER load_config() — meaning a thrown exception (the
+    // common case for malformed JSON) skipped the cleanup.  Result: every
+    // fuzz run leaked a tmp file and /tmp filled to 4GB after several minutes.
+    // Fix: deterministic filename (PID-based) so we reuse one file, and an
+    // RAII guard that removes it on exception too.
+    {
+        static const std::string tmp = "/tmp/.rawaccel_fuzz_" +
+                                       std::to_string(::getpid()) + ".json";
+        struct TmpCleanup {
+            const std::string& p;
+            ~TmpCleanup() { std::error_code ec; std::filesystem::remove(p, ec); }
+        } guard{tmp};
 
-        // Verify sanitization invariants on every loaded profile.
-        for (auto& dp : cfg.profiles) {
-            if (dp.dev_cfg.dpi < 1 || dp.dev_cfg.dpi > 32000) __builtin_trap();
-            if (dp.dev_cfg.polling_rate < 125 || dp.dev_cfg.polling_rate > 8000) __builtin_trap();
+        try {
+            {
+                std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+                f.write(input.c_str(), input.size());
+            }
+            app_config cfg = load_config(tmp);
+
+            // Verify sanitization invariants on every loaded profile.
+            for (auto& dp : cfg.profiles) {
+                if (dp.dev_cfg.dpi < 1 || dp.dev_cfg.dpi > 32000) __builtin_trap();
+                if (dp.dev_cfg.polling_rate < 125 || dp.dev_cfg.polling_rate > 8000) __builtin_trap();
+            }
+        } catch (...) {
+            // Expected for malformed JSON.  RAII guard cleans up tmp.
         }
-    } catch (...) {
-        // Expected for malformed JSON.
     }
 
     return 0;
