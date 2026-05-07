@@ -46,7 +46,13 @@ static std::vector<CurvePt> compute_curve(const accel_args& args,
     pts.reserve(N + 1);
     for (int i = 0; i <= N; i++) {
         double s = max_speed * i / N;
-        pts.push_back({s, au.apply(s, args)});
+        double g = au.apply(s, args);
+        // Defensive: NaN/Inf gain feeds straight into cairo_line_to() coords
+        // below, where it can produce undefined rendering on some Cairo
+        // backends.  Replace with 0 so the curve dips to the x-axis and the
+        // problem is visually obvious instead of crashing the GUI.
+        if (!std::isfinite(g)) g = 0.0;
+        pts.push_back({s, g});
     }
     return pts;
 }
@@ -305,9 +311,20 @@ bool lut_set_points(accel_args& ax,
         truncated = true;
     }
     ax.length = static_cast<int>(pts.size()) * 2;
+    // BUG-7-related defence: a double > FLT_MAX casts to +Inf, NaN casts to
+    // a NaN float — both corrupt the LUT binary search.  GtkSpinButton ranges
+    // are bounded so this should never fire, but a future widget change or
+    // out-of-band edit (drag-to-create with a buggy max_speed) could regress.
+    constexpr double FLT_HI = static_cast<double>(std::numeric_limits<float>::max());
+    auto safe_f = [](double v) -> float {
+        if (!std::isfinite(v)) return 0.0f;
+        if (v >  FLT_HI) v =  FLT_HI;
+        if (v < -FLT_HI) v = -FLT_HI;
+        return static_cast<float>(v);
+    };
     for (int i = 0; i < (int)pts.size(); i++) {
-        ax.data[i*2]   = static_cast<float>(pts[i].first);
-        ax.data[i*2+1] = static_cast<float>(pts[i].second);
+        ax.data[i*2]   = safe_f(pts[i].first);
+        ax.data[i*2+1] = safe_f(pts[i].second);
     }
     return truncated;
 }
@@ -434,13 +451,24 @@ void lut_list_changed(AppState* S) {
     if (S->xy_linked) cur_prof(S).prof.accel_y = ax;
     gtk_widget_queue_draw(S->graph_area);
 
-    // If the order changed, rebuild the list so rows move to their correct positions
+    // If the *order* of points changed, rebuild the list so rows move to their
+    // correct positions.  BUG-3: `lut_set_points` writes float-truncated values
+    // back to ax.data, so reading them with `lut_get_points` returns sub-ULP-
+    // different doubles even when no reorder happened.  Exact `!=` therefore
+    // fired on every spin tick (e.g. typing "5.6" → 5.5999...), causing a full
+    // list rebuild on each keystroke that ate the user's caret.  Use a generous
+    // epsilon (LUT speeds are at the integer scale; 1e-3 is far below user
+    // intent) to detect *real* reorders only.
     bool order_changed = false;
     auto sorted_pts = lut_get_points(ax);
     if (sorted_pts.size() == pts_before.size()) {
         for (size_t i = 0; i < pts_before.size(); i++) {
-            if (pts_before[i].first != sorted_pts[i].first) { order_changed = true; break; }
+            if (std::fabs(pts_before[i].first - sorted_pts[i].first) > 1e-3) {
+                order_changed = true; break;
+            }
         }
+    } else {
+        order_changed = true; // size mismatch (shouldn't normally happen)
     }
     if (order_changed) rebuild_lut_list(S);
 }

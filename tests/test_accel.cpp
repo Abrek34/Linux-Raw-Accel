@@ -3167,6 +3167,60 @@ static void test_classic_in_degenerate_cap_naninf() {
 // file path is created and atomic rename happens correctly even when the
 // target file is concurrently read.
 
+// ── BUG-15: motion_math remainder MUST NOT accumulate when motion is clamped
+// to INT range — pathological large input would otherwise lock the user into
+// many frames of INT_MAX motion.
+
+static void test_motion_math_clamp_remainder_reset() {
+    SECTION("BUG-15 — motion_math: clamp does not leak unbounded remainder");
+    modifier_settings settings = {};
+    settings.prof.accel_x.mode = accel_mode::classic;
+    settings.prof.accel_x.acceleration = 0.5;
+    settings.prof.accel_x.exponent_classic = 2.0;
+    settings.prof.accel_x.gain = 1;
+    settings.prof.accel_y = settings.prof.accel_x;
+    settings.prof.domain_weights = {1.0, 1.0};
+    settings.prof.range_weights  = {1.0, 1.0};
+    settings.prof.speed_max = 1e9;
+    settings.prof.output_dpi = 800;
+    settings.prof.lr_output_dpi_ratio = 1;
+    settings.prof.ud_output_dpi_ratio = 1;
+    init_settings(settings);
+    speed_processor sp; sp.init(settings.prof.speed_processor_args);
+    modifier mod;
+
+    double rx = 0, ry = 0;
+    int ox, oy;
+
+    // Pathological: INT_MAX motion repeated → remainder must NOT grow
+    for (int i = 0; i < 50; i++) {
+        apply_motion_math(mod, sp, settings, 1.0, 8.0,
+                          (double)INT_MAX, 0.0, rx, ry, ox, oy);
+    }
+    EXPECT(std::fabs(rx) < 1.0); // remainder reset, not accumulated
+    EXPECT(std::fabs(ry) < 1.0);
+
+    // Now small motion should produce small output, not INT_MAX
+    apply_motion_math(mod, sp, settings, 1.0, 8.0, 1.0, 0.0, rx, ry, ox, oy);
+    EXPECT(ox <= 100); // not INT_MAX → remainder did not leak
+
+    // Healthy fractional motion still accumulates correctly (subpixel works)
+    rx = ry = 0;
+    int total = 0;
+    for (int i = 0; i < 10; i++) {
+        apply_motion_math(mod, sp, settings, 1.0, 8.0, 0.3, 0.0, rx, ry, ox, oy);
+        total += ox;
+    }
+    EXPECT(total >= 2 && total <= 4); // 10 × 0.3 ≈ 3 pixels delivered
+
+    // NaN/Inf input also stays safe (defence-in-depth verification)
+    rx = ry = 0;
+    apply_motion_math(mod, sp, settings, 1.0, 8.0,
+                      std::numeric_limits<double>::quiet_NaN(), 0.0, rx, ry, ox, oy);
+    EXPECT(std::isfinite(rx) && std::fabs(rx) < 1.0);
+    EXPECT(ox == 0); // NaN motion → 0
+}
+
 static void test_save_config_durability_path() {
     SECTION("BUG-13 — save_config: tmp file is removed and target updated atomically");
     std::string path = "/tmp/_rawaccel_save_test.json";
@@ -5482,6 +5536,7 @@ int main(int argc, char** argv) {
     test_pipeline_nan_injection();
     test_classic_io_degenerate_cap();
     test_classic_in_degenerate_cap_naninf();
+    test_motion_math_clamp_remainder_reset();
     test_save_config_durability_path();
     test_power_output_offset();
     test_directional_weight_boundary();

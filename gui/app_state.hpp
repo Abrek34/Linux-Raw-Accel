@@ -5,6 +5,7 @@
 #include <glib/gstdio.h>
 #include <cairo.h>
 #include <cmath>
+#include <limits>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>

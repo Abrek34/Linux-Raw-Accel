@@ -77,10 +77,16 @@ static int kde_libinput_accel_state() {
         }
         // PointerAcceleration=0  (0 = no extra gain on top of flat)
         if (strncmp(line, "PointerAcceleration=", 20) == 0) {
-            // If already found profile==flat, also check the gain value
-            double val = atof(line + 20);
+            // BUG-16: atof() invokes UB on out-of-range input (C99 7.20.1.1).
+            // A malicious kwinrc with "PointerAcceleration=1e1000" would
+            // propagate UB through the GUI.  Use strtod + errno check; treat
+            // unparseable / non-finite values as "non-zero" (i.e. accel on).
+            errno = 0;
+            char* end = nullptr;
+            double val = std::strtod(line + 20, &end);
+            bool parsed = (end != line + 20 && errno == 0 && std::isfinite(val));
             // A near-zero PointerAcceleration with flat profile is fine
-            if (result == 0 && fabs(val) > 0.05) result = 1;
+            if (result == 0 && (!parsed || std::fabs(val) > 0.05)) result = 1;
         }
     }
     fclose(f);

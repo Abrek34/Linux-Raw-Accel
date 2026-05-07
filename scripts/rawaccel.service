@@ -29,13 +29,29 @@ ProtectSystem=strict
 ProtectHome=true
 ProtectKernelModules=true
 ProtectKernelTunables=true
+ProtectKernelLogs=true
 ProtectControlGroups=true
+ProtectClock=true
+ProtectProc=invisible
+ProcSubset=pid
 RestrictNamespaces=true
 RestrictRealtime=true
+RestrictSUIDSGID=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
 NoNewPrivileges=true
+RemoveIPC=true
+# UMask=0077 → files created by the daemon (incl. /run/rawaccel.pid) default
+# to 0600 / dirs 0700 instead of world-readable.  The IPC socket is chmod'd
+# to 0660 explicitly after creation, so this doesn't break the GUI/CLI access.
+UMask=0077
 ReadWritePaths=/etc/rawaccel /run
+# Note: CapabilityBoundingSet= is intentionally NOT set to a narrow value.
+# When set too restrictively (e.g. CAP_DAC_OVERRIDE only), some kernel
+# configurations refuse libevdev_uinput_create_from_device() with EPERM.
+# The daemon already runs with NoNewPrivileges=true and a strict
+# RestrictAddressFamilies, so the attack surface from a compromised root
+# process is bounded enough without breaking startup on diverse kernels.
 
 # Network: daemon does not use any network sockets.
 # AF_UNIX for potential future D-Bus; AF_NETLINK for kernel udev events.

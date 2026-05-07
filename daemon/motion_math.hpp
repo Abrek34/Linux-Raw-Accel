@@ -52,10 +52,19 @@ inline void apply_motion_math(
 
     // Preserve sign-correct fractional remainder.
     // Guard against NaN/Inf propagating into the remainder accumulator.
+    //
+    // BUG-15: if `motion` was clamped to the INT range (pathological large
+    // input, e.g. a buggy driver injecting INT_MAX REL events), the
+    // "remainder" computed as motion - out_int can be many billions.  A
+    // healthy remainder is always in (-1, 1) — anything larger means the
+    // sample was lost to clamping and should NOT be carried forward, or
+    // every subsequent event would also be clamped to INT_MAX for many
+    // frames until the remainder finally drained.  Reset the remainder when
+    // it exceeds ±1 (the math invariant of subpixel accumulation).
     remainder_x = motion.x - static_cast<double>(out_x);
     remainder_y = motion.y - static_cast<double>(out_y);
-    if (!std::isfinite(remainder_x)) remainder_x = 0;
-    if (!std::isfinite(remainder_y)) remainder_y = 0;
+    if (!std::isfinite(remainder_x) || std::fabs(remainder_x) >= 1.0) remainder_x = 0;
+    if (!std::isfinite(remainder_y) || std::fabs(remainder_y) >= 1.0) remainder_y = 0;
 }
 
 } // namespace rawaccel
