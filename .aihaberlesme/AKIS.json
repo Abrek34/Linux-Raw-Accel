@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "guncelleme": "2026-09-05 16:29 +03 (Aj7 M17: bos, emir bekliyor)",
+  "guncelleme": "2026-09-05 18:30 +03 (Aj2 M23: bos, emir bekliyor)",
   "referans": "aihaberlesme.md — insan okumalı kanonik anlatım; AKIS.json makine-okunur durum deposudur.",
   "kurallar": {
     "protokol_md": "aihaberlesme.md",
@@ -260,8 +260,8 @@
     {
       "gorev": "P61",
       "sahip": "4",
-      "durum": "bekliyor",
-      "kilit": null,
+      "durum": "devam",
+      "kilit": "4",
       "baslik": "OYUNCU 5: Oracle/paket genisleme: yeni oyuncu ozellikleri icin oracle kapsami + 0.5.0 paketinin oyun profilleriyle uyum teyidi"
     },
     {
@@ -430,7 +430,7 @@
     {
       "sira": 2,
       "ajan": "2",
-      "durum": "tamam (M22: bagimsiz QA paneli kosuldu - build 0 uyari, 21627/21627, ASan 21627/21627, fuzz 4.559M crash yok, oracle OK 588/27, tr PASS)",
+      "durum": "serbest, emir bekliyor (M23: QA/inceleme alani, kilit yok)",
       "not": "P35 QA paneli + kod inceleme",
       "istekler": [
         {
