@@ -412,7 +412,7 @@ static int cmd_duplicate(app_config& cfg, const std::string& config_path,
 }
 
 /// Create a profile from a built-in preset.
-/// Presets: "gaming", "office", "precision", "disable"
+/// Presets: "gaming", "office", "precision", "disable", "cs2", "valorant", "apex", "fps"
 static device_profile make_preset(const std::string& preset_name, const std::string& profile_name) {
     device_profile dp;
     dp.name = profile_name;
@@ -467,6 +467,86 @@ static device_profile make_preset(const std::string& preset_name, const std::str
         dp.prof.accel_x.mode = accel_mode::noaccel;
         dp.prof.accel_y.mode = accel_mode::noaccel;
         dp.prof.output_dpi = 1000;
+    } else if (preset_name == "cs2") {
+        // CS2 tactical shooter: pro eDPI band 560-1000, classic curve, early kick-in.
+        // Low swap of slow movement = micro-adjust headshots stay 1:1, flicks ramp up.
+        dp.prof.accel_x.mode = accel_mode::classic;
+        dp.prof.accel_y.mode = accel_mode::classic;
+        dp.prof.accel_x.gain = true;
+        dp.prof.accel_y.gain = true;
+        dp.prof.accel_x.acceleration = 0.004;
+        dp.prof.accel_y.acceleration = 0.004;
+        dp.prof.accel_x.exponent_classic = 2.0;
+        dp.prof.accel_y.exponent_classic = 2.0;
+        dp.prof.accel_x.input_offset = 0;
+        dp.prof.accel_y.input_offset = 0;
+        dp.prof.accel_x.limit = 1.6;
+        dp.prof.accel_y.limit = 1.6;
+        dp.prof.accel_x.cap = { 18.0, 1.6 };
+        dp.prof.accel_y.cap = { 18.0, 1.6 };
+        dp.prof.accel_x.cap_mode_val = cap_mode::out;
+        dp.prof.accel_y.cap_mode_val = cap_mode::out;
+        dp.prof.output_dpi = 1000;
+    } else if (preset_name == "valorant") {
+        // Valorant (TenZ-inspired base): natural curve for smooth entry/exit,
+        // modest gain, high cap so panic flicks stay controlled but fast.
+        dp.prof.accel_x.mode = accel_mode::natural;
+        dp.prof.accel_y.mode = accel_mode::natural;
+        dp.prof.accel_x.gain = true;
+        dp.prof.accel_y.gain = true;
+        dp.prof.accel_x.limit = 1.3;
+        dp.prof.accel_y.limit = 1.3;
+        dp.prof.accel_x.decay_rate = 0.08;
+        dp.prof.accel_y.decay_rate = 0.08;
+        dp.prof.accel_x.motivity = 1.2;
+        dp.prof.accel_y.motivity = 1.2;
+        dp.prof.accel_x.input_offset = 0.02;
+        dp.prof.accel_y.input_offset = 0.02;
+        dp.prof.accel_x.cap = { 30.0, 2.0 };
+        dp.prof.accel_y.cap = { 30.0, 2.0 };
+        dp.prof.accel_x.cap_mode_val = cap_mode::out;
+        dp.prof.accel_y.cap_mode_val = cap_mode::out;
+        dp.prof.output_dpi = 1000;
+    } else if (preset_name == "apex") {
+        // Apex Legends: tracking-heavy + verticality. Power mode ramps fast for
+        // 180° flicks while light smoothing keeps track. Slightly higher limit.
+        dp.prof.accel_x.mode = accel_mode::power;
+        dp.prof.accel_y.mode = accel_mode::power;
+        dp.prof.accel_x.gain = true;
+        dp.prof.accel_y.gain = true;
+        dp.prof.accel_x.scale = 2.2;
+        dp.prof.accel_y.scale = 2.2;
+        dp.prof.accel_x.exponent_power = 0.8;
+        dp.prof.accel_y.exponent_power = 0.8;
+        dp.prof.accel_x.input_offset = 0.02;
+        dp.prof.accel_y.input_offset = 0.02;
+        dp.prof.accel_x.output_offset = 0.2;
+        dp.prof.accel_y.output_offset = 0.2;
+        dp.prof.accel_x.cap = { 28.0, 2.2 };
+        dp.prof.accel_y.cap = { 28.0, 2.2 };
+        dp.prof.accel_x.cap_mode_val = cap_mode::out;
+        dp.prof.accel_y.cap_mode_val = cap_mode::out;
+        dp.prof.output_dpi = 1000;
+    } else if (preset_name == "fps") {
+        // Generic FPS: balanced classic curve, moderate acceleration and cap.
+        // Safe starting point for most shooters / aim trainers.
+        dp.prof.accel_x.mode = accel_mode::classic;
+        dp.prof.accel_y.mode = accel_mode::classic;
+        dp.prof.accel_x.gain = true;
+        dp.prof.accel_y.gain = true;
+        dp.prof.accel_x.acceleration = 0.005;
+        dp.prof.accel_y.acceleration = 0.005;
+        dp.prof.accel_x.exponent_classic = 2.0;
+        dp.prof.accel_y.exponent_classic = 2.0;
+        dp.prof.accel_x.input_offset = 0.01;
+        dp.prof.accel_y.input_offset = 0.01;
+        dp.prof.accel_x.limit = 1.8;
+        dp.prof.accel_y.limit = 1.8;
+        dp.prof.accel_x.cap = { 20.0, 1.8 };
+        dp.prof.accel_y.cap = { 20.0, 1.8 };
+        dp.prof.accel_x.cap_mode_val = cap_mode::out;
+        dp.prof.accel_y.cap_mode_val = cap_mode::out;
+        dp.prof.output_dpi = 1000;
     } else {
         dp.name.clear(); // signal unknown preset
     }
@@ -489,7 +569,7 @@ static int cmd_create_preset(app_config& cfg, const std::string& config_path,
     device_profile dp = make_preset(preset_name, profile_name);
     if (dp.name.empty()) {
         std::cerr << "Unknown preset: '" << preset_name
-                  << "'.  Available: gaming, office, precision, disable\n";
+                  << "'.  Available: gaming, office, precision, disable, cs2, valorant, apex, fps\n";
         return 1;
     }
     cfg.profiles.push_back(dp);
@@ -1143,7 +1223,7 @@ Commands:
   show <profile>                Show profile details
   set <profile>                 Set active profile
   create <profile>              Create new profile with defaults
-  create-preset <preset> <name> Create profile from preset (gaming, office, precision, disable)
+  create-preset <preset> <name> Create profile from preset (gaming, office, precision, disable, cs2, valorant, apex, fps)
   delete <profile>              Delete a profile
   rename <old> <new>            Rename a profile
   duplicate <src> <dst>         Duplicate a profile (clears device_id)
