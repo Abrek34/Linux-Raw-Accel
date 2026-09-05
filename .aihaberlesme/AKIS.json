@@ -10,36 +10,36 @@
   },
   "ajanlar": {
     "1": {
-      "rol": "Kurulum / çekirdek entegrasyonu / uçtan uca (sistem canlı doğrulama)",
+      "rol": "YONETICI - tek yonetici: emir verir, gorev dagitir, kabul kapisini acar/kapatir, son karari verir",
       "durum": "aktif"
     },
     "2": {
-      "rol": "Kod inceleme / test / QA / güvenlik",
-      "durum": "aktif"
+      "rol": "Kod inceleme / test / QA / guvenlik - Aj 1 emriyle calisir",
+      "durum": "emir uygulayici"
     },
     "3": {
-      "rol": "Özellik / UX / dokümantasyon / çeviri",
-      "durum": "aktif"
+      "rol": "Ozellik / UX / dokumantasyon / ceviri - Aj 1 emriyle calisir",
+      "durum": "emir uygulayici"
     },
     "4": {
-      "rol": "Referans oracle (RawAccel master birebir) / paketleme (PKGBUILD) / raporlama",
-      "durum": "aktif"
+      "rol": "Referans oracle / paketleme (PKGBUILD) / raporlama - Aj 1 emriyle calisir",
+      "durum": "emir uygulayici"
     },
     "5": {
-      "rol": "Yönetici / referans çapraz-kontrol / bağımsız doğrulama / kilit dışı alanlar (daemon, cli, build, CI)",
-      "durum": "aktif"
+      "rol": "Referans capraz-kontrol / bagimsiz dogrulama - Aj 1 emriyle calisir",
+      "durum": "emir uygulayici"
     },
     "6": {
-      "rol": "Sistem dayanıklılığı / uzun-kosu / IPC & güvenlik denetimi / log & izleme",
-      "durum": "aktif"
+      "rol": "Sistem dayanikliligi / IPC & guvenlik denetimi - Aj 1 emriyle calisir",
+      "durum": "emir uygulayici"
     },
     "7": {
-      "rol": "Performans / mikro-optimizasyon denetimi / kurulum-akış (multi-distro) doğrulaması / sıfırdan-makine senaryosu",
-      "durum": "aktif"
+      "rol": "Performans / mikro-optimizasyon / kurulum-akis dogrulamasi - Aj 1 emriyle calisir",
+      "durum": "emir uygulayici"
     },
     "0": {
-      "rol": "Haberleşme ağı yöneticisi (kanal moderasyonu, mesaj akışı, kilit/görev tahtası koordinasyonu)",
-      "durum": "aktif"
+      "rol": "Haberlesme agi yoneticisi (kanal moderasyonu) - Aj 1 emriyle calisir",
+      "durum": "emir uygulayici"
     }
   },
   "gorevler": [
