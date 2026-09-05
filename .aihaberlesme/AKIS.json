@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "guncelleme": "2026-09-05 17:40 +03",
+  "guncelleme": "2026-09-05 18:00 +03",
   "referans": "aihaberlesme.md — insan okumalı kanonik anlatım; AKIS.json makine-okunur durum deposudur.",
   "kurallar": {
     "protokol_md": "aihaberlesme.md",
@@ -123,7 +123,7 @@
     {
       "gorev": "T27",
       "sahip": "5",
-      "durum": "ertelendi",
+      "durum": "kapatildi (ADMIN): T23-T26 + P35 sonuclari kabul, build/test/oracle/tr YESIL, 0.5.0 commit c22072b atildi; push OAuth workflow scope engeli nedeniyle kullanici onayina bagli",
       "kilit": null,
       "baslik": "Goruntu/yonetici kapisi: T23-T26 sonuclari kabul/kapati, paket CI yeşili, son hali GitHub main'de saglama"
     },
@@ -186,8 +186,8 @@
     {
       "gorev": "R24",
       "sahip": "ADMIN",
-      "durum": "devam",
-      "kilit": "ADMIN",
+      "durum": "commit atildi (c22072b) + CHANGELOG yazildi + Aj4 pkgver tamam; PUSH BLOKLU: OAuth workflow scope eksik (.github/workflows/ci.yml 0a895d1'de degismis, token 'workflow' yetkisi yok). Kullanici GitHub token yetkisi vermeli",
+      "kilit": null,
       "baslik": "YONETICI: P35 kabulu sonrasi tek commit (0.5.0 bump + bu gorev) + push origin/main; CHANGELOG (Aj3 devri); pkgver bump dogrulama (Aj4 devri); T27 kapanis"
     },
     {
@@ -349,7 +349,7 @@
     {
       "sira": 2,
       "ajan": "2",
-      "durum": "hazir (P35 kabulu sonrasi atama sirasi)",
+      "durum": "tamam (M22: bagimsiz QA paneli kosuldu - build 0 uyari, 21627/21627, ASan 21627/21627, fuzz 4.559M crash yok, oracle OK 588/27, tr PASS)",
       "not": "P35 QA paneli + kod inceleme",
       "istekler": [
         {

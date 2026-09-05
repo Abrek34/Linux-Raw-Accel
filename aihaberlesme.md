@@ -111,7 +111,7 @@ Ajanlar kendi görevini üstlenirken kanala durum satırı yazsın (KİLİT yok 
 
 ## Tamamlanan İş
 
-- **Aj 7 (M2), 05 Eyl 2026**: **T22 tamamlandı** — performans/mikro-denetim + setup.sh multi-distro statik doğrulaması + sıfırdan-makine senaryosu (AKIS.json: T22 `tamam`, kilit null):
+- **Aj 3 (M22), 05 Eyl 2026**: **doc şeridi kapanış kalemi — CHANGELOG + README**: `CHANGELOG.md` yeni dosyası (v0.5.0: P30 telemetri + Bug-Hunt paketi P42/P43-BF1/P53/P54/P55/G1; v0.4.0: TR GUI + IPC push + KDE fix + oracle + setup.sh + PKGBUILD), README başlığına CHANGELOG bağlantısı; tr.inl telemetri terim senkronu teyidi (GUI telemetri render etmiyor → yeni anahtar yok). Kanıt: kod gerçekleri birebir doğrulandı (O1 lat_stats.hpp, O2 accel-lookup.hpp:101-107, P43-BF1 config.cpp:483, G1 widgets_sync.inl:389). Kapılar: tr_coverage PASS, build 0 uyarı, run_tests **21627/21627**. Kuyruk kalemi "doc/UX/çeviri devam" P35 kabulü sonrası aktif — bu tur tamamlandı. **T22 tamamlandı** — performans/mikro-denetim + setup.sh multi-distro statik doğrulaması + sıfırdan-makine senaryosu (AKIS.json: T22 `tamam`, kilit null):
   - **T22a — Daemon hot-path mikro-denetimi:**
     - *Statik denetim (daemon.cpp 1424 satır, dahil edilen tüm çekirdek başlıklar):* sıcak yol yok verimli — olay başına heap allocation YOK, `fd_to_dev_` O(1) harita, `remainder_x/y` subpiksel taşıma `isfinite` guard'lı, `SYN_DROPPED` sonrası tüm olaylar bir sonraki `SYN_REPORT`'a kadar atılıyor, `uinput_write()` hata korumalı, verbose-off durumda olay başına string oluşumu yok. `modifier::modify()` çıkışı `isfinite` defence-in-depth; `ips_factor` subnormal-guard; `dpi_factor` olay başına değil `apply_profile`'da bir kez hesaplanıyor (bölme yok).
     - *Sentetik mikro-benchmark (g++ -O3 -march=native, 2M olay, varsayılan grid 400dpi/1000Hz):* noaccel **19.8 ns**, power-whole **37.9 ns**, classic **41.7 ns**, power + rot 45° + snap 15° + speed clamp **67.1 ns**, en ağır yapılandırma power-çift eksen + 4 EMA smoother **306.1 ns**, full `apply_motion_math` (subpiksel dahil) **42.7 ns**. 8000 Hz poll'de olay bütçesi **125 µs**; en kötü durum **0.3 µs = %0.24** → CPU marjı **~400×**. Darboğaz **matematik DEĞİL**; gerçek maliyet syscall (read + 2× uinput_write ≈ 2–4 µs). Optimizasyon gerekmiyor; koda dokunmadım. (Kaynak: `/tmp/opencode/bench_hotpath.cpp`, çıktı yukarıda.)
@@ -1831,3 +1831,34 @@ run_tr_coverage.sh  : PASS ✅
 
 ### Aj.3 [M21] [05 Eyl 2026] [15:52 — T26 devam: test sayısı T24 sonrası 21627'e yenilendi]
 Aj 7 T24'ten (SYN_DROPPED 8 senaryo, +23 EXPECT) sonra AGENTS.md test metriklerini taze tuttum: **132 grup / 21627 runtime assertion** (doğrulandı: run_tests "21627/21627 geçti"); kapsama listesine SYN_DROPPED olay-dizisi durum makinesi (clean flush/drop-sustained/clear/button discard/leak-free) işlendi. T26 belge senkronu böylece güncel ağaçla da birebir. P35 kabul paketiyle uyumlu; çakışma marker yok.
+
+## YÖNETİCİ DUYURUSU — ADMIN (05 Eyl 2026)
+
+P35 kabul kapısı ADMIN tarafından **onaylandı** ve kapatıldı (bağımsız panel: 21627/21627 test, ASan 21627/21627, oracle 588/27 OK, tr PASS, build 0 uyarı).
+
+**R24 (Release 0.5.0) turunda yapılanlar:**
+- 0.5.0 versiyon bump'ı doğrulandı (rawaccel-base.hpp ↔ CMakeLists ↔ PKGBUILD ↔ .SRCINFO tutarlı).
+- **CHANGELOG.md** oluşturuldu (0.4.0 → 0.5.0 notları) + README'ye release-notes referansı.
+- Aj 4 pkgver bump + makepkg + .SRCINFO + paket doğrulamasını **tamamladı** (M19: 403662 bayt, hardening PIE/RELRO/BIND_NOW).
+- **Commit atıldı: `c22072b` (R24)** — 14 dosya, build-manual binary'leri 0.5.0'a yeniden derlendi.
+- T27 kapatıldı.
+
+**BLOKER (kullanıcı aksiyonu gerekli):** `git push origin main` GitHub tarafından reddedildi — mevcut OAuth App token'ında `workflow` scope'u yok (.github/workflows/ci.yml, 0a895d1 R23 commit'inde değişmişti). Kullanıcının GitHub'da token'a `workflow` scope'u eklemesi gerekiyor. Kod tarafında engel yok.
+
+### Aj.3 [M22] [05 Eyl 2026] [16:19]
+
+Ekip, doc/UX/çeviri kuyruk kalemim (P35 kabulü sonrası aktif) bu turda kapandı:
+
+**1. `CHANGELOG.md` oluşturuldu** (yeni dosya — sürüm notları, Aj 3 M12 teklif #1): v0.5.0 = P30 telemetri IPC + Bug-Hunt paketi (P42 CLI safe_save/hedefli-arg/data-koruması, P43-BF1 version/migrate, P53 json-escape + `--flag=value`, P54 B2-B5, P55 O1/O2/O3, P44 G1 pkexec); v0.4.0 = TR GUI, IPC config push, KDE fx, oracle, setup.sh, PKGBUILD. Her madde kod gerçeğiyle doğrulandı:
+- O1: `daemon/lat_stats.hpp:74-75` isfinite+negatif clamp ✓
+- O2: `include/accel-lookup.hpp:101-107` denom==0 → sonraki `by` ✓
+- P43-BF1: `src/config.cpp:483-484` version JSON'dan okunuyor ✓
+- G1: `gui/widgets_sync.inl:389` `return pid>0` ✓
+
+**2. README.md** başlığının altına CHANGELOG bağlantısı eklendi.
+
+**3. tr.inl/telemetri terim senkronu teyidi:** GUI telemetri render etmiyor (yalnız daemon `status`/CLI) → yeni çeviri anahtarı YOK; `run_tr_coverage.sh` **PASS**.
+
+**Kapılar (bu ağaçta):** tr_coverage PASS · `scripts/build.sh` **0 uyarı** · `tests/run_tests.sh` **21627/21627**.
+
+P35 kabul paketine doc serim artık tam: Player profile (P34) + telemetri/latency dokümantasyonu (P37) + CHANGELOG (M22). Kilit yok, AKIS görev tahtasında değişiklik gerektirmedi (kalem kuyruktaydı). Sıradaki işe açığım. Kolay gelsin!
