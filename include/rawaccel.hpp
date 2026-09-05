@@ -63,11 +63,14 @@ struct linear_ema_smoother {
         cutoffTrendTotal *= trendDampening;
         windowTotal += windowTrendTotal * time;
         cutoffTotal += cutoffTrendTotal * time;
-        windowTotal  = std::max(windowTotal, 0.0);
-        cutoffTotal  = std::max(cutoffTotal, 0.0);
 
         windowTotal += twc  * (speed - windowTotal);
         cutoffTotal += tcc  * (speed - cutoffTotal);
+
+        // don't let trend carry us below 0 (clamp AFTER the EMA update, like the
+        // reference — trend adjustment below then measures the clamped state)
+        windowTotal  = std::max(windowTotal, 0.0);
+        cutoffTotal  = std::max(cutoffTotal, 0.0);
 
         double nwt = time > 0 ? (windowTotal - oldW) / time : 0;
         double nct = time > 0 ? (cutoffTotal - oldC) / time : 0;
@@ -223,7 +226,7 @@ public:
     /// @param in      Raw mouse delta [counts]; modified in place.
     /// @param sp      Per-axis speed processor (stateful).
     /// @param settings Precomputed modifier settings.
-    /// @param dpi_factor  DPI / NORMALIZED_DPI
+    /// @param dpi_factor  NORMALIZED_DPI / device DPI (reference input_dpi_normalization_factor)
     /// @param time    Time since last event [ms]
     void modify(vec2d& in, speed_processor& sp,
                 const modifier_settings& settings,
@@ -285,11 +288,13 @@ public:
                           std::fabs(in.y * ips_factor * args.domain_weights.y) };
 
         if (sp.speed_flags.dist_mode == distance_mode::separate) {
-            // Per-axis acceleration
+            // Per-axis acceleration.  Reference callback weight convention:
+            //   gain = 1 + (accel_fn - 1) * range_weight
+            // so a 0 weight disables acceleration (returns 1), not the mouse.
             sp.calc_speed_separate(abs_vel, time);
 
-            double scale_x = data.accel_x.apply(abs_vel.x, args.accel_x) * args.range_weights.x;
-            double scale_y = data.accel_y.apply(abs_vel.y, args.accel_y) * args.range_weights.y;
+            double scale_x = 1.0 + (data.accel_x.apply(abs_vel.x, args.accel_x) - 1.0) * args.range_weights.x;
+            double scale_y = 1.0 + (data.accel_y.apply(abs_vel.y, args.accel_y) - 1.0) * args.range_weights.y;
 
             if (sp.speed_flags.should_smooth_scale) {
                 scale_x = sp.smoother_x.scale_smoother.smooth(scale_x, time);
@@ -307,21 +312,16 @@ public:
             // Whole (combined) acceleration
             double speed = sp.calc_speed_whole(abs_vel, time);
 
-            // K4: interpolate range_weight from X/Y weights based on the angle.
-            // reference_angle == 0   → pure horizontal → range_weights.x
-            // reference_angle == π/2 → pure vertical   → range_weights.y
-            // In between            → cos/sin weighted blend
-            // When apply_directional_weight == false (X==Y), always use X (== Y).
-            double range_weight = 1.0;
+            // Reference directional weight: linear interpolation in angle from
+            // range_weights.x (0°, horizontal) to range_weights.y (90°, vertical):
+            //   weight = rwx + (rwy - rwx) * (2/π) * reference_angle
+            double range_weight = args.range_weights.x;
             if (flags.apply_directional_weight) {
-                range_weight = args.range_weights.x * std::cos(reference_angle) +
-                               args.range_weights.y * std::sin(reference_angle);
-            } else {
-                // X and Y weights are equal — both hold the same value, just take X.
-                range_weight = args.range_weights.x;
+                double diff = args.range_weights.y - args.range_weights.x;
+                range_weight += 2.0 / M_PI * reference_angle * diff;
             }
 
-            double scale = data.accel_x.apply(speed, args.accel_x) * range_weight;
+            double scale = 1.0 + (data.accel_x.apply(speed, args.accel_x) - 1.0) * range_weight;
 
             if (sp.speed_flags.should_smooth_scale) {
                 scale = sp.smoother_x.scale_smoother.smooth(scale, time);
@@ -331,21 +331,32 @@ public:
             in.y *= scale;
 
             if (sp.speed_flags.should_smooth_output) {
-                in.x = std::copysign(sp.smoother_x.output_speed_smoother.smooth(std::fabs(in.x), time), in.x);
-                in.y = std::copysign(sp.smoother_y.output_speed_smoother.smooth(std::fabs(in.y), time), in.y);
+                // Reference smooths the magnitude and rescales both components by
+                // the same ratio, preserving the cursor direction.
+                double mag = magnitude(in);
+                if (mag > 0) {
+                    double smoothedMag = sp.smoother_x.output_speed_smoother.smooth(mag, time);
+                    in.x *= (smoothedMag / mag);
+                    in.y *= (smoothedMag / mag);
+                }
             }
         }
 
-        // 5. Directional DPI multipliers
-        // R6: guard against division-by-zero when ratio is near 0 (sanitize clamps to
-        // >= 0.01, but defend in depth for programmatic paths that skip sanitize).
-        if (flags.apply_dir_mul_x && std::fabs(args.lr_output_dpi_ratio) > 1e-9) {
-            double mul = in.x > 0 ? args.lr_output_dpi_ratio : 1.0 / args.lr_output_dpi_ratio;
-            in.x *= mul;
+        // 5. Output DPI normalization + directional DPI multipliers
+        // Reference: dpi_adjustment = (output_dpi / NORMALIZED_DPI) * dpi_factor;
+        // applied to X, and to Y scaled further by the Y/X output-DPI ratio.
+        if (args.output_dpi > 0 && dpi_factor > 0) {
+            double dpi_adjustment = (args.output_dpi / NORMALIZED_DPI) * dpi_factor;
+            in.x *= dpi_adjustment;
+            in.y *= dpi_adjustment * args.yx_output_dpi_ratio;
         }
-        if (flags.apply_dir_mul_y && std::fabs(args.ud_output_dpi_ratio) > 1e-9) {
-            double mul = in.y > 0 ? args.ud_output_dpi_ratio : 1.0 / args.ud_output_dpi_ratio;
-            in.y *= mul;
+        // RawAccel applies lr/ud ratios only in the *negative* (left/down) direction.
+        // R6: guard against division-by-zero — here only a plain multiplication.
+        if (flags.apply_dir_mul_x && args.lr_output_dpi_ratio > 0 && in.x < 0) {
+            in.x *= args.lr_output_dpi_ratio;
+        }
+        if (flags.apply_dir_mul_y && args.ud_output_dpi_ratio > 0 && in.y < 0) {
+            in.y *= args.ud_output_dpi_ratio;
         }
 
         // Defense-in-depth: ensure no NaN/Inf escapes the pipeline.

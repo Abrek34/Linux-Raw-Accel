@@ -20,4 +20,5 @@ $CXX $CXXFLAGS \
 
 echo "Çalıştırılıyor..."
 echo ""
-"$BIN"
+# Forward any CLI args (e.g. --filter, --list, --quiet) to the test binary
+"$BIN" "$@"

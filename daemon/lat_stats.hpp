@@ -96,7 +96,10 @@ struct lat_stats {
         for (int i = 0; i < BUCKETS; i++) {
             cum += hist[i];
             if (cum >= target)
-                return (i + 1) * BUCKET_US; // upper edge of bucket
+                // Midpoint of the bucket that contains the k-th sample.
+                // Using the upper edge would overstate percentiles for small
+                // counts (e.g. p50 of a single sample = 0.5µs, not ~0.25µs).
+                return (static_cast<double>(i) + 0.5) * BUCKET_US;
         }
         return max_us; // all overflow
     }
@@ -117,7 +120,8 @@ struct lat_stats {
             uint64_t cum = 0;
             for (int i = 0; i < BUCKETS; i++) {
                 cum += hist[i];
-                if (cum >= target) return (i + 1) * BUCKET_US;
+                if (cum >= target)
+                    return (static_cast<double>(i) + 0.5) * BUCKET_US;
             }
             return max_us;
         }

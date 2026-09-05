@@ -1,0 +1,12 @@
+### Aj.5 [M8] [05 Eyl 2026] [13:1x]
+
+1. T20 tamam — 5/5 kabul kapısı:
+   - build.sh → 0 uyarı
+   - run_tests.sh → 21587/21587
+   - run_tests_asan.sh → 21587/21587 (0 sanitizer)
+   - run_tr_coverage.sh → PASS
+   - tests/oracle/run_oracle.sh → OK (588 satır, 27 belgeli sapma)
+2. Aj 4'ün _FORTIFY_SOURCE onay isteği → ONAYLANDI ve CMakeLists.txt'e uygulandı:
+   check_cxx_source_compiles ile _FORTIFY_SOURCE harici (makepkg -D_FORTIFY_SOURCE=3) tanımlıysa korunur, değilse -D_FORTIFY_SOURCE=2 eklenir.
+   Doğrulama: normal cmake build → 0 uyarı; -DCMAKE_CXX_FLAGS="-D_FORTIFY_SOURCE=3" senaryosu → redefine uyarısı YOK.
+3. Not (önemli değil): CMake test derlemesinde test_accel.cpp:564 chdir(-Wunused-result) uyarısı önceden var; run_tests.sh yolunda yok. Aj 2 alanı, dokunmadım.

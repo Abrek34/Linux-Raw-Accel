@@ -17,6 +17,7 @@
 //    - on_activate() is the only entry point that receives the live AppState*.
 
 #include "app_state.hpp"
+#include "tr.inl"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -41,22 +42,34 @@ void save_config_now(AppState* S) {
     try {
         save_config(S->config, S->config_path);
         S->unsaved = false;
-        // Auto-notify daemon so the running instance picks up the new config immediately.
-        // This mirrors the "Apply" button path but is silent (no error if daemon is stopped).
-        std::string sig_err;
-        bool notified = daemon_send_signal(SIGHUP, &sig_err);
+        // Push the full config to the daemon over IPC ("set_config" RPC):
+        // the daemon persists it to its OWN config path — for a root systemd
+        // daemon that is /etc/rawaccel/settings.json — and live-applies it.
+        // A plain SIGHUP only makes the daemon re-read its own (stale) config.
+        // Fall back to SIGHUP for old daemons that predate the IPC RPC.
+        std::string json = app_config_to_json(S->config);
+        bool applied = daemon_ipc_push_config(json);
+        if (!applied) {
+            std::string sig_err;
+            applied = daemon_send_signal(SIGHUP, &sig_err);
+        }
         // Check for duplicate device IDs and prepend warning to status
         std::string dup_warn = check_duplicate_device_ids(S->config);
         std::string status_msg;
-        if (notified)
-            status_msg = "Saved & reloaded: " + S->config_path;
-        else
-            status_msg = "Saved: " + S->config_path;
+        if (applied) {
+            status_msg = trf("Applied & reloaded: %s", S->config_path.c_str());
+        } else {
+            // Distinguish "daemon is down" from "daemon is up but rejected the
+            // config" — both mean the running daemon still has the OLD config.
+            status_msg = daemon_running()
+                ? trf("Saved locally, but the daemon was not updated: %s", S->config_path.c_str())
+                : trf("Saved locally, but the daemon is not running: %s", S->config_path.c_str());
+        }
         if (!dup_warn.empty())
             status_msg = dup_warn + " | " + status_msg;
         set_status(S, status_msg);
     } catch (std::exception& e) {
-        set_status(S, std::string("Save error: ") + e.what());
+        set_status(S, trf("Save error: %s", e.what()));
     }
 }
 
@@ -70,14 +83,15 @@ std::string check_duplicate_device_ids(const app_config& cfg) {
             const auto& b = cfg.profiles[j];
             if (a.device_id == b.device_id) {
                 if (!warn.empty()) warn += "; ";
-                warn += "\"" + a.name + "\" & \"" + b.name +
-                        "\" share device " + a.device_id;
+                warn += trf("\"%s\" & \"%s\" share device %s",
+                            a.name.c_str(), b.name.c_str(), a.device_id.c_str());
             }
         }
     }
-    if (!warn.empty())
-        warn = "Warning: duplicate device IDs — " + warn +
-               ". Only the first matching profile is used by the daemon.";
+    if (!warn.empty()) {
+        warn = trf("Warning: duplicate device IDs — %s. Only the first matching profile is used by the daemon.",
+                   warn.c_str());
+    }
     return warn;
 }
 
@@ -125,6 +139,7 @@ int main(int argc, char* argv[]) {
     } else {
         state.config_path = find_config_path();
     }
+    state.lang_path = (fs::path(state.config_path).parent_path() / "gui_lang").string();
 
     try {
         state.config = load_config(state.config_path);

@@ -1,35 +1,79 @@
 cmake_minimum_required(VERSION 3.16)
-project(rawaccel-linux VERSION 0.2.0 LANGUAGES CXX)
+project(rawaccel-linux VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+include(CheckCXXSourceCompiles)
 
 # ── Build options ─────────────────────────────────────────────────────────────
 option(BUILD_GUI    "Build GTK4 GUI"    ON)
 option(BUILD_DAEMON "Build daemon"      ON)
 option(BUILD_CLI    "Build CLI tool"    ON)
+option(BUILD_TESTS  "Build unit tests" ON)
+option(RAWACCEL_PORTABLE "Portable build (-march=native disabled)" OFF)
+
+# ── Compiler warnings ─────────────────────────────────────────────────────────
+add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
+
+# ── Security hardening (mirrors scripts/build.sh) ─────────────────────────────
+# The daemon runs as root with uinput access, so every binary gets the same
+# hardening the direct-compilation path applies:
+#   -fstack-protector-strong   : stack canaries on functions with arrays/refs
+#   -fstack-clash-protection   : defeat stack clash attacks
+#   -D_FORTIFY_SOURCE=2        : compile-time bounds checks on libc string ops
+#   -D_GLIBCXX_ASSERTIONS      : runtime bounds checks on libstdc++ containers
+#   -fPIE + -pie               : full ASLR for the binary
+#   -pie -z relro,now,noexecstack,separate-code : hardened linking
+# -fcf-protection=full (Intel CET) is x86-specific; guarded so other arches still build.
+# _FORTIFY_SOURCE: if already defined by the environment (e.g. makepkg.conf
+# -D_FORTIFY_SOURCE=3), keep it and avoid a "redefined" warning; otherwise add
+# the hardened -D_FORTIFY_SOURCE=2 default.
+set(_rawaccel_old_req "${CMAKE_REQUIRED_FLAGS}")
+set(CMAKE_REQUIRED_FLAGS "${CMAKE_CXX_FLAGS}")
+check_cxx_source_compiles("
+#ifndef _FORTIFY_SOURCE
+#error not externally defined
+#endif
+int main() { return 0; }" RAWACCEL_FORTIFY_PREDEFINED)
+set(CMAKE_REQUIRED_FLAGS "${_rawaccel_old_req}")
+
+add_compile_options(
+    -fstack-protector-strong
+    -fstack-clash-protection
+    -D_GLIBCXX_ASSERTIONS
+    -fPIE
+    -Wformat
+    -Wformat-security
+)
+if(NOT RAWACCEL_FORTIFY_PREDEFINED)
+    add_compile_options(-D_FORTIFY_SOURCE=2)
+endif()
+if(NOT RAWACCEL_PORTABLE)
+    add_compile_options(-march=native)
+endif()
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|i[3-6]86)$")
+    add_compile_options(-fcf-protection=full)
+endif()
+add_link_options(-pie -Wl,-z,relro,-z,now,-z,noexecstack,-z,separate-code)
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
 find_package(PkgConfig REQUIRED)
+find_package(Threads REQUIRED)
+
 pkg_check_modules(EVDEV REQUIRED libevdev)
 
 if(BUILD_GUI)
     pkg_check_modules(GTK4 REQUIRED gtk4)
 endif()
 
-# ── Include dirs ──────────────────────────────────────────────────────────────
-include_directories(include)
-
-# ── Common optimization flags ─────────────────────────────────────────────────
-add_compile_options(-O3 -march=native -Wall -Wextra -Wno-unused-parameter)
-
 # ── Shared config library ─────────────────────────────────────────────────────
-add_library(rawaccel-config STATIC src/config.cpp)
+add_library(rawaccel-config STATIC ${CMAKE_SOURCE_DIR}/src/config.cpp)
 target_include_directories(rawaccel-config PUBLIC
     ${CMAKE_SOURCE_DIR}/include
 )
-target_compile_options(rawaccel-config PRIVATE -O2)
+target_compile_options(rawaccel-config PRIVATE -O2 -Wall -Wextra)
 
 # ── Daemon ────────────────────────────────────────────────────────────────────
 if(BUILD_DAEMON)
@@ -45,9 +89,9 @@ if(BUILD_DAEMON)
     target_link_libraries(rawaccel-daemon
         rawaccel-config
         ${EVDEV_LIBRARIES}
+        Threads::Threads
         pthread
     )
-    target_compile_options(rawaccel-daemon PRIVATE ${EVDEV_CFLAGS_OTHER})
 
     install(TARGETS rawaccel-daemon DESTINATION /usr/local/bin)
 endif()
@@ -80,7 +124,6 @@ if(BUILD_GUI)
         rawaccel-config
         ${GTK4_LIBRARIES}
     )
-    target_compile_options(rawaccel-gui PRIVATE ${GTK4_CFLAGS_OTHER})
 
     install(TARGETS rawaccel-gui DESTINATION /usr/local/bin)
 
@@ -99,7 +142,6 @@ install(FILES config/default.json
         RENAME settings.json)
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
-option(BUILD_TESTS "Build unit tests" ON)
 if(BUILD_TESTS)
     enable_testing()
     add_executable(rawaccel-tests
@@ -111,7 +153,6 @@ if(BUILD_TESTS)
     target_link_libraries(rawaccel-tests
         rawaccel-config
     )
-    target_compile_options(rawaccel-tests PRIVATE -O2)
     add_test(NAME rawaccel-unit-tests COMMAND rawaccel-tests)
 endif()
 

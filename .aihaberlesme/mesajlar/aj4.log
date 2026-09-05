@@ -1,0 +1,29 @@
+### Aj.4 [M1] [05 Eyl 2026] [13:10]
+
+T19 üstlenildi: Oracle tekrar koşusu + PKGBUILD temiz paket doğrulaması.
+
+ORACLE: bash tests/oracle/run_oracle.sh → RESULT: OK. 588 satırın 561'i <=1e-9 birebir, 27 satır belgeli sapma (classic exp<=1 linear path + power/sync speed 0). known_deviations.txt güncel (T15 notu dahil).
+PKGBUILD: packaging/ içinde makepkg -f → rawaccel-linux-0.4.0-1-x86_64.pkg.tar.zst (401802 bayt) DERLENDİ. Kanıt (bsdtar taraması):
+- usr/bin/rawaccel-{daemon,cli,gui} (ELF PIE, stripped)
+- usr/share/applications/rawaccel.desktop
+- usr/lib/systemd/system/rawaccel.service → ExecStart=/usr/bin/rawaccel-daemon -c /etc/rawaccel/settings.json
+- usr/lib/udev/rules.d/99-rawaccel.rules (input group rw uinput+event*)
+- usr/lib/modules-load.d/rawaccel.conf (uinput)
+- usr/share/polkit-1/actions/org.rawaccel.policy → annotate /usr/bin/rawaccel-daemon
+- etc/rawaccel/settings.json (geçerli JSON)
+Hardening: readelf → GNU_STACK RW(noexec), GNU_RELRO var, FLAGS BIND_NOW + NOW PIE. .PKGINFO depend: libevdev gtk4 glib2 polkit systemd; makedepend: cmake pkgconf gcc.
+NOT (küçük): makepkg derlemesinde "warning: '_FORTIFY_SOURCE' redefined" çıkıyor — CachyOS/Arch makepkg.conf varsayılan -D_FORTIFY_SOURCE=3 iken CMake hardening -D_FORTIFY_SOURCE=2 sonda redefine edip değeri 2'ye düşürüyor (güvenlik azalması ~marjinal, davranış değişmez). Düzeltme: CMakeLists.txt'te FORTIFY koşullu tanım (tanımlı değilse ekle). Bu CMakeLists.txt = Aj 5 alanı → Aj 5 onayıyla uygulanabilir; ben şu an dokunmuyorum.
+T19 durumu: tamam. Kilit kaldırıldı (AKIS.json güncellendi).
+
+### Aj.4 [M2] [05 Eyl 2026] [13:30]
+
+Ekip, T19 tamam (oracle OK + PKGBUILD temiz paket). Tahtada bana atanmış açık iş yok — gönüllü olduğum / devralabileceğim alanları duyuruyorum (Aj 5 yönetici veya kullanıcı yönlendirebilir):
+
+1. **Oracle bakımı (rolümün sürekli görevi):** bundan sonra `include/accel-*.hpp`'ye dokunan (Aj 2) veya T9/LUT ile ilgili değişiklik yapan olursa `tests/oracle/run_oracle.sh` tekrar koşulmalı — teyit için sırada bekliyorum. Şu an her şey OK (561/588 ≤1e-9 + 27 belgeli).
+2. **PKGBUILD/setup.sh paketleme doğrulaması:** temiz kurulum senaryosu — `rawaccel-linux-0.4.0-1` paketini gerçek/hedef makinede kurup `verify_install()` çıktısı, udev/systemd/polkit entegrasyonunu uçtan uca teyit edebilirim (Aj 7'nin multi-distro statik doğrulamasıyla çakışmaz — ben Arch/CachyOS **paketi kurulu** senaryoyum).
+3. **AUR/sürüm bakımı:** PKGBUILD için `.SRCINFO` üretimi ve `packaging/` temizlik politika kontrolü (yeni özellik DEĞİL, yayın hijyeni). Bir sürüm güncellemesi gündeme gelirse (0.4.0 → sonraki) version-bump kontrolünü üstlenirim.
+4. **CI'ya oracle adımı (Aj 5 M6 önerisi b):** kullanıcı onayı verirse `.github/workflows/ci.yml`'ye `tests/oracle/run_oracle.sh` eklerim — oracle sahibi olarak bu adımı bana devredebilirsiniz.
+5. **`_FORTIFY_SOURCE` redefine uyarısı (T19 notum):** CMakeLists.txt'te koşullu tanım (Aj 5 onayıyla) uygulayabilirim — CachyOS makepkg.conf `=3`'ün, CMake `=2` ile ezilmesini kapatır.
+6. **İlerleme raporlama:** turlar arasında birleşik durum raporu (görev tahtası + kilit + kapılar) yazabilirim — Aj 0'un moderasyonuna yardımcı.
+
+İş devredecek/sağlama alacak varsa kanala yazın, hemen üstlenirim. Kolay gelsin!

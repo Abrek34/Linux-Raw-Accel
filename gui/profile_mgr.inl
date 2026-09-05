@@ -52,8 +52,8 @@ void show_input_dialog(AppState* S,
     gtk_widget_set_halign(hbox, GTK_ALIGN_END);
     gtk_box_append(GTK_BOX(vbox), hbox);
 
-    GtkWidget* cancel_btn = gtk_button_new_with_label("Cancel");
-    GtkWidget* ok_btn     = gtk_button_new_with_label("OK");
+    GtkWidget* cancel_btn = gtk_button_new_with_label(tr("Cancel"));
+    GtkWidget* ok_btn     = gtk_button_new_with_label(tr("OK"));
     gtk_widget_add_css_class(ok_btn, "suggested-action");
     gtk_box_append(GTK_BOX(hbox), cancel_btn);
     gtk_box_append(GTK_BOX(hbox), ok_btn);
@@ -85,11 +85,11 @@ void show_input_dialog(AppState* S,
 
 void on_new_profile(GtkButton*, gpointer user_data) {
     auto* S = static_cast<AppState*>(user_data);
-    show_input_dialog(S, "New Profile", "Profile name (e.g. gaming)", "",
+    show_input_dialog(S, tr("New Profile"), tr("Profile name (e.g. gaming)"), "",
         [S](const std::string& name) {
             // Check duplicate
             for (auto& p : S->config.profiles)
-                if (p.name == name) { set_status(S, "A profile with that name already exists."); return; }
+                if (p.name == name) { set_status(S, tr("A profile with that name already exists.")); return; }
             device_profile dp;
             dp.name = name;
             dp.dev_cfg.dpi = 800;
@@ -106,13 +106,13 @@ void on_rename_profile(GtkButton*, gpointer user_data) {
     auto* S = static_cast<AppState*>(user_data);
     if (S->config.profiles.empty()) return;
     std::string old_name = cur_prof(S).name;
-    show_input_dialog(S, "Rename Profile", "New name", old_name.c_str(),
+    show_input_dialog(S, tr("Rename Profile"), tr("New name"), old_name.c_str(),
         [S, old_name](const std::string& name) {
             if (name.empty()) return;
             // Duplicate check
             for (auto& p : S->config.profiles)
                 if (p.name == name && p.name != old_name) {
-                    set_status(S, "A profile with that name already exists.");
+                    set_status(S, tr("A profile with that name already exists."));
                     return;
                 }
             cur_prof(S).name = name;
@@ -127,13 +127,13 @@ void on_rename_profile(GtkButton*, gpointer user_data) {
 void on_delete_profile(GtkButton*, gpointer user_data) {
     auto* S = static_cast<AppState*>(user_data);
     if (S->config.profiles.size() <= 1) {
-        set_status(S, "At least one profile is required.");
+        set_status(S, tr("At least one profile is required."));
         return;
     }
 
     // Confirm dialog
     GtkWidget* dlg = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(dlg), "Delete Profile");
+    gtk_window_set_title(GTK_WINDOW(dlg), tr("Delete Profile"));
     gtk_window_set_transient_for(GTK_WINDOW(dlg), GTK_WINDOW(S->window));
     gtk_window_set_modal(GTK_WINDOW(dlg), TRUE);
     gtk_window_set_default_size(GTK_WINDOW(dlg), 300, -1);
@@ -143,7 +143,7 @@ void on_delete_profile(GtkButton*, gpointer user_data) {
     gtk_widget_set_margin_top(vbox, 16);   gtk_widget_set_margin_bottom(vbox, 16);
     gtk_window_set_child(GTK_WINDOW(dlg), vbox);
 
-    std::string msg = "Delete profile \"" + cur_prof(S).name + "\"?";
+    std::string msg = trf("Delete profile \"%s\"?", cur_prof(S).name.c_str());
     GtkWidget* lbl = gtk_label_new(msg.c_str());
     gtk_box_append(GTK_BOX(vbox), lbl);
 
@@ -151,8 +151,8 @@ void on_delete_profile(GtkButton*, gpointer user_data) {
     gtk_widget_set_halign(hbox, GTK_ALIGN_END);
     gtk_box_append(GTK_BOX(vbox), hbox);
 
-    GtkWidget* cancel_btn = gtk_button_new_with_label("Cancel");
-    GtkWidget* del_btn    = gtk_button_new_with_label("Delete");
+    GtkWidget* cancel_btn = gtk_button_new_with_label(tr("Cancel"));
+    GtkWidget* del_btn    = gtk_button_new_with_label(tr("Delete"));
     gtk_widget_add_css_class(del_btn, "destructive-action");
     gtk_box_append(GTK_BOX(hbox), cancel_btn);
     gtk_box_append(GTK_BOX(hbox), del_btn);
@@ -181,7 +181,7 @@ void on_duplicate_profile(GtkButton*, gpointer user_data) {
     auto* S = static_cast<AppState*>(user_data);
     if (S->config.profiles.empty()) return;
     device_profile copy = cur_prof(S);
-    copy.name += " (copy)";
+    copy.name += tr(" (copy)");
     S->config.profiles.push_back(copy);
     S->current_profile_idx = (int)S->config.profiles.size() - 1;
     rebuild_profile_combo(S);
@@ -194,7 +194,7 @@ void on_reset_profile(GtkButton*, gpointer user_data) {
 
     // Confirm dialog
     GtkWidget* dlg = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(dlg), "Reset to Defaults");
+    gtk_window_set_title(GTK_WINDOW(dlg), tr("Reset to Defaults"));
     gtk_window_set_transient_for(GTK_WINDOW(dlg), GTK_WINDOW(S->window));
     gtk_window_set_modal(GTK_WINDOW(dlg), TRUE);
     gtk_window_set_default_size(GTK_WINDOW(dlg), 320, -1);
@@ -204,8 +204,8 @@ void on_reset_profile(GtkButton*, gpointer user_data) {
     gtk_widget_set_margin_top(vbox, 16);   gtk_widget_set_margin_bottom(vbox, 16);
     gtk_window_set_child(GTK_WINDOW(dlg), vbox);
 
-    std::string msg = "Reset \"" + cur_prof(S).name + "\" to default values?\n"
-                      "This cannot be undone.";
+std::string msg = trf("Reset \"%s\" to default values?\nThis cannot be undone.",
+                       cur_prof(S).name.c_str());
     GtkWidget* lbl = gtk_label_new(msg.c_str());
     gtk_label_set_wrap(GTK_LABEL(lbl), TRUE);
     gtk_box_append(GTK_BOX(vbox), lbl);
@@ -214,8 +214,8 @@ void on_reset_profile(GtkButton*, gpointer user_data) {
     gtk_widget_set_halign(hbox, GTK_ALIGN_END);
     gtk_box_append(GTK_BOX(vbox), hbox);
 
-    GtkWidget* cancel_btn = gtk_button_new_with_label("Cancel");
-    GtkWidget* reset_btn  = gtk_button_new_with_label("Reset");
+    GtkWidget* cancel_btn = gtk_button_new_with_label(tr("Cancel"));
+    GtkWidget* reset_btn  = gtk_button_new_with_label(tr("Reset"));
     gtk_widget_add_css_class(reset_btn, "destructive-action");
     gtk_box_append(GTK_BOX(hbox), cancel_btn);
     gtk_box_append(GTK_BOX(hbox), reset_btn);
@@ -237,7 +237,7 @@ void on_reset_profile(GtkButton*, gpointer user_data) {
         S2->config.profiles[S2->current_profile_idx] = fresh;
         profile_to_widgets(S2);
         S2->unsaved = true;
-        set_status(S2, "Profile reset to defaults — press Save to keep.");
+        set_status(S2, tr("Profile reset to defaults — press Save to keep."));
         gtk_window_destroy(GTK_WINDOW(d));
     }), dlg);
 

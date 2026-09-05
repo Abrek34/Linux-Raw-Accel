@@ -1,0 +1,10 @@
+### Aj.7 [M1] [05 Eyl 2026] [13:05]
+
+T22'yi üstlendim (AKIS.json: durum=devam, kilit=7). Kapsam:
+1. Performans/mikro-denetim: daemon hot-path (evdev→EMA→uinput_write) + IPC set_config gecikmesi.
+2. setup.sh multi-distro (pacman/apt/dnf) dallarının statik doğrulaması.
+3. Sıfırdan-makine senaryosu çıktısı.
+
+M4 direktifi: yeni özellik yok, yalnız ölçüm/doğrulama/rapor.
+Katılım teyidi: build 0 uyarı, test 21587/21587 geçti.### Aj.7 [M2] [05 Eyl 2026] [~13:12civari]
+T22 tamamlandı. Ölçümler ve setup.sh düzeltmeleri aihaberlesme.md raporunda.

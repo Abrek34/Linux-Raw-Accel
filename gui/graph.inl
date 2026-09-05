@@ -3,6 +3,17 @@
 // Forward declaration — lut_get_points() is defined later in this file.
 static std::vector<std::pair<double,double>> lut_get_points(const accel_args& ax);
 
+/// LUT gain mode (reference `lookup::velocity`): stored y is an output speed,
+/// so the effective gain is y / speed. These helpers convert between the stored
+/// value and the gain the editor/graph shows.
+static double lut_stored_to_gain(double speed, double stored, bool velocity) {
+    if (!velocity) return stored;
+    return (speed > 0) ? stored / speed : 1.0;
+}
+static double lut_gain_to_stored(double speed, double gain, bool velocity) {
+    return velocity ? gain * speed : gain;
+}
+
 /// Compute the maximum gain for the graph Y-axis given the current profile and zoom/pan.
 /// All graph draw and gesture handlers use this function — no duplication.
 static double compute_max_gain(AppState* S, double max_speed) {
@@ -16,11 +27,12 @@ static double compute_max_gain(AppState* S, double max_speed) {
             if (std::isfinite(g) && g > max_gain) max_gain = g;
         }
         // In LUT mode: sampling may miss the actual points —
-        // check all LUT gain values directly.
+        // check all LUT gain values directly (velocity mode: y / speed).
         if (args.mode == accel_mode::lookup) {
             int n = args.length / 2;
             for (int i = 0; i < n; i++) {
-                double g = static_cast<double>(args.data[i * 2 + 1]);
+                double g = lut_stored_to_gain(args.data[i * 2], args.data[i * 2 + 1],
+                                              args.gain);
                 if (std::isfinite(g) && g > max_gain) max_gain = g;
             }
         }
@@ -192,10 +204,11 @@ void on_graph_draw(GtkDrawingArea*, cairo_t* cr,
     // Draw LUT points visually on the graph in LUT mode
     if (S->lut_graph_mode) {
         auto& dp2 = cur_prof(S);
+        bool  vel = dp2.prof.accel_x.gain;
         auto  pts = lut_get_points(dp2.prof.accel_x);
         for (auto& p : pts) {
             double px = to_cx(p.first);
-            double py = to_cy(p.second);
+            double py = to_cy(lut_stored_to_gain(p.first, p.second, vel));
             // Nokta dairesi
             cairo_set_source_rgb(cr, C_DOT[0], C_DOT[1], C_DOT[2]);
             cairo_arc(cr, px, py, 5.0, 0, 2 * M_PI);
@@ -277,7 +290,9 @@ void on_graph_motion(GtkEventControllerMotion*, double cx, double cy, gpointer u
     auto pts = lut_get_points(ax);
 
     bool near = false;
-    for (auto& [spd, gain] : pts) {
+    bool vel  = ax.gain;
+    for (auto& [spd, stored] : pts) {
+        double gain = lut_stored_to_gain(spd, stored, vel);
         double px = GRAPH_ML + (spd / max_speed) * PW;
         double py = GRAPH_MT + (1.0 - gain / max_gain) * PH;
         double d2 = (cx - px) * (cx - px) + (cy - py) * (cy - py);
@@ -375,30 +390,32 @@ void rebuild_lut_list(AppState* S) {
         gtk_list_box_remove(GTK_LIST_BOX(S->lut_list_box), child);
 
     auto& ax  = cur_prof(S).prof.accel_x;
+    bool  vel = ax.gain;
     auto  pts = lut_get_points(ax);
 
     for (int i = 0; i < (int)pts.size(); i++) {
         // Row: [  Speed: [spin]   Gain: [spin]  [Delete] ]
+        double gain = lut_stored_to_gain(pts[i].first, pts[i].second, vel);
         GtkWidget* hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
         gtk_widget_set_margin_start(hbox, 4);
         gtk_widget_set_margin_end(hbox, 4);
         gtk_widget_set_margin_top(hbox, 2);
         gtk_widget_set_margin_bottom(hbox, 2);
 
-        GtkWidget* lbl_s = gtk_label_new("Spd:");
+        GtkWidget* lbl_s = gtk_label_new(tr("Spd:"));
         GtkWidget* spin_s = gtk_spin_button_new_with_range(0.0, 500.0, 0.5);
         gtk_spin_button_set_digits(GTK_SPIN_BUTTON(spin_s), 2);
         gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin_s), pts[i].first);
         gtk_widget_set_hexpand(spin_s, TRUE);
 
-        GtkWidget* lbl_g = gtk_label_new("Gain:");
+        GtkWidget* lbl_g = gtk_label_new(tr("Gain:"));
         GtkWidget* spin_g = gtk_spin_button_new_with_range(0.01, 50.0, 0.01);
         gtk_spin_button_set_digits(GTK_SPIN_BUTTON(spin_g), 3);
-        gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin_g), pts[i].second);
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin_g), gain);
         gtk_widget_set_hexpand(spin_g, TRUE);
 
         GtkWidget* del_btn = gtk_button_new_from_icon_name("edit-delete-symbolic");
-        gtk_widget_set_tooltip_text(del_btn, "Remove this point");
+        gtk_widget_set_tooltip_text(del_btn, tr("Remove this point"));
 
         gtk_box_append(GTK_BOX(hbox), lbl_s);
         gtk_box_append(GTK_BOX(hbox), spin_s);
@@ -427,6 +444,7 @@ void lut_list_changed(AppState* S) {
     if (!S->lut_list_box) return;
     S->unsaved = true; // LUT spin changes also count as unsaved
     auto& ax = cur_prof(S).prof.accel_x;
+    bool  vel = ax.gain;
     std::vector<std::pair<double,double>> pts;
 
     GtkWidget* row_widget = gtk_widget_get_first_child(S->lut_list_box);
@@ -435,11 +453,11 @@ void lut_list_changed(AppState* S) {
         // hbox children: lbl_s, spin_s, lbl_g, spin_g, del_btn
         GtkWidget* c = gtk_widget_get_first_child(hbox);
         c = gtk_widget_get_next_sibling(c); // spin_s
-        double spd = gtk_spin_button_get_value(GTK_SPIN_BUTTON(c));
+        double spd  = gtk_spin_button_get_value(GTK_SPIN_BUTTON(c));
         c = gtk_widget_get_next_sibling(c); // lbl_g
         c = gtk_widget_get_next_sibling(c); // spin_g
         double gain = gtk_spin_button_get_value(GTK_SPIN_BUTTON(c));
-        pts.push_back({spd, gain});
+        pts.push_back({spd, lut_gain_to_stored(spd, gain, vel)});
         row_widget = gtk_widget_get_next_sibling(row_widget);
     }
 
@@ -479,26 +497,27 @@ void on_lut_add_point(GtkButton*, gpointer user_data) {
     auto& ax = cur_prof(S).prof.accel_x;
     auto  pts = lut_get_points(ax);
     if ((int)pts.size() >= (int)LUT_POINTS_CAPACITY) {
-        set_status(S, "Maximum number of points reached.");
+        set_status(S, tr("Maximum number of points reached."));
         return;
     }
     // Insert a new point just beyond the current last point
     double new_speed = pts.empty() ? 10.0 : pts.back().first + 10.0;
-    double new_gain  = pts.empty() ? 1.5  : pts.back().second;
-    pts.push_back({new_speed, new_gain});
+    double new_gain  = pts.empty() ? 1.5
+        : lut_stored_to_gain(pts.back().first, pts.back().second, ax.gain);
+    pts.push_back({new_speed, lut_gain_to_stored(new_speed, new_gain, ax.gain)});
     lut_set_points(ax, pts);
     if (S->xy_linked) cur_prof(S).prof.accel_y = ax;
     rebuild_lut_list(S);
     gtk_widget_queue_draw(S->graph_area);
 }
 
-/// Show/hide the LUT frame or normal parameters when the mode changes.
+/// Show/hide the LUT frame when the mode changes.
+/// The normal parameters frame is owned by update_mode_sensitivity().
 void update_lut_visibility(AppState* S) {
     if (!S->lut_frame || !S->accel_params_frame) return;
     bool is_lut = (idx_to_mode((int)gtk_drop_down_get_selected(
                         GTK_DROP_DOWN(S->mode_combo))) == accel_mode::lookup);
     S->lut_graph_mode = is_lut;
-    gtk_widget_set_visible(S->lut_frame,         is_lut);
-    gtk_widget_set_visible(S->accel_params_frame, !is_lut);
+    gtk_widget_set_visible(S->lut_frame, is_lut);
     if (is_lut) rebuild_lut_list(S);
 }

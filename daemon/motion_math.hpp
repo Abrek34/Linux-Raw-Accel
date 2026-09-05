@@ -14,7 +14,7 @@ namespace rawaccel {
 /// Updates remainder_{x,y} in place.
 /// Returns integer output counts in out_x / out_y.
 ///
-/// dpi_factor  = device_dpi / NORMALIZED_DPI
+/// dpi_factor  = NORMALIZED_DPI / device_dpi (reference input_dpi_normalization_factor)
 /// time_ms     = interval since previous event (milliseconds), already clamped
 inline void apply_motion_math(
     modifier&              mod,

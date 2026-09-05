@@ -33,7 +33,17 @@ bash scripts/build.sh
 # Portable binary (no -march=native, runs on other CPUs)
 RAWACCEL_PORTABLE=1 bash scripts/build.sh
 
-# With CMake
+# Custom compiler
+CXX=clang++ bash scripts/build.sh
+```
+
+Both build paths (`scripts/build.sh` and the CMake `Release` target) apply the
+same hardening flags: stack protector/clash protection, `-D_FORTIFY_SOURCE=2`,
+`-D_GLIBCXX_ASSERTIONS`, `-fPIE`+`-pie`, `-Wl,-z relro,now,noexecstack,separate-code`
+(and `-fcf-protection` on x86).
+
+```bash
+# With CMake (optional)
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
@@ -43,17 +53,54 @@ Compiled binaries are placed in `build-manual/`.
 
 ## Installation
 
+The **canonical one-shot installer is `setup.sh`** at the repo root. It installs
+all system dependencies (for your distro), cleans any previous install, builds,
+installs binaries + systemd/udev/polkit/desktop/libinput-quirk, enables the
+service, and applies the KDE Plasma flat-acceleration fix:
+
 ```bash
-sudo bash scripts/install.sh
+sudo bash setup.sh                # full install (deps + build + system-wide + KDE fix)
+sudo bash setup.sh --no-deps      # skip system dependency installation
+sudo bash setup.sh --reinstall    # clean old install, then reinstall (default)
 ```
 
-Or manually:
+`scripts/install.sh` is a thin wrapper that forwards to `setup.sh` (kept for
+backwards compatibility).
+
+Uninstall (keeps your `~/.config/rawaccel` and `/etc/rawaccel/settings.json`):
+
 ```bash
+sudo bash setup.sh --uninstall
+```
+
+Manual install (equivalent steps, for reference):
+```bash
+# Build
+bash scripts/build.sh
+
 sudo cp build-manual/rawaccel-daemon /usr/local/bin/
 sudo cp build-manual/rawaccel-cli    /usr/local/bin/
 sudo cp build-manual/rawaccel-gui    /usr/local/bin/
+
+# System config dir + default config (used by the systemd service)
+sudo mkdir -p /etc/rawaccel
+sudo cp config/default.json /etc/rawaccel/settings.json   # if not already present
+
+# udev rule (keeps /dev/uinput accessible) + uinput module
+sudo install -m644 scripts/99-rawaccel.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+echo uinput | sudo tee /etc/modules-load.d/rawaccel.conf
+sudo modprobe uinput
+
+# Start the daemon at boot
 sudo systemctl enable --now rawaccel
 ```
+
+> **Note:** the systemd service runs the daemon as **root** (it needs to grab
+> `/dev/input/event*` and create `/dev/uinput`, and the service file drops its
+> capability bounding set to only the minimum required).  The **GUI and CLI run as
+> your user** — see [Config file sync](#config-file-sync) for how the two stay in
+> agreement.
 
 ## Usage
 
@@ -62,6 +109,13 @@ sudo systemctl enable --now rawaccel
 ```bash
 rawaccel-gui
 ```
+
+**GUI language:** the header-bar dropdown switches the interface live between
+**Auto (locale)** / **English** / **Türkçe** without restarting. The choice is
+persisted to `~/.config/rawaccel/gui_lang` (`auto` / `en` / `tr`). In **Auto**
+mode the system locale is used (`LANG`/`setlocale`), so a Turkish system starts
+in Türkçe automatically. Every translatable UI string has a Turkish entry —
+the translation-coverage tool (`tests/run_tr_coverage.sh`) enforces this.
 
 ### CLI
 
@@ -82,6 +136,10 @@ rawaccel-cli set-param gaming dpi 800
 # Switch active profile (signals daemon to reload)
 rawaccel-cli set gaming
 
+# Live status: profiles + per-device detected DPI / polling rate / battery,
+# and which profile each connected mouse resolves to
+rawaccel-cli status
+
 # Export/import as JSON
 rawaccel-cli export gaming > backup.json
 rawaccel-cli import backup.json
@@ -96,15 +154,67 @@ sudo rawaccel-daemon
 # Verbose mode: shows device open/uinput creation details
 sudo rawaccel-daemon -v
 
-# With systemd
-sudo systemctl start rawaccel
-sudo systemctl enable rawaccel   # start on boot
+# Run as a systemd service (also enables start-on-boot)
+sudo systemctl enable --now rawaccel
+
+# Status / logs
+systemctl status rawaccel
+journalctl -u rawaccel -f
 
 # Reload config without restarting
 rawaccel-cli reload
 # or
 kill -HUP $(cat /run/rawaccel.pid)
+
+# Stop / disable
+sudo systemctl stop rawaccel
+sudo systemctl disable rawaccel
 ```
+
+> Editing config with the **GUI or `rawaccel-cli` does not require a manual
+> reload** — those tools push the updated config to the daemon over IPC
+> (`set_config`), which the daemon persists and live-applies.  `reload`/`SIGHUP`
+> is only needed when you hand-edit a config file on disk.
+
+### Config file sync
+
+There are **two** config locations:
+
+| Location | Purpose |
+|----------|---------|
+| `~/.config/rawaccel/settings.json` | The working copy the **GUI and CLI** read/write |
+| `/etc/rawaccel/settings.json` | The copy the **systemd daemon** reads at boot |
+
+The sync flow works automatically:
+
+1. You edit a profile with `rawaccel-gui` or `rawaccel-cli` → saved to your
+   user config `~/.config/rawaccel/settings.json`.
+2. The tool sends the full config to the running daemon over its **IPC socket**
+   (`set_config` RPC).  The root daemon persists it to `/etc/rawaccel/settings.json`
+   and live-applies it — no logout, no SIGHUP, no binary divergence.
+3. Falls back: if the daemon doesn't speak the RPC (or the socket is unreachable),
+   the tool sends `SIGHUP`/`reload` so the daemon re-reads its own copy.
+
+The GUI shows exactly which of the three outcomes happened after every save:
+
+- **"Applied & reloaded: …"** — the daemon received your config over IPC and
+  live-applied it (normal case).
+- **"Saved locally, but the daemon was not updated: …"** — daemon is running but
+  the IPC push was rejected/failed; your file is saved but not yet live.
+- **"Saved locally, but the daemon is not running: …"** — no daemon, nothing to
+  push to; your file is saved and will be used at next daemon start.
+
+So the two files are kept identical automatically whenever you edit via the
+GUI/CLI.  Hand-editing `/etc/rawaccel/settings.json` directly still requires a
+`rawaccel-cli reload` (or the GUI **Reload** shortcut `Ctrl+R`).
+
+Verify they match:
+```bash
+cmp ~/.config/rawaccel/settings.json /etc/rawaccel/settings.json && echo IDENTICAL
+```
+
+If both `~/.config/rawaccel/settings.json` and `/etc/rawaccel/settings.json`
+are missing, GUI/CLI create a default config automatically.
 
 ## Parameters
 
@@ -158,6 +268,16 @@ kill -HUP $(cat /run/rawaccel.pid)
 | `output_dpi` | Output DPI normalization value | `1000` |
 | `lr_ratio` | Left/right output DPI ratio (`1.0` = off) | `1.0` |
 | `ud_ratio` | Up/down output DPI ratio (`1.0` = off) | `1.0` |
+| `yx_ratio` | Y-axis output DPI ratio, relative to X (`1.0` = off) | `1.0` |
+
+The per-direction ratios only scale the *negative* axis direction
+(`lr_ratio` scales leftward motion, `ud_ratio` scales downward motion), matching
+Raw Accel's "sens multiplier" behavior; the `yx_ratio` scales all of the Y axis.
+
+> **JSON field names:** in `settings.json` these ratios are stored as
+> `lr_output_dpi_ratio`, `ud_output_dpi_ratio` and `yx_output_dpi_ratio`.
+> The CLI spells them `lr_ratio` / `ud_ratio` / `yx_ratio`
+> (e.g. `rawaccel-cli set-param <p> yx_ratio 1.1`).
 
 ## Multi-Mouse / Per-Device Profile Assignment
 
@@ -186,17 +306,20 @@ When a mouse connects, the daemon selects its profile using this priority:
 
 **Via CLI:**
 ```bash
-# List currently connected mice (shown with event nodes)
+# List connected mice with their detected device_id values
 rawaccel-cli status
 
-# The daemon stores the event node as device_id in the profile JSON
-# Example: assign "office-mouse" profile to /dev/input/event4
-rawaccel-cli set-param office-mouse device_id /dev/input/event4
-# Note: device_id is a string field — set it directly in the JSON for reliability
+# Assign "office-mouse" profile to a specific mouse.
+# Use the exact device_id shown by `status` (composite "usb:VVVV:PPPP:serial",
+# a /dev/input/by-id/... path, or an event node).
+rawaccel-cli set-param office-mouse device_id "usb:0e0f:0002:A1B2"
+
+# Clear the assignment -> profile applies to all unmatched mice
+rawaccel-cli set-param office-mouse device_id ""
 
 # Or edit the JSON directly:
 # ~/.config/rawaccel/settings.json
-# Set "device_id": "/dev/input/event4" in the profile object
+# Set "device_id" in the profile object
 ```
 
 **Via JSON:**
@@ -294,14 +417,40 @@ rawaccel-linux/
 ├── cli/
 │   └── main.cpp               # rawaccel-cli
 ├── gui/
-│   └── main.cpp               # rawaccel-gui (GTK4)
+│   └── main.cpp               # rawaccel-gui (GTK4); UI split across *.inl
 ├── scripts/
 │   ├── build.sh               # Quick build script
-│   ├── install.sh             # Installation script
+│   ├── install.sh             # Thin wrapper → setup.sh
 │   ├── rawaccel.service       # systemd service
 │   └── rawaccel.desktop       # .desktop file
+├── tests/
+│   ├── test_accel.cpp         # Unit + integration tests (~90 functions)
+│   ├── tr_coverage.cpp        # Translation coverage audit (find strings)
+│   ├── run_tests.sh           # Unit test runner
+│   └── run_tr_coverage.sh     # Translation coverage runner
+├── setup.sh                   # Canonical one-shot installer
 └── CMakeLists.txt
 ```
+
+## Testing
+
+```bash
+# All unit tests (compile + run)
+bash tests/run_tests.sh
+
+# Same tests under ASan + UBSan (catches memory/UB bugs)
+bash tests/run_tests_asan.sh
+
+# Translation coverage: every UI string must have a Turkish entry
+bash tests/run_tr_coverage.sh
+
+# Fuzz harnesses (libFuzzer, 60 s per harness)
+bash tests/run_fuzz.sh
+```
+
+Expected: `=== Sonuç: N/N geçti ===` (exits 1 on any FAIL). The translation
+coverage tool exits 1 if any translatable UI string is missing from the Turkish
+dictionary (see `tests/run_tr_coverage.sh`).
 
 ## GUI Keyboard Shortcuts
 
@@ -372,6 +521,32 @@ kwriteconfig6 --file kwinrc --group Libinput --key PointerAccelerationProfile 1
 kwriteconfig6 --file kwinrc --group Libinput --key PointerAcceleration 0
 qdbus6 org.kde.KWin /KWin reconfigure
 ```
+
+### New mouse after the fix (per-device overrides)
+
+KDE stores libinput settings per device (nested `[Libinput][bus][vendor][product][Name]`
+sections) **in addition to** the global `[Libinput]` section.  `kde-fix-accel.sh` writes a
+per-device **Flat** override for every RawAccel virtual mouse present at the time it runs.
+
+What this means in practice:
+
+- A mouse attached **after** the fix is still covered by the **global** Flat section
+  (libinput falls back to it when no per-device override exists) — so double-acceleration
+  stays off automatically in the default configuration.
+- Exception: if you set a per-device acceleration for a new mouse in **System Settings →
+  Input Devices → Mouse**, KDE writes an override for that device that beats the global
+  Flat — on that device RawAccel's curve would be double-applied again.
+
+Manual step when you add a new mouse (both cases above resolve it):
+
+```bash
+# Idempotent — picks up any newly attached RawAccel virtual device
+# and re-writes its per-device Flat override:
+bash scripts/kde-fix-accel.sh
+```
+
+No other action is required after a normal plug/unplug; only re-run this when the fix's
+per-device coverage should include the newest hardware.
 
 ### GUI warning
 

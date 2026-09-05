@@ -77,8 +77,11 @@ static json accel_args_to_json(const accel_args& a) {
     j["smooth"]           = a.smooth;
     j["cap"]              = { a.cap.x, a.cap.y };
     j["cap_mode"]         = cap_to_str(a.cap_mode_val);
-    // LUT data
-    if (a.length > 0) {
+    // LUT data — only meaningful for lookup mode.  Guard: synchronous (GAIN)
+    // writes its internal LUT into args.data in memory; without this gate a
+    // synchronous profile would serialize those floats as if they were user
+    // lookup points (clobbering a previously saved lookup curve on reload).
+    if (a.mode == accel_mode::lookup && a.length > 0) {
         json pts = json::array();
         for (int i = 0; i < a.length; i++)
             pts.push_back(a.data[i]);
@@ -113,7 +116,8 @@ static accel_args accel_args_from_json(const json& j) {
         }
     }
     if (j.contains("cap_mode"))  a.cap_mode_val = str_to_cap(j["cap_mode"].get<std::string>());
-    if (j.contains("lut_data") && j.contains("lut_length")) {
+    if (j.contains("lut_data") && j.contains("lut_length") &&
+        a.mode == accel_mode::lookup) {
         // BUG-5: nlohmann::json::get<int>() invokes UB when the JSON value
         // doesn't fit in `int` (libFuzzer + UBSan caught this with payloads
         // like `"lut_length": 1e26`).  Read as a double first, range-clamp,
@@ -151,6 +155,7 @@ static json profile_to_json_obj(const profile& p) {
     j["accel_x"]           = accel_args_to_json(p.accel_x);
     j["accel_y"]           = accel_args_to_json(p.accel_y);
     j["output_dpi"]        = p.output_dpi;
+    j["yx_output_dpi_ratio"] = p.yx_output_dpi_ratio;
     j["degrees_rotation"]  = p.degrees_rotation;
     j["degrees_snap"]      = p.degrees_snap;
     j["speed_min"]         = p.speed_min;
@@ -199,6 +204,7 @@ static profile profile_from_json_obj(const json& j) {
     if (j.contains("accel_x")) p.accel_x = accel_args_from_json(j["accel_x"]);
     if (j.contains("accel_y")) p.accel_y = accel_args_from_json(j["accel_y"]);
     if (j.contains("output_dpi"))         p.output_dpi         = j["output_dpi"].get<double>();
+    if (j.contains("yx_output_dpi_ratio")) p.yx_output_dpi_ratio = j["yx_output_dpi_ratio"].get<double>();
     if (j.contains("degrees_rotation"))   p.degrees_rotation   = j["degrees_rotation"].get<double>();
     if (j.contains("degrees_snap"))       p.degrees_snap       = j["degrees_snap"].get<double>();
     if (j.contains("speed_min"))          p.speed_min          = j["speed_min"].get<double>();
@@ -261,9 +267,9 @@ static void sort_lut_data(accel_args& a) {
             a.data[(sj + 1) * 2 + 1] = a.data[sj * 2 + 1];
             j--;
         }
-        const size_t sj1 = static_cast<size_t>(j + 1);
-        a.data[sj1 * 2]     = kx;
-        a.data[sj1 * 2 + 1] = ky;
+        const int insert = j + 1;
+        a.data[static_cast<size_t>(insert) * 2]     = kx;
+        a.data[static_cast<size_t>(insert) * 2 + 1] = ky;
     }
 }
 
@@ -282,6 +288,13 @@ static void sanitize_accel_args(accel_args& a) {
     a.scale           = finite_or(a.scale, 0);
     a.decay_rate      = finite_or(a.decay_rate, 0);
     a.exponent_classic = finite_or(a.exponent_classic, 2);
+    // T15 — GUI parity: gtk_spin_button exposes exponent_classic over [1,10]
+    // (gui/ui_builder.inl). Clamping here keeps manually-edited JSON (CLI)
+    // from drifting below 1, where the reference curve amplifies into garbage
+    // (exp=0.5, low speed → gain≈448). exp==1 still takes the documented
+    // "linear path" in the classic port, so GUI-reachable values are unchanged.
+    if (a.exponent_classic < 1.0) a.exponent_classic = 1.0;
+    if (a.exponent_classic > 10.0) a.exponent_classic = 10.0;
     a.exponent_power  = finite_or(a.exponent_power, 1);
     a.input_offset    = finite_or(a.input_offset, 0);
     a.output_offset   = finite_or(a.output_offset, 0);
@@ -335,6 +348,7 @@ static void sanitize_profile(profile& p) {
     p.speed_max            = finite_or(p.speed_max, 0);
     p.lr_output_dpi_ratio  = finite_or(p.lr_output_dpi_ratio, 1);
     p.ud_output_dpi_ratio  = finite_or(p.ud_output_dpi_ratio, 1);
+    p.yx_output_dpi_ratio  = finite_or(p.yx_output_dpi_ratio, 1);
     p.domain_weights.x     = finite_or(p.domain_weights.x, 1);
     p.domain_weights.y     = finite_or(p.domain_weights.y, 1);
     p.range_weights.x      = finite_or(p.range_weights.x, 1);
@@ -367,6 +381,8 @@ static void sanitize_profile(profile& p) {
     if (p.lr_output_dpi_ratio > 100)  p.lr_output_dpi_ratio = 100;
     if (p.ud_output_dpi_ratio < 0.01) p.ud_output_dpi_ratio = 0.01;
     if (p.ud_output_dpi_ratio > 100)  p.ud_output_dpi_ratio = 100;
+    if (p.yx_output_dpi_ratio < 0.01) p.yx_output_dpi_ratio = 0.01;
+    if (p.yx_output_dpi_ratio > 100)  p.yx_output_dpi_ratio = 100;
     // speed_min / speed_max: non-negative; max >= min if both nonzero
     if (p.speed_min < 0) p.speed_min = 0;
     if (p.speed_max < 0) p.speed_max = 0;
@@ -425,11 +441,9 @@ static device_profile device_profile_from_json(const json& j) {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-app_config load_config(const std::string& path) {
-    std::ifstream f(path);
-    if (!f.is_open()) throw std::runtime_error("Cannot open config file: " + path);
-
-    json j = json::parse(f);
+/// Shared app_config ↔ JSON object conversion.  Both the file loader and the
+/// IPC config-push RPC go through these so the two never drift apart.
+static app_config app_config_from_json_obj(const json& j) {
     app_config cfg;
 
     if (j.contains("active_profile"))
@@ -445,15 +459,40 @@ app_config load_config(const std::string& path) {
     return cfg;
 }
 
-void save_config(const app_config& cfg, const std::string& path) {
-    fs::create_directories(fs::path(path).parent_path());
-
+static json app_config_to_json_obj(const app_config& cfg) {
     json j;
+    j["version"]          = RAWACCEL_VERSION;
     j["active_profile"] = cfg.active_profile;
     j["use_raw_input"]  = cfg.use_raw_input;
     j["profiles"]       = json::array();
     for (auto& dp : cfg.profiles)
         j["profiles"].push_back(device_profile_to_json(dp));
+    return j;
+}
+
+std::string app_config_to_json(const app_config& cfg) {
+    return app_config_to_json_obj(cfg).dump();
+}
+
+app_config app_config_from_json(const std::string& json_str) {
+    // device_profile_from_json already sanitizes each profile on the way in.
+    return app_config_from_json_obj(json::parse(json_str));
+}
+
+app_config load_config(const std::string& path) {
+    std::ifstream f(path);
+    if (!f.is_open()) throw std::runtime_error("Cannot open config file: " + path);
+    app_config cfg = app_config_from_json_obj(json::parse(f));
+    migrate_config(cfg);
+    return cfg;
+}
+
+void save_config(const app_config& cfg, const std::string& path) {
+    fs::path parent_path = fs::path(path).parent_path();
+    if (!parent_path.empty())
+        fs::create_directories(parent_path);
+
+    json j = app_config_to_json_obj(cfg);
 
     // Write to a temp file first, then rename — atomic on Linux (same filesystem).
     // This prevents the daemon from reading a half-written/truncated JSON.
@@ -556,6 +595,70 @@ std::string find_config_path() {
         return std::string(home) + "/.config/rawaccel/settings.json";
     }
     return DEFAULT_CONFIG_PATH;
+}
+
+const char* current_config_version() {
+    return RAWACCEL_VERSION;
+}
+
+// 0.4.0 breaking change: in lookup + gain mode the stored y is now an OUTPUT
+// SPEED (effective gain = y / speed), matching reference RawAccel. Configs
+// written by <=0.3.x stored y as a direct gain. Reproduce the old curve by
+// scaling each point: y_new = y_old * x.
+static void migrate_lookup_gain(app_config& cfg) {
+    for (auto& dp : cfg.profiles) {
+        auto fix = [](accel_args& a) {
+            if (a.mode != accel_mode::lookup || !a.gain) return;
+            int n = a.length / 2;
+            for (int i = 0; i < n; i++) {
+                double x = a.data[i * 2];
+                double y = a.data[i * 2 + 1];
+                if (!(x > 0)) continue; // first point at speed 0 stays (velocity division is guarded)
+                a.data[i * 2 + 1] = static_cast<float>(y * x);
+            }
+        };
+        fix(dp.prof.accel_x);
+        fix(dp.prof.accel_y);
+    }
+}
+
+bool migrate_config(app_config& cfg) {
+    // If version is already current, no migration needed
+    if (cfg.version == RAWACCEL_VERSION) {
+        return false;
+    }
+
+    bool migrated = false;
+
+    // Migration from pre-0.2.0 (no version field)
+    if (cfg.version.empty()) {
+        // Older configs didn't have the version field
+        // They also might be missing some newer fields that get default-initialized
+        // The struct default values should handle most of this, but we can add
+        // explicit defaults here if needed
+        migrated = true;
+    }
+
+    // Migration from 0.2.x to 0.3.0
+    if (cfg.version == "0.2.0" || cfg.version == "0.2.1") {
+        // No breaking changes in 0.3.0, just new fields (version)
+        // The struct default values handle new fields
+        migrated = true;
+    }
+
+    // Migration from 0.3.x to 0.4.0 — lookup+gain data semantics changed.
+    if (cfg.version.empty() || cfg.version == "0.2.0" || cfg.version == "0.2.1" ||
+        cfg.version == "0.3.0") {
+        migrate_lookup_gain(cfg);
+        migrated = true;
+    }
+
+    // Update to current version
+    if (migrated) {
+        cfg.version = RAWACCEL_VERSION;
+    }
+
+    return migrated;
 }
 
 } // namespace rawaccel

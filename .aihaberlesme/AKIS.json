@@ -1,0 +1,96 @@
+{
+  "format_version": 1,
+  "guncelleme": "2026-09-05 13:16 +03",
+  "referans": "aihaberlesme.md — insan okumalı kanonik anlatım; AKIS.json makine-okunur durum deposudur.",
+  "kurallar": {
+    "protokol_md": "aihaberlesme.md",
+    "kilit": "Bir dosya üzerinde çalışmadan önce o gorevin 'kilit' alanina Aj.N yazilir; bitince kaldirilir. Serbest calisma alanlari ve yeni dosyalar kilit gerektirmez.",
+    "mesaj_format": "### Aj.N [MN] [gün ay yıl] [saat]",
+    "yeni_ozellik_yok": true
+  },
+  "ajanlar": {
+    "1": {
+      "rol": "Kurulum / çekirdek entegrasyonu / uçtan uca (sistem canlı doğrulama)",
+      "durum": "aktif"
+    },
+    "2": {
+      "rol": "Kod inceleme / test / QA / güvenlik",
+      "durum": "aktif"
+    },
+    "3": {
+      "rol": "Özellik / UX / dokümantasyon / çeviri",
+      "durum": "aktif"
+    },
+    "4": {
+      "rol": "Referans oracle (RawAccel master birebir) / paketleme (PKGBUILD) / raporlama",
+      "durum": "aktif"
+    },
+    "5": {
+      "rol": "Yönetici / referans çapraz-kontrol / bağımsız doğrulama / kilit dışı alanlar (daemon, cli, build, CI)",
+      "durum": "aktif"
+    },
+    "6": {
+      "rol": "Sistem dayanıklılığı / uzun-kosu / IPC & güvenlik denetimi / log & izleme",
+      "durum": "aktif"
+    },
+    "7": {
+      "rol": "Performans / mikro-optimizasyon denetimi / kurulum-akış (multi-distro) doğrulaması / sıfırdan-makine senaryosu",
+      "durum": "aktif"
+    },
+    "0": {
+      "rol": "Haberleşme ağı yöneticisi (kanal moderasyonu, mesaj akışı, kilit/görev tahtası koordinasyonu)",
+      "durum": "aktif"
+    }
+  },
+  "gorevler": [
+    {
+      "gorev": "T16",
+      "sahip": "1",
+      "durum": "devam",
+      "kilit": "1",
+      "baslik": "Canlı uçtan uca yeniden doğrulama: virtmouse → ivmeli çıkış, set_config canlı davranış, kwinrc/kcminputrc Flat koruması"
+    },
+    {
+      "gorev": "T17",
+      "sahip": "2",
+      "durum": "tamam",
+      "kilit": null,
+      "baslik": "Bağımsız QA paneli + inceleme kararları (send() kısmi gönderim, refresh_language)"
+    },
+    {
+      "gorev": "T18",
+      "sahip": "3",
+      "durum": "tamam",
+      "kilit": null,
+      "baslik": "Belge/UX senkronu + çeviri denetimi + GUI dili canlı doğrulama"
+    },
+    {
+      "gorev": "T19",
+      "sahip": "4",
+      "durum": "tamam",
+      "kilit": null,
+      "baslik": "Oracle tekrar koşusu + PKGBUILD temiz paket doğrulaması"
+    },
+{
+      "gorev": "T20",
+      "sahip": "5",
+      "durum": "tamam",
+      "kilit": null,
+      "baslik": "Yönetici kabul kapısı + gözetim + kalan kararların toplanması"
+    },
+    {
+      "gorev": "T21",
+      "sahip": "6",
+      "durum": "tamam",
+      "kilit": null,
+      "baslik": "Sistem dayanıklılığı: uzun-kosu, IPC güvenliği, journalctl analizi, hotplug yeniden doğrulama"
+    },
+    {
+      "gorev": "T22",
+      "sahip": "7",
+      "durum": "tamam",
+      "kilit": null,
+      "baslik": "Performans/mikro-denetim + setup.sh multi-distro dallarının statik doğrulaması + sıfırdan-makine senaryosu çıktısı"
+    }
+  ]
+}

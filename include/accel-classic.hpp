@@ -6,16 +6,23 @@
 namespace rawaccel {
 
 /// Classic (linear raised to power) acceleration.
-/// Formula (legacy/scale mode): scale * x^(exp-1)
-/// Returns a multiplier applied to input speed.
+/// Two variants, selected by args.gain (reference classic<LEGACY> / classic<GAIN>):
+///   LEGACY: multiplier cap applied directly (gain = cap-factor clamped).
+///   GAIN:   output-speed integral form that asymptotically approaches the cap
+///           instead of clamping — the default reference mode.
+/// exponent_classic <= 1 keeps the port's documented "linear" constant-gain path.
 struct classic {
     double accel_raised = 0;
-    double cap          = DBL_MAX;
+    bool   gain_mode    = false;
+    double cap          = DBL_MAX;    // LEGACY multiplier cap
+    double cap_x        = DBL_MAX;    // GAIN input where the cap kicks in
+    double cap_y        = DBL_MAX;    // GAIN output at/above cap
+    double constant     = 0;          // GAIN integration constant
     double sign         = 1;
 
     classic() = default;
 
-    classic(const accel_args& args) {
+    classic(const accel_args& args) : gain_mode(args.gain) {
         // exponent == 1 → linear (acceleration * x / x == acceleration, constant gain)
         // Skip the normal setup; operator() will handle it via the exp==1 path.
         if (args.exponent_classic <= 1.0) {
@@ -27,6 +34,36 @@ struct classic {
             return;
         }
 
+        if (args.gain) {
+            init_gain(args);
+        } else {
+            init_legacy(args);
+        }
+    }
+
+    double operator()(double x, const accel_args& args) const {
+        if (x <= args.input_offset) return 1.0;
+        // Linear path (exponent <= 1): constant gain = acceleration, capped at cap_y
+        if (args.exponent_classic <= 1.0)
+            return 1.0 + minsd(accel_raised, cap);
+
+        if (!gain_mode)
+            return sign * minsd(base_fn(x, accel_raised, args), cap) + 1.0;
+
+        // GAIN mode (reference classic<GAIN>): output is the integral of the
+        // gain curve; for x >= cap.x the curve continues as constant/x + cap.y
+        // so gain asymptotically approaches the cap instead of clamping to it.
+        double output;
+        if (x < cap_x) {
+            output = base_fn(x, accel_raised, args);
+        } else {
+            output = constant / x + cap_y;
+        }
+        return sign * output + 1.0;
+    }
+
+private:
+    void init_legacy(const accel_args& args) {
         switch (args.cap_mode_val) {
         case cap_mode::io:
             cap = args.cap.y - 1;
@@ -70,23 +107,85 @@ struct classic {
         }
     }
 
-    double operator()(double x, const accel_args& args) const {
-        if (x <= args.input_offset) return 1.0;
-        // Linear path (exponent <= 1): constant gain = acceleration, capped at cap_y
-        if (args.exponent_classic <= 1.0)
-            return 1.0 + minsd(accel_raised, cap);
-        return sign * minsd(base_fn(x, accel_raised, args), cap) + 1.0;
+    void init_gain(const accel_args& args) {
+        switch (args.cap_mode_val) {
+        case cap_mode::io:
+            cap_x = args.cap.x;
+            cap_y = args.cap.y - 1;
+            if (cap_y < 0) { cap_y = -cap_y; sign = -sign; }
+            {
+                double a = gain_accel(cap_x, cap_y, args.exponent_classic, args.input_offset);
+                accel_raised = (std::isfinite(a) && a > 0)
+                    ? std::pow(a, args.exponent_classic - 1)
+                    : 0.0;
+            }
+            constant = (base_fn(cap_x, accel_raised, args) - cap_y) * cap_x;
+            break;
+        case cap_mode::in:
+            {
+                double ar = std::pow(args.acceleration, args.exponent_classic - 1);
+                accel_raised = std::isfinite(ar) ? ar : 0.0;
+            }
+            if (args.cap.x > 0) {
+                cap_x = args.cap.x;
+                cap_y = gain(cap_x, args.acceleration, args.exponent_classic, args.input_offset);
+                constant = (base_fn(cap_x, accel_raised, args) - cap_y) * cap_x;
+            }
+            break;
+        case cap_mode::out:
+        default:
+            {
+                double ar = std::pow(args.acceleration, args.exponent_classic - 1);
+                accel_raised = std::isfinite(ar) ? ar : 0.0;
+            }
+            if (args.cap.y > 0) {
+                cap_y = args.cap.y - 1;
+                if (cap_y == 0) {
+                    cap_x = 0;
+                } else {
+                    if (cap_y < 0) { cap_y = -cap_y; sign = -sign; }
+                    cap_x = gain_inverse(cap_y, args.acceleration,
+                                         args.exponent_classic, args.input_offset);
+                    constant = (base_fn(cap_x, accel_raised, args) - cap_y) * cap_x;
+                }
+            }
+            break;
+        }
+        // Defense: guard the GAIN constants (NaN from degenerate caps poisons
+        // every sample at x >= cap_x).
+        if (!std::isfinite(cap_x)) cap_x = DBL_MAX;
+        if (!std::isfinite(cap_y)) cap_y = DBL_MAX;
+        if (!std::isfinite(constant)) constant = 0;
     }
 
-private:
     double base_fn(double x, double ar, const accel_args& args) const {
-        return ar * std::pow(x - args.input_offset, args.exponent_classic) / x;
+        // Guard: extreme exponents overflow pow() to Inf (or degenerate 0·Inf).
+        // Falling back to 0 keeps the identity output (gain 1.0) instead of NaN.
+        double p = std::pow(x - args.input_offset, args.exponent_classic);
+        if (!std::isfinite(p)) return 0.0;
+        double r = ar * p / x;
+        return std::isfinite(r) ? r : 0.0;
     }
 
     static double base_accel(double x, double y, const accel_args& args) {
         double power = args.exponent_classic;
         if (power <= 1.0 || x <= args.input_offset) return 0; // degenerate
         return std::pow(x * y * std::pow(x - args.input_offset, -power), 1.0 / (power - 1));
+    }
+
+    // Reference classic<GAIN> helpers
+    static double gain(double x, double accel, double power, double offset) {
+        return power * std::pow(accel * (x - offset), power - 1);
+    }
+
+    static double gain_inverse(double y, double accel, double power, double offset) {
+        return (accel * offset + std::pow(y / power, 1.0 / (power - 1))) / accel;
+    }
+
+    static double gain_accel(double x, double y, double power, double offset) {
+        double denom = offset - x;
+        if (denom == 0) return 0; // degenerate
+        return -std::pow(y / power, 1.0 / (power - 1)) / denom;
     }
 };
 

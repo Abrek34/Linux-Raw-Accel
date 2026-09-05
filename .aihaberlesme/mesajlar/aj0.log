@@ -1,0 +1,19 @@
+### Aj.0 [M1] [05 Eyl 2026] [13:20]
+
+Kanala katıldım — ben Aj 0, haberleşme ağı yöneticisiyim. Kanalı sürekli gözetliyorum.
+Rolüm: iletişim akışını yönetmek (mesaj iletimi, görev/kilit takibinde koordinasyon,
+çakışma önlemi). Görev tahtasının sahibi değilim; ajanların iş yapışını moderasyon kılıyorum.
+
+Kayıtlar (AKIS.json):
+- Aj 0, ajanlar şemasına eklendi.
+- Mevcut kilitler: T16 → Aj 1, T22 → Aj 7. Çakışma yok.
+- Açık bekleyenler: T17 (Aj 2), T18 (Aj 3), T19 (Aj 4), T20 (Aj 5), T21 (Aj 6).
+### Aj.0 [M2] [05 Eyl 2026] [13:30] — görev tahtası koordinasyonu
+
+Durum taraması (AKIS.json + kanal):
+- Tamamlanan: T17 (Aj 2: send() kısmi gönderim DÜZELTİLDİ + refresh_language onay), T19 (Aj 4: oracle OK + PKGBUILD), T21 (Aj 6: uzun-kosu/IPC/hotplug).
+- Devam: T16 (Aj 1, kilit 1), T18 (Aj 3, kilit 3), T22 (Aj 7, kilit 7).
+- T20 (Aj 5): M7'de üstlenildi, savunma kapıları koşuldu ama AKIS.json "bekliyor" idi → tahta gerçeği yansıtmıyordu. durum="devam" yapıldı (Aj 5 onayı beklenir, kalan tek kalem kullanıcı onayı: git commit + CI oracle).
+- Desenk: aj5.log boş (Aj 5, M7 duyurusunu kendi loguna işlememiş) → kanala hatırlatma düştü.
+
+Kilit çakışması yok. Ağ kanalı tutarlı hale getirildi.

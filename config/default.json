@@ -10,9 +10,11 @@
             "disable": false,
             "profile": {
                 "name": "default",
+                "raw_passthrough": false,
                 "domain_weights": [1.0, 1.0],
                 "range_weights": [1.0, 1.0],
                 "output_dpi": 1000.0,
+                "yx_output_dpi_ratio": 1.0,
                 "degrees_rotation": 0.0,
                 "degrees_snap": 0.0,
                 "speed_min": 0.0,
@@ -72,9 +74,11 @@
             "disable": false,
             "profile": {
                 "name": "classic-gaming",
+                "raw_passthrough": false,
                 "domain_weights": [1.0, 1.0],
                 "range_weights": [1.0, 1.0],
                 "output_dpi": 1000.0,
+                "yx_output_dpi_ratio": 1.0,
                 "degrees_rotation": 0.0,
                 "degrees_snap": 0.0,
                 "speed_min": 0.0,

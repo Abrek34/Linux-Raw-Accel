@@ -1,0 +1,52 @@
+### Aj.2 [M7] [05 Eyl 2026] [görev beklemede]
+
+Selam ekip, kanala katıldım ve Aj 2 (kod inceleme / test / QA / güvenlik) olarak devraldım. Kanalı sürekli izliyorum.
+Doğrulama: build 0 uyarı (3 binary), test 21587/21587.
+
+### Aj.2 [M8] [05 Eyl 2026] [13:1x — T17 tamamlandı]
+
+**Bağımsız QA paneli — hepsi yeşil:**
+- build.sh → 0 uyarı (3 binary)
+- run_tests.sh → 21587/21587
+- run_tests_asan.sh → 21587/21587 (0 sanitizer)
+- run_fuzz.sh 60 → 1.25M koşu, çökme yok
+- run_tr_coverage.sh → PASS
+- oracle → OK (588 satır, 27 belgeli sapma)
+
+**İnceleme kararları:**
+1. `refresh_language` single-window registry → değişiklik gerektirmez (onaylandı). Registry statik ama tek-pencere mmarisinde pencere kapandıktan sonra refresh_language çağrılmaz; dangling riski düşük.
+2. `send()` kısmi gönderim → DÜZELTİLDİ (`gui/daemon_comm.inl` `daemon_ipc_send_raw`). Tek `send()` çağrısını tam-gönderim döngüsüyle değiştirdim (kısmi gönderimde devam, başarısızsa sonraki socket adayı). Daemon tarafı zaten "incomplete config payload" guard'ı ile reddediyordu; bu değişiklik boşuna reddi önler. Build 0 uyarı, test 21587/21587, tr_coverage PASS.
+
+T17 kapanış: AKIS.json T17 tamam, kilit null.
+### Aj.2 [M9] [05 Eyl 2026] [13:2x — iş talebi]
+
+Ekip, T17 kapandı, boştayım → **gönüllülük talebim:**
+1. **T20 ön-doğrulaması (Aj 5'e destek):** yönetici kabul kapısından önce 5 test kapısını (build/test/ASan/fuzz/oracle) bağımsız 2. göz olarak tekrar koşup raporlayabilirim — Aj 5'in kilidine dokunmam, sadece koşum + rapor.
+2. **CI'ya oracle adımı (kullanıcı onayıyla):** `.github/workflows/ci.yml`'ye `tests/oracle/run_oracle.sh` adımı — masada bekleyen öneri (b). Bakım işi, yeni özellik değil.
+3. **Yakın inceleme (code review):** son turların değişikliklerini kapsayan satır-satır inceleme (daemon push_config, hardened build, setup.sh dalları) — bulguya göre rapor veya mini-yama.
+- Kilit dışı; başkası sahiplendiği dosyaya dokunmam. Atanırsa hemen alırım.
+
+### Aj.2 [M11] [05 Eyl 2026] [13:4x — kod inceleme raporu]
+
+Kullanıcı onayıyla son değişikliklerin kod incelemesi tamamlandı. Bulgular:
+
+**1. daemon push_config (daemon.cpp) — ✓ sağlam, değişiklik yok.**
+- no-op guard deterministik: `app_config_to_json` sıralı nlohmann json → aynı config her zaman aynı string; metin karşılaştırması güvenilir.
+- config_ her yazımda devices_mutex_ altında (apply_new_config:672, status 875, dl:1201) → tutarlı okuma.
+- Lock sırası tutarlı (push_cfg_mu_ içinde apply_new_config → devices_mutex_); push_config devices_mutex_'i sadece tek başına alır → deadlock yok. find_profile mutex almaz, lock altında çağrılır → kilit yeniden girişi sorunsuz.
+- save_config atomik + fsync + dizin fsync + EINTR/error yolları (BUG-13/R18 doğrulanmış).
+- apply_new_config kullanıcı-yoksa full setup'a düşüyor (683-688) ✓.
+
+**2. CMakeLists.txt hardening — ✓ sağlam.**
+- `_FORTIFY_SOURCE` önceden tanımlıysa (makepkg `=3`) yeniden tanımlamıyor (check_cxx_source_compiles, satır 33-52) — Aj 4'ün "redefined" uyarısı CMake yolunda kapalı. Ama **build.sh yolunda aynı guard YOK** (satır 50 hardcode `=2`).
+
+**3. scripts/build.sh — küçük 2 tutarsızlık bulgusu:**
+- **B1:** `-D_FORTIFY_SOURCE=2` hardcode (satır 50) — CMake'e hizalama için koşullu olmalı. Şimdilik zarar yok (build.sh'te `_FORTIFY_SOURCE` genelde tanımsız), düşük önem.
+- **B2:** `-fcf-protection=full` x86 koşulsuz (satır 49); CMake x86 koşullu yapmış (56-58). ARM/portable build'de bazı derleyicilerde hata olabilir. x86 test ettim OK; portable hedefi başka mimari için tutarsızlık.
+
+**4. setup.sh üç dal — ✓ sağlam, değişiklik yok.**
+- pacman|apt|dnf dalları eksiksiz (g++, make, cmake, pkg-config/pkgconf, libevdev, gtk4, systemd, polkit, python3, qt6-tools). Doğrulama bloğu die/warn kuralları doğru. syntax OK (`bash -n`).
+- Not: setup.sh + scripts/build.sh Aj 5 (T12/T20 alanı) ve Aj 7 (T22 setup.sh) şeridinde → **mini-yama (B1+B2) yapmadım**, Aj 5 onayına bırakıyorum. İstenirse hemen uygularım.
+
+Sonuç: üç alan da fonksiyonel sağlam; B1/B2 iki düşük-önem tutarlılık önerisi, bloke edici değil.
+

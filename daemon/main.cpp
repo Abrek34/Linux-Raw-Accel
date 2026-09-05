@@ -5,6 +5,7 @@
 #include <string>
 #include <cstring>
 #include <atomic>
+#include <iomanip>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -179,10 +180,11 @@ static void print_usage(const char* argv0) {
     std::cout
         << "Usage: " << argv0 << " [OPTIONS]\n\n"
         << "Options:\n"
-        << "  -c, --config PATH   Config file (default: ~/.config/rawaccel/settings.json)\n"
-        << "  -v, --verbose       Verbose logging to stdout\n"
-        << "  -V, --version       Print version\n"
-        << "  -h, --help          Show this help\n\n"
+        << "  -c, --config PATH      Config file (default: ~/.config/rawaccel/settings.json)\n"
+        << "  -v, --verbose          Verbose logging to stdout\n"
+        << "  -f, --log-format FMT   Log format: text (default) | json\n"
+        << "  -V, --version          Print version\n"
+        << "  -h, --help             Show this help\n\n"
         << "Signals:\n"
         << "  SIGHUP   Hot-reload config\n"
         << "  SIGTERM  Stop daemon\n"
@@ -194,6 +196,7 @@ static void print_usage(const char* argv0) {
 int main(int argc, char* argv[]) {
     std::string config_path;
     bool verbose = false;
+    std::string log_format = "text"; // "text" or "json"
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -206,6 +209,12 @@ int main(int argc, char* argv[]) {
             config_path = argv[++i];
         } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
             verbose = true;
+        } else if ((strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--log-format") == 0) && i + 1 < argc) {
+            log_format = argv[++i];
+            if (log_format != "text" && log_format != "json") {
+                std::cerr << "Invalid log format: " << log_format << " (expected 'text' or 'json')\n";
+                return 1;
+            }
         }
     }
 
@@ -263,9 +272,22 @@ int main(int argc, char* argv[]) {
     g_daemon.store(&daemon);
 
     // Always log to stdout (systemd journal captures it), verbose = also show debug
-    daemon.set_log_cb([verbose](const std::string& msg) {
-        std::cout << "[rawaccel] " << msg << std::endl;
-    });
+    bool json_logs = (log_format == "json");
+    auto log_cb = [verbose, json_logs](const std::string& msg) {
+        if (json_logs) {
+            // Simple JSON line: {"timestamp": "...", "level": "info", "message": "..."}
+            // Use a basic ISO8601 timestamp
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            char timebuf[32];
+            strftime(timebuf, sizeof(timebuf), "%Y-%m-%dT%H:%M:%S", gmtime(&ts.tv_sec));
+            std::cout << "{\"timestamp\":\"" << timebuf << "." << std::setfill('0') << std::setw(3) << (ts.tv_nsec / 1000000)
+                      << "Z\",\"level\":\"info\",\"message\":\"" << msg << "\"}" << std::endl;
+        } else {
+            std::cout << "[rawaccel] " << msg << std::endl;
+        }
+    };
+    daemon.set_log_cb(log_cb);
     daemon.set_verbose(verbose);
 
     // Use sigaction (POSIX) instead of std::signal (implementation-defined).

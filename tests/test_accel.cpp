@@ -29,6 +29,7 @@
 #include <regex>
 #include <string>
 #include <vector>
+#include <unistd.h>
 
 using namespace rawaccel;
 
@@ -163,8 +164,8 @@ static void test_natural() {
     EXPECT_NEAR(n(0.0, args), 1.0, 1e-9);
 
     // Hız arttıkça gain artar.
-    // Not: gain mode integral formülü kullanır; asimptotu args.limit DEĞİL,
-    // daha yüksek bir değere yakınsıyor — bu matematiksel olarak beklenen davranış.
+    // Not: gain mode, RawAccel reference integral formülünü kullanır; asimptot
+    // args.limit'e yakınsar (legacy modda olduğu gibi limit+1 değil).
     double g1 = n(1.0, args);
     double g2 = n(10.0, args);
     double g3 = n(50.0, args);
@@ -187,73 +188,116 @@ static void test_natural() {
 // ── Test 4: jump ─────────────────────────────────────────────────────────────
 
 static void test_jump() {
-    SECTION("jump — sigmoid");
+    SECTION("jump — reference (cap.x = step pos, cap.y = step gain)");
     accel_args args = make_args(accel_mode::jump);
-    // sync_speed=5, smooth=0.5, limit=1.5
-
+    // make_args: gain=true, cap={15,1.5}, smooth=0.5 → smooth_rate = 2π/(0.5·15)
     jump j(args);
 
-    // x=0 → 1.0
+    // x=0 → 1.0 (GAIN origin)
     EXPECT_NEAR(j(0.0, args), 1.0, 1e-12);
 
     // Çok düşük hız → ~1.0 (sigmoid sıfıra yakın)
     double g_vlow = j(0.01, args);
     EXPECT(g_vlow >= 1.0);
-    EXPECT(g_vlow < 1.1);
+    EXPECT(g_vlow < 1.05);
 
-    // Çok yüksek hız → limit'e yakın (1 + (1.5-1) = 1.5)
-    double g_high = j(50.0, args);
-    EXPECT(g_high > 1.4);
-    EXPECT(g_high <= 1.5 + 1e-9);
+    // Çok yüksek hız → limit'e yakın (1 + step.y = 1.5); integral form asimptotik
+    double g_high = j(100000.0, args);
+    EXPECT(std::fabs(g_high - 1.5) < 1e-3);
 
     // Artan hız → artan gain
-    EXPECT(j(5.0, args) > j(1.0, args));
-    EXPECT(j(20.0, args) > j(5.0, args));
+    EXPECT(j(20.0, args) > j(10.0, args));
+    EXPECT(j(10.0, args) > j(1.0, args));
 
-    // limit < 1 guard: decelerasyon üretmemeli
-    accel_args args2 = args;
-    args2.limit = 0.5; // limit - 1 = -0.5 → clamp → 0
-    jump j2(args2);
-    // Her hızda gain >= 1.0 olmalı
-    EXPECT(j2(1.0,  args2) >= 1.0);
-    EXPECT(j2(10.0, args2) >= 1.0);
-    EXPECT(j2(50.0, args2) >= 1.0);
+    // LEGACY: smooth sigmoid doğrudan çarpan döndürür
+    accel_args args_l = args;
+    args_l.gain = false;
+    jump jl(args_l);
+    // y(0.01) = 1 + step.y/(1 + exp(smooth_rate·(step.x−x))) ≈ 1.0 + 1.75e-6
+    EXPECT_NEAR(jl(0.01, args_l), 1.0, 1e-5);
+    EXPECT_NEAR(jl(500.0, args_l), 1.5, 1e-6);
+    // LEGACY hard step (smooth=0): x < step.x → 1, else → 1 + step.y (basamak)
+    accel_args args_hard = args;
+    args_hard.gain  = false;
+    args_hard.smooth = 0;
+    jump jh(args_hard);
+    EXPECT_NEAR(jh(1.0,  args_hard), 1.0, 1e-9);    // x < step.x
+    EXPECT_NEAR(jh(15.0, args_hard), 1.5, 1e-9);    // x == step.x → 1 + step.y
+    EXPECT_NEAR(jh(30.0, args_hard), 1.5, 1e-9);    // plateau 1 + step.y
+    EXPECT_NEAR(jh(500.0, args_hard), 1.5, 1e-9);
+
+    // GAIN hard step: 1 + step.y·(x - step.x)/x
+    accel_args args_gh = args;
+    args_gh.gain   = true;
+    args_gh.smooth = 0;
+    jump jgh(args_gh);
+    EXPECT_NEAR(jgh(1.0,  args_gh), 1.0, 1e-9);
+    EXPECT_NEAR(jgh(30.0, args_gh), 1.25, 1e-9);
+    EXPECT_NEAR(jgh(500.0, args_gh), 1.485, 1e-9);
 }
 
 // ── Test 5: synchronous ──────────────────────────────────────────────────────
 
 static void test_synchronous() {
-    SECTION("synchronous");
+    SECTION("synchronous — activation_framework (legacy)");
     accel_args args = make_args(accel_mode::synchronous);
-    args.sync_speed     = 5.0;
-    args.exponent_power = 1.5; // power > 1 → gain artar hızla
+    // make_args: motivity=1.5, gamma=1, sync_speed=5, smooth=0.5
+    // smooth!=0 → sharpness=1 → non-linear tanh path.
+    args.gain = false;
 
     synchronous s(args);
 
-    // x=0 → 1.0
+    // x=0 → 1.0 (port guard)
     EXPECT_NEAR(s(0.0, args), 1.0, 1e-12);
 
-    // x = sync_speed → gain = (sync_speed/sync_speed)^(power-1) = 1.0
+    // x = sync_speed → 1.0
     EXPECT_NEAR(s(5.0, args), 1.0, 1e-9);
 
-    // x > sync_speed → gain > 1
-    EXPECT(s(10.0, args) > 1.0);
-    // x < sync_speed → gain < 1
-    EXPECT(s(2.0, args) < 1.0);
+    // x > sync_speed → gain up to motivity (1.5); x < sync_speed → down to 1/motivity
+    EXPECT(s(10.0, args) > 1.0 && s(10.0, args) <= 1.5 + 1e-9);
+    EXPECT(s(2.0,  args) < 1.0 && s(2.0,  args) >= 1.0/1.5 - 1e-9);
+    // monotonic
+    EXPECT(s(50.0, args) > s(10.0, args));
+    EXPECT(s(1.0,  args) < s(3.0, args));
 
-    // power < 1: x→0 sonsuzluğa gitmesin (MIN_SPEED guard)
-    accel_args args2 = args;
-    args2.exponent_power = 0.5;
-    synchronous s2(args2);
-    double g = s2(1e-9, args2);
-    EXPECT(std::isfinite(g));
+    SECTION("synchronous — linear clamp (smooth=0)");
+    accel_args args_c = args;
+    args_c.smooth = 0; // sharpness=16 → linear clamp
+    synchronous sc(args_c);
+    EXPECT_NEAR(sc(1e-9,  args_c), 1.0/1.5, 1e-9); // saturated min
+    EXPECT_NEAR(sc(500.0, args_c), 1.5, 1e-9);     // saturated max
+    EXPECT_NEAR(sc(5.0,   args_c), 1.0, 1e-9);
+
+    SECTION("synchronous — GAIN (integral LUT)");
+    accel_args args_g = make_args(accel_mode::synchronous);
+    args_g.gain = true;
+    args_g.smooth = 0;
+    synchronous sg(args_g);
+    // Constructor filled args_g.data with the 97-entry integral table.
+    EXPECT(args_g.length == 0); // length is untouched (data is implicit)
+    double g5 = sg(5.0, args_g);
+    EXPECT(std::isfinite(g5));
+    // Smooth-linear clamp with motivity 1.5: average multiplier over [0,5]
+    // lies strictly below the saturated 1.5 but above the minimum 2/3.
+    EXPECT(g5 >= 0.667 - 1e-2 && g5 <= 1.5 + 1e-3);
+    // Far beyond the table (x > 2^9): constant tail → average approaches motivity.
+    double gbig = sg(1e6, args_g);
+    EXPECT(std::isfinite(gbig));
+    EXPECT(gbig > 1.4);
+    // Degenerate motivity → identity (guard)
+    accel_args args_d = args_g;
+    args_d.motivity = 0;
+    synchronous sd(args_d);
+    EXPECT_NEAR(sd(5.0, args_d), 1.0, 1e-6);
+    EXPECT_NEAR(sd(50.0, args_d), 1.0, 1e-6);
 }
 
 // ── Test 6: lookup (LUT) ─────────────────────────────────────────────────────
 
 static void test_lookup() {
-    SECTION("lookup — LUT interpolation");
+    SECTION("lookup — LUT interpolation (velocity off)");
     accel_args args = make_args(accel_mode::lookup);
+    args.gain = false; // stored y is used directly as the gain
 
     // 3 nokta: (0, 1.0), (10, 1.5), (20, 2.0)
     float pts[] = { 0.0f, 1.0f, 10.0f, 1.5f, 20.0f, 2.0f };
@@ -262,19 +306,41 @@ static void test_lookup() {
 
     lookup lut(args);
 
+    // x <= 0 → 0 (reference: strictly positive domain)
+    EXPECT_NEAR(lut(0.0,  args), 0.0, 1e-6);
+    EXPECT_NEAR(lut(-1.0, args), 0.0, 1e-6);
+
     // Tam noktalarda
-    EXPECT_NEAR(lut(0.0,  args), 1.0, 1e-6);
     EXPECT_NEAR(lut(10.0, args), 1.5, 1e-6);
     EXPECT_NEAR(lut(20.0, args), 2.0, 1e-6);
 
     // İnterpolasyon: x=5 → 1.25
     EXPECT_NEAR(lut(5.0, args), 1.25, 1e-6);
 
-    // İlk noktanın altı → ilk gain
-    EXPECT_NEAR(lut(-1.0, args), 1.0, 1e-6);
+    // Son noktanın üstü → lineer ekstrapolasyon (referans lerp, t > 1)
+    EXPECT_NEAR(lut(30.0, args), 2.5, 1e-6);
 
-    // Son noktanın üstü → son gain
-    EXPECT_NEAR(lut(30.0, args), 2.0, 1e-6);
+    SECTION("lookup — velocity (gain) mode");
+    // Stored y is treated as output speed; effective gain = y / x.
+    accel_args args_v = args;
+    args_v.gain = true;
+    float pv[] = { 0.0f, 0.0f, 10.0f, 5.0f, 20.0f, 10.0f };
+    ::memcpy(args_v.data, pv, sizeof(pv));
+    args_v.length = 6;
+    lookup lv(args_v);
+    EXPECT_NEAR(lv(0.0,  args_v), 0.0, 1e-6);
+    EXPECT_NEAR(lv(5.0,  args_v), 0.5, 1e-6);
+    EXPECT_NEAR(lv(10.0, args_v), 0.5, 1e-6);
+    EXPECT_NEAR(lv(20.0, args_v), 0.5, 1e-6);
+
+    // x first point altında (>0): fallback → ilk çıkış / ilk nokta hızı
+    float pv2[] = { 5.0f, 2.0f, 10.0f, 3.0f };
+    accel_args args_f = args;
+    args_f.gain = true;
+    ::memcpy(args_f.data, pv2, sizeof(pv2));
+    args_f.length = 4;
+    lookup lf(args_f);
+    EXPECT_NEAR(lf(1.0, args_f), 0.4, 1e-6); // 2.0 / 5.0
 
     // Boş LUT → 1.0
     accel_args empty = make_args(accel_mode::lookup);
@@ -461,6 +527,44 @@ static void test_file_roundtrip() {
     std::remove(tmp.c_str());
 }
 
+static void test_save_config_relative_path() {
+    SECTION("BUG-22 — save_config supports bare relative filenames");
+
+    char tmpl[] = "/tmp/rawaccel_rel_XXXXXX";
+    char* dir = mkdtemp(tmpl);
+    EXPECT(dir != nullptr);
+    if (!g_section_active || !dir) return;
+
+    char old_cwd[4096] = {};
+    bool ok = getcwd(old_cwd, sizeof(old_cwd)) != nullptr;
+    EXPECT(ok);
+    if (!ok) { rmdir(dir); return; }
+
+    ok = chdir(dir) == 0;
+    EXPECT(ok);
+    if (!ok) { rmdir(dir); return; }
+
+    app_config cfg;
+    cfg.active_profile = "default";
+    device_profile dp;
+    dp.name = "default";
+    cfg.profiles.push_back(dp);
+
+    try {
+        save_config(cfg, "settings.json");
+        app_config loaded = load_config("settings.json");
+        ok = loaded.profiles.size() == 1 && loaded.profiles[0].name == "default";
+    } catch (...) {
+        ok = false;
+    }
+    EXPECT(ok);
+
+    std::remove("settings.json.tmp");
+    std::remove("settings.json");
+    chdir(old_cwd);
+    rmdir(dir);
+}
+
 // ── Test 12: Monotonik artış kontrolü ────────────────────────────────────────
 
 static void test_monotonic() {
@@ -555,7 +659,8 @@ static void test_power_monotonic() {
 static void test_classic_cap_modes() {
     SECTION("classic — cap_mode::io ve cap_mode::in");
 
-    // cap_mode::io: cap.x hızında cap.y kazanımına kilitler
+    // cap_mode::io: cap.x kapama noktası, cap.y GAIN formda ASİMPTOT'tur.
+    // Referans GAIN: cap.x'te değil, sonsuzda cap.y'ye yakınsar (üst = 1 + cap.y).
     {
         accel_args args;
         args.mode              = accel_mode::classic;
@@ -567,17 +672,20 @@ static void test_classic_cap_modes() {
         args.cap               = { 10.0, 1.8 };
 
         classic cl(args);
-        // At cap.x, gain must equal cap.y (within tolerance)
+        // Referans: accel_raised = gain_accel(10, 0.8, 2, 0)^(2-1) = 0.04;
+        // cl(10) = 1 + 0.04·10 = 1.4 (cap.y'den düşük), sonra asimptotik artar.
         double g_at_cap = cl(args.cap.x, args);
-        EXPECT_NEAR(g_at_cap, args.cap.y, 1e-6);
-        // Beyond cap, gain must not increase
+        EXPECT_NEAR(g_at_cap, 1.4, 1e-6);
+        // Kapamadan sonra artış devam eder (sabit/ x + cap.y), asimptota yaklaşır
         double g_beyond = cl(args.cap.x * 2.0, args);
-        EXPECT(g_beyond <= g_at_cap + 1e-9);
+        EXPECT_NEAR(g_beyond, 1.6, 1e-6);
+        EXPECT(g_beyond > g_at_cap);
+        EXPECT_NEAR(cl(1e9, args), 1.8, 1e-6);   // asimptot: 1 + cap.y
         // Below offset, gain must be 1
         EXPECT_NEAR(cl(0.0, args), 1.0, 1e-12);
     }
 
-    // cap_mode::in: cap.x speeds limit input, gain still rises (or is flat) beyond
+    // cap_mode::in: cap.x sonrası gain sabit/ x + cap.y ile asimptotik artar
     {
         accel_args args;
         args.mode              = accel_mode::classic;
@@ -589,10 +697,14 @@ static void test_classic_cap_modes() {
         args.cap               = { 12.0, 0.0 };  // cap.x active, cap.y ignored
 
         classic cl(args);
-        // gain at cap.x and 2×cap.x must be the same (flat after input cap)
+        // Referans: cap.y = gain(12, 0.005, 2, 0) = 2·0.005·12 = 0.12 (gömülü);
+        // cl(12)=1.06, cl(24)=1.09; asimptot 1.12
         double g_at_cap   = cl(args.cap.x,       args);
         double g_beyond   = cl(args.cap.x * 2.0, args);
-        EXPECT_NEAR(g_at_cap, g_beyond, 1e-9);
+        EXPECT_NEAR(g_at_cap, 1.06, 1e-6);
+        EXPECT_NEAR(g_beyond, 1.09, 1e-6);
+        EXPECT(g_beyond > g_at_cap);           // asimptotik artış
+        EXPECT(g_beyond < 1.12 + 1e-9);        // asimptotun altında
         // gain must be > 1 (actually accelerating)
         EXPECT(g_at_cap > 1.0);
     }
@@ -660,17 +772,20 @@ static void test_modifier() {
 static void test_edge_guards() {
     SECTION("N8 natural limit<1 no inversion, N11 power exponent=0 finite");
 
-    // N8: natural with args.limit < 1 should never produce gain < 1 or invert mouse
+    // N8: natural with args.limit < 1 — referans: limit ASİMPTOT'tur, kazanım
+    //     onun üstüne yakınsar ama 1'in altında kalır (ters çevirme yok, her zaman ≥0).
     {
         accel_args args = make_args(accel_mode::natural);
-        args.limit = 0.5; // < 1 → would produce limit=-0.5 without guard
-        args.gain  = false; // non-gain mode: most likely to go negative
+        args.limit = 0.5; // < 1 → kazanım 0.5 asimptotuna yakınsar
+        args.gain  = false; // non-gain mode
         natural n(args);
-        // With N8 fix, limit is clamped to 0 → output is always 1.0
-        EXPECT(n(0.0, args) >= 1.0);
-        EXPECT(n(5.0, args) >= 1.0);
-        EXPECT(n(20.0, args) >= 1.0);
+        EXPECT_NEAR(n(0.0, args), 1.0, 1e-9);
+        // Referans değerler: n(5)=0.684, n(20)=0.509, n(50)→0.5
+        EXPECT(n(5.0, args) > args.limit);       // asimptotun üstünde
+        EXPECT(n(20.0, args) > args.limit);
+        EXPECT(n(5.0, args) < 1.0);              // 1'in altında ama pozitif (inversion yok)
         EXPECT(std::isfinite(n(50.0, args)));
+        EXPECT_NEAR(n(50.0, args), args.limit, 1e-3);  // limit asimptotu
     }
 
     // N8: natural with args.limit = 0 (extreme) should not crash or go below 0
@@ -807,11 +922,12 @@ static void test_modifier_end_to_end() {
     }
 
     // ── 6. Directional DPI ratio: lr_output_dpi_ratio > 1 ────────────────
+    // Referans: lr/ud oranları SADECE negatif (sol/aşağı) yöne uygulanır.
     {
         profile p;
         p.accel_x.mode = accel_mode::noaccel;
         p.accel_y.mode = accel_mode::noaccel;
-        p.lr_output_dpi_ratio = 2.0; // rightward motion doubled
+        p.lr_output_dpi_ratio = 2.0; // sola hareket 2 katına çıkar
 
         modifier_settings ms; ms.prof = p; init_settings(ms);
         speed_processor   sp; sp.init(p.speed_processor_args);
@@ -819,11 +935,11 @@ static void test_modifier_end_to_end() {
 
         vec2d in_right = { 5.0, 0.0 };
         mod.modify(in_right, sp, ms, 1.0, 1.0);
-        EXPECT_NEAR(in_right.x, 10.0, 1e-9); // 5 * 2.0
+        EXPECT_NEAR(in_right.x, 5.0, 1e-9);   // sağa: oran uygulanmaz
 
         vec2d in_left = { -5.0, 0.0 };
         mod.modify(in_left, sp, ms, 1.0, 1.0);
-        EXPECT_NEAR(in_left.x, -2.5, 1e-9); // -5 * (1/2.0)
+        EXPECT_NEAR(in_left.x, -10.0, 1e-9);  // sola: ×2
     }
 
     // ── 7. Angle snap: diagonal near horizontal → snapped to horizontal ──
@@ -974,8 +1090,8 @@ static void test_config_error_paths() {
         accel_args a = make_args(accel_mode::lookup);
         a.length = (int)LUT_RAW_DATA_CAPACITY + 100; // way over capacity
         lookup lut(a);
-        // point_count must be <= LUT_POINTS_CAPACITY
-        EXPECT(lut.point_count <= (int)LUT_POINTS_CAPACITY);
+        // size (point count) must be <= LUT_POINTS_CAPACITY
+        EXPECT(lut.size <= (int)LUT_POINTS_CAPACITY);
     }
 
     // ── profile_from_json with invalid JSON string → exception ────────────
@@ -1075,6 +1191,14 @@ static void test_input_validation() {
         EXPECT(dp.dev_cfg.polling_rate >= 125);
         EXPECT(dp.prof.degrees_snap >= 0);
         EXPECT(dp.prof.output_dpi <= 32000);
+
+        // T15 — exponent_classic clamped to the GUI range [1,10] so
+        // manually-edited JSON cannot reach the exp<1 fragmented path.
+        dp.prof.accel_x.exponent_classic = 0.5;
+        dp.prof.accel_y.exponent_classic = 50.0;
+        sanitize_device_profile(dp);
+        EXPECT(dp.prof.accel_x.exponent_classic >= 1.0);   // 0.5 → 1.0
+        EXPECT(dp.prof.accel_y.exponent_classic <= 10.0);  // 50  → 10.0
     }
 }
 
@@ -1515,7 +1639,7 @@ static void test_lookup_edge_cases() {
         args.length = 1;
         args.data[0] = 5.0f;
         lookup lut(args);
-        EXPECT(lut.point_count == 0);
+        EXPECT(lut.size == 0);
         EXPECT_NEAR(lut(5.0, args), 1.0, 1e-9);
     }
 
@@ -1542,7 +1666,7 @@ static void test_lookup_edge_cases() {
             args.data[i*2+1] = 1.0f + (float)i * 0.01f;
         }
         lookup lut(args);
-        EXPECT(lut.point_count == max_pairs);
+        EXPECT(lut.size == max_pairs);
         double g = lut(50.0, args);
         EXPECT(std::isfinite(g));
     }
@@ -1717,8 +1841,10 @@ static void test_lut_sort_on_sanitize() {
         EXPECT_NEAR(dp.prof.accel_x.data[7], 2.0f,  1e-9);
 
         // Verify the sorted LUT actually produces correct interpolation
+        // (use velocity=false so stored y is read as the gain directly)
+        dp.prof.accel_x.gain = false;
         lookup lut(dp.prof.accel_x);
-        EXPECT_NEAR(lut(0.0, dp.prof.accel_x), 1.0, 1e-6);
+        EXPECT_NEAR(lut(0.0, dp.prof.accel_x), 0.0, 1e-6);   // reference: x<=0 → 0
         EXPECT_NEAR(lut(5.0, dp.prof.accel_x), 1.2, 1e-6);
         EXPECT_NEAR(lut(10.0, dp.prof.accel_x), 1.5, 1e-6);
         EXPECT_NEAR(lut(20.0, dp.prof.accel_x), 2.0, 1e-6);
@@ -1833,18 +1959,20 @@ static void test_lut_sort_json_roundtrip() {
         auto& ax = cfg2.profiles[0].prof.accel_x;
         EXPECT(ax.length == 6);
 
-        // After load + sanitize, data must be sorted by X
+        // After load + sanitize, data must be sorted by X.
+        // Config written without a version → migrate_lookup_gain turns the
+        // old direct-gain y into velocity output speed: y_new = y_old · x.
         EXPECT_NEAR(ax.data[0], 0.0f,  1e-9);
-        EXPECT_NEAR(ax.data[1], 1.0f,  1e-9);
+        EXPECT_NEAR(ax.data[1], 1.0f,  1e-9);   // x=0 noktası dokunulmaz
         EXPECT_NEAR(ax.data[2], 5.0f,  1e-9);
-        EXPECT_NEAR(ax.data[3], 1.2f,  1e-9);
+        EXPECT_NEAR(ax.data[3], 6.0f,  1e-9);   // 1.2 · 5  (yönlendirilmiş)
         EXPECT_NEAR(ax.data[4], 15.0f, 1e-9);
-        EXPECT_NEAR(ax.data[5], 1.6f,  1e-9);
+        EXPECT_NEAR(ax.data[5], 24.0f, 1e-9);   // 1.6 · 15
 
-        // Verify interpolation works correctly on reloaded data
+        // Interpolation: velocity mode → geçerli gain = y/speed (özgün eğri geri gelir)
         lookup lut(ax);
-        EXPECT_NEAR(lut(0.0, ax), 1.0, 1e-6);
-        EXPECT_NEAR(lut(5.0, ax), 1.2, 1e-6);
+        EXPECT_NEAR(lut(0.0,  ax), 0.0, 1e-6);
+        EXPECT_NEAR(lut(5.0,  ax), 1.2, 1e-6);
         EXPECT_NEAR(lut(15.0, ax), 1.6, 1e-6);
     }
 }
@@ -2102,7 +2230,7 @@ static void test_accel_args_sanitize() {
         std::remove(tmp);
     }
 
-    // 14. Negative acceleration + integer exponent → valid deceleration (no NaN)
+    // 14. Negative acceleration + integer exponent → referans GAIN formu yine de sonlu
     {
         accel_args args;
         args.mode = accel_mode::classic;
@@ -2111,7 +2239,9 @@ static void test_accel_args_sanitize() {
         classic c(args);
         double gain = c(10.0, args);
         EXPECT(std::isfinite(gain));
-        EXPECT(gain < 1.0); // deceleration: gain below 1
+        // Referans GAIN out: accel_raised=-0.01, cap.y=0.5, cap.x=-25,
+        // c(10) = 1 + (constant/x + cap.y) = 1 + (6.25/10 + 0.5) = 2.125
+        EXPECT_NEAR(gain, 2.125, 1e-9);
     }
 
     // 15. Negative acceleration + non-integer exponent → NaN guarded to 0 in constructor
@@ -2890,7 +3020,11 @@ static void test_natural_extreme_params() {
 
     // limit = 1.0 → internal limit = 0 → result depends on gain mode.
     // Non-gain: limit*(1-decay)+1 = 0+1 = 1.0
-    // Gain:     t + 0*(...) = t → output/x + 1 = 2.0 (base speed + gain)
+    // Gain:     limit=0 → integral output = 0 → gain = 1.0 (no acceleration).
+    //           (O4: old formula produced 2.0; with the reference integral the
+    //           total output is the input itself, so gain is exactly 1.0.)
+    //           With args.limit==1 the reference would divide by limit==0 in
+    //           its constructor; N8 keeps this safe and yields 1.0.
     {
         accel_args args = make_args(accel_mode::natural);
         args.limit = 1.0;
@@ -2905,7 +3039,7 @@ static void test_natural_extreme_params() {
         natural n_gain(args);
         double r_g = n_gain(10.0, args);
         if (!std::isfinite(r_g)) bad++;
-        EXPECT_NEAR(r_g, 2.0, 0.01); // gain integral: base + t/x = 2.0
+        EXPECT_NEAR(r_g, 1.0, 0.01); // no acceleration when limit clamped to 0
     }
 
     // gain=true, large input
@@ -2988,7 +3122,8 @@ static void test_dpi_ratio_zero_guard() {
     EXPECT(std::isfinite(in.x));
     EXPECT(std::isfinite(in.y));
 
-    // Also verify non-zero ratio still works
+    // Also verify non-zero ratio still works (reference: ratios apply to
+    // the negative/left/down direction only, plain multiplication, no reciprocal)
     settings.prof.lr_output_dpi_ratio = 2.0;
     settings.prof.ud_output_dpi_ratio = 0.5;
     init_settings(settings);
@@ -2996,9 +3131,9 @@ static void test_dpi_ratio_zero_guard() {
     mod.modify(in2, sp, settings, 1.0, 1.0);
     EXPECT(std::isfinite(in2.x));
     EXPECT(std::isfinite(in2.y));
-    // Positive x → multiply by ratio (2.0); negative y → divide by ratio (1/0.5=2)
-    EXPECT_NEAR(in2.x, 10.0, 0.01);
-    EXPECT_NEAR(in2.y, -6.0, 0.01);
+    // Positive x → no lr scaling; negative y → multiply by ud (0.5)
+    EXPECT_NEAR(in2.x, 5.0, 0.01);
+    EXPECT_NEAR(in2.y, -1.5, 0.01);
 }
 
 // ── R6: lp_distance zero-vector guard ────────────────────────────────────────
@@ -3278,13 +3413,23 @@ static void test_power_output_offset() {
 
 // ── R7: directional weight interpolation boundary values ─────────────────────
 
+// ── R7: directional weight blending at 0°, 45°, 90° ──────────────────────────
+// Referans kuralı: scale = 1 + (gain - 1) * weight;  weight, yataydaki
+// range_weights.x'ten dikeydeki .y'ye 2/π · açı ile doğrusal geçer.
+// (noaccel'de gain=1 olduğu için weight'in etkisi yoktur — yalnızca hızlandırma
+//  farkını modüle eder.)
+
 static void test_directional_weight_boundary() {
     SECTION("R7 — directional weight blending at 0°, 45°, 90°");
 
-    // With different range_weights.x and .y, verify blending works
+    // Accel: classic LEGACY, gain = 1 + 0.005·ips (power 2). Weight bu gain'i modüle eder.
     profile prof{};
-    prof.accel_x.mode = accel_mode::noaccel;
-    prof.accel_y.mode = accel_mode::noaccel;
+    prof.accel_x.mode            = accel_mode::classic;
+    prof.accel_x.gain            = false;
+    prof.accel_x.acceleration    = 0.005;
+    prof.accel_x.exponent_classic = 2.0;
+    prof.accel_x.input_offset    = 0.0;
+    prof.accel_y                 = prof.accel_x;
     prof.range_weights.x = 2.0;
     prof.range_weights.y = 4.0;
     prof.domain_weights = {1, 1};
@@ -3294,26 +3439,27 @@ static void test_directional_weight_boundary() {
     modifier_settings settings;
     settings.prof = prof;
     init_settings(settings);
+    EXPECT(settings.data.flags.apply_directional_weight);
 
     modifier mod;
     speed_processor sp;
     sp.init(prof.speed_processor_args);
 
-    // Pure horizontal → range_weights.x = 2.0
+    // Pure horizontal → reference_angle = 0 → weight = range_weights.x = 2.0
+    // gain = 1 + 0.005·10 = 1.05 → scale = 1 + 0.05·2 = 1.10 → x = 11.0
     {
         vec2d in = {10.0, 0.0};
         mod.modify(in, sp, settings, 1.0, 1.0);
-        EXPECT_NEAR(in.x, 20.0, 0.1); // 10 * 2.0
+        EXPECT_NEAR(in.x, 11.0, 1e-6);
         EXPECT_NEAR(in.y, 0.0, 1e-9);
     }
-    // Pure vertical → range_weights.y = 4.0
+    // Pure vertical → reference_angle = π/2 → weight = 2 + 2·(2/π)·(π/2) = 4.0
+    // gain = 1.05 → scale = 1 + 0.05·4 = 1.20 → y = 12.0
     {
-        speed_processor sp2;
-        sp2.init(prof.speed_processor_args);
         vec2d in = {0.0, 10.0};
-        mod.modify(in, sp2, settings, 1.0, 1.0);
+        mod.modify(in, sp, settings, 1.0, 1.0);
         EXPECT_NEAR(in.x, 0.0, 1e-9);
-        EXPECT_NEAR(in.y, 40.0, 0.1); // 10 * 4.0
+        EXPECT_NEAR(in.y, 12.0, 1e-6);
     }
 }
 
@@ -3390,7 +3536,7 @@ static void test_classic_gain_mode_cap_consistency() {
 // ── R9: natural gain formula correctness ─────────────────────────────────────
 
 static void test_natural_gain_formula() {
-    SECTION("R9 — natural gain mode: output/x+1 converges to args.limit+1");
+    SECTION("R9 — natural gain mode: output/x+1 converges to args.limit");
 
     accel_args args;
     args.mode = accel_mode::natural;
@@ -3402,17 +3548,15 @@ static void test_natural_gain_formula() {
     natural n(args);
 
     // Internal limit = args.limit - 1 = 2.0
-    // Gain mode asymptote: output/x + 1 → (1 + internal_limit) + 1 = args.limit + 1 = 4.0
-    // Because output = t + limit*(t - (1-exp(-a*t))/a) → (1+limit)*t for large t
-    // So output/x + 1 → (1+limit) + 1 = limit + 2 = args.limit + 1
+    // Reference gain mode (O4): output = limit*(decay/accel - offset_x) - limit/accel
+    // → limit*x asymptotically, so gain = output/x + 1 → limit + 1 = args.limit.
+    // (Old port formula had an extra +t term that pushed the asymptote to args.limit+1.)
     double r = n(100000.0, args);
-    EXPECT_NEAR(r, 4.0, 0.01);  // args.limit + 1
+    EXPECT_NEAR(r, 3.0, 0.01);  // args.limit
 
-    // At x just past 0 (but > 1e-9 guard), gain mode gives output/x+1 → 2.0
-    // L'Hopital: lim_{t→0} output/x = lim t + limit*(t - (1-e^{-at})/a) / (t+offset)
-    // When offset=0, this → 1.0, so total → 2.0
+    // Just past the offset the integral cancels: output ≈ 0 → gain ≈ 1.0
     double r_low = n(0.001, args);
-    EXPECT_NEAR(r_low, 2.0, 0.1);
+    EXPECT_NEAR(r_low, 1.0, 0.1);
 
     // Non-gain mode: should converge to args.limit = 3.0
     args.gain = false;
@@ -3423,6 +3567,85 @@ static void test_natural_gain_formula() {
     // Non-gain at x=0 → 1.0
     double r_ng_low = n2(0.001, args);
     EXPECT_NEAR(r_ng_low, 1.0, 0.01);
+}
+
+// ── O4: natural reference-alignment regression ────────────────────────────────
+
+static void test_natural_reference_values() {
+    SECTION("O4 — natural matches RawAccel reference integral");
+
+    // Gain mode, offset=0: limit=1.5 → internal 0.5, accel = 0.1/0.5 = 0.2
+    accel_args g_args = make_args(accel_mode::natural);
+    g_args.limit = 1.5;
+    g_args.decay_rate = 0.1;
+    g_args.input_offset = 0.0;
+    g_args.gain = true;
+    natural ng(g_args);
+
+    // Reference: gain = output/x + 1, output = limit*(decay/accel - offset_x) - limit/accel
+    // x=10: decay = exp(-0.2*10) = exp(-2)
+    double decay10 = std::exp(-0.2 * 10.0);
+    double out10   = 0.5 * (decay10 / 0.2 + 10.0) - 0.5 / 0.2;
+    EXPECT_NEAR(ng(10.0, g_args), out10 / 10.0 + 1.0, 1e-9);
+    EXPECT_NEAR(ng(10.0, g_args), 1.283834, 1e-4);
+    // Asymptote approaches args.limit, NOT args.limit + 1
+    EXPECT(ng(1e9, g_args) < 1.5001);
+
+    // Legacy mode with offset > 0: reference gain includes the offset terms.
+    accel_args l_args = make_args(accel_mode::natural);
+    l_args.limit = 1.5;
+    l_args.decay_rate = 0.1;
+    l_args.input_offset = 2.0;
+    l_args.gain = false;
+    natural nl(l_args);
+
+    // accel = 0.1/0.5 = 0.2, x=10 → t=8, decay = exp(-1.6)
+    double d   = std::exp(-0.2 * 8.0);
+    double ox  = 2.0 - 10.0;
+    double ref = 0.5 * (1.0 - (2.0 - d * ox) / 10.0) + 1.0;
+    EXPECT_NEAR(nl(10.0, l_args), ref, 1e-9);
+}
+
+// ── O5: output_dpi must affect the modifier output ────────────────────────────
+
+static void test_output_dpi_applied() {
+    SECTION("O5 — output_dpi scales modifier output like the reference");
+
+    profile prof{};
+    prof.accel_x.mode = accel_mode::noaccel;
+    prof.accel_y = prof.accel_x;
+    prof.domain_weights = {1.0, 1.0};
+    prof.range_weights  = {1.0, 1.0};
+    prof.speed_max = 1e9;
+
+    modifier_settings settings;
+    settings.prof = prof;
+    init_settings(settings);
+    speed_processor sp; sp.init(prof.speed_processor_args);
+    modifier mod;
+
+    // Default output_dpi = NORMALIZED_DPI=1000, dpi_factor=1 → output unchanged
+    vec2d in1 = {10.0, -6.0};
+    mod.modify(in1, sp, settings, 1.0, 1.0);
+    EXPECT_NEAR(in1.x, 10.0, 1e-9);
+    EXPECT_NEAR(in1.y, -6.0, 1e-9);
+
+    // output_dpi = 500 → output halved (dpi_adjustment = (out/1000) * dpi_factor)
+    settings.prof.output_dpi = 500.0;
+    init_settings(settings);
+    vec2d in2 = {10.0, -6.0};
+    mod.modify(in2, sp, settings, 1.0, 1.0);
+    EXPECT_NEAR(in2.x, 5.0, 1e-9);
+    EXPECT_NEAR(in2.y, -3.0, 1e-9);
+
+    // output_dpi=2000 with dpi_factor=0.5 (2000 DPI device → 1000/2000):
+    // multiplier = (2000/1000)*0.5 = 1.0 → output unchanged again
+    settings.prof.output_dpi = 2000.0;
+    init_settings(settings);
+    vec2d in3 = {10.0, -6.0};
+    mod.modify(in3, sp, settings, 0.5, 1.0);
+    EXPECT_NEAR(in3.x, 10.0, 1e-9);
+    EXPECT_NEAR(in3.y, -6.0, 1e-9);
 }
 
 // ── R10: EMA smoother correctness ────────────────────────────────────────────
@@ -4361,6 +4584,7 @@ static void test_lookup_max_capacity() {
 
     accel_args args;
     args.mode = accel_mode::lookup;
+    args.gain = false;  // velocity off → stored y kazanımı doğrudan okunur
 
     // Fill to exactly LUT_POINTS_CAPACITY (257 points = 514 floats)
     int max_pts = (int)LUT_POINTS_CAPACITY;
@@ -4373,11 +4597,12 @@ static void test_lookup_max_capacity() {
     }
 
     lookup lut(args);
-    EXPECT(lut.point_count == max_pts);
+    EXPECT(lut.size == max_pts);
 
     // Test interpolation at various points
-    double g0 = lut(0.0, args);    // at first point
-    EXPECT_NEAR(g0, 1.0, 1e-4);
+    // x <= 0 → 0 (reference lookup: strictly positive domain)
+    double g0 = lut(0.0, args);
+    EXPECT_NEAR(g0, 0.0, 1e-6);
 
     double g_mid = lut(128.0, args);  // midpoint
     EXPECT_NEAR(g_mid, 1.128, 1e-3);
@@ -4385,8 +4610,11 @@ static void test_lookup_max_capacity() {
     double g_end = lut(256.0, args);  // last point
     EXPECT_NEAR(g_end, 1.256, 1e-3);
 
-    double g_beyond = lut(1000.0, args);  // beyond last → clamp to last
-    EXPECT_NEAR(g_beyond, 1.0 + (max_pts - 1) / 1000.0, 1e-3);
+    // After the last point the reference lerp EXTRAPOLATES (t > 1, a<b → maxsd
+    // returns the unbounded value), not clamps:
+    // y = 1.255 + (1000-255)·(1.256-1.255) = 2.0
+    double g_beyond = lut(1000.0, args);
+    EXPECT_NEAR(g_beyond, 2.0, 1e-3);
 
     // Verify interpolation between points
     double g_half = lut(0.5, args);  // between point 0 and 1
@@ -4397,7 +4625,7 @@ static void test_lookup_max_capacity() {
     accel_args args_over = args;
     args_over.length = (int)LUT_RAW_DATA_CAPACITY + 100;  // way over
     lookup lut_over(args_over);
-    EXPECT(lut_over.point_count <= (int)LUT_POINTS_CAPACITY);
+    EXPECT(lut_over.size <= (int)LUT_POINTS_CAPACITY);
 }
 
 static void test_ema_coefficient_zero() {
@@ -4435,9 +4663,15 @@ static void test_ema_coefficient_zero() {
 static void test_modifier_directional_weight_blend() {
     SECTION("R12 — modifier directional weight cos/sin blend");
 
+    // Referans: scale = 1 + (gain - 1) * weight; weight, reference_angle'a göre
+    // range_weights.x (yatay) → range_weights.y (dikey) arasında 2/π·açı ile geçer.
     profile prof{};
-    prof.accel_x.mode = accel_mode::noaccel;
-    prof.accel_y = prof.accel_x;
+    prof.accel_x.mode            = accel_mode::classic;
+    prof.accel_x.gain            = false;
+    prof.accel_x.acceleration    = 0.005;
+    prof.accel_x.exponent_classic = 2.0;
+    prof.accel_x.input_offset    = 0.0;
+    prof.accel_y                 = prof.accel_x;
     prof.speed_processor_args.whole = true;
     // Different X and Y weights → directional weight kicks in
     prof.range_weights.x = 2.0;
@@ -4452,27 +4686,30 @@ static void test_modifier_directional_weight_blend() {
     sp.init(prof.speed_processor_args);
     modifier mod;
 
-    // Pure horizontal → weight = range_weights.x * cos(0) + range_weights.y * sin(0)
-    //                          = 2.0 * 1 + 0.5 * 0 = 2.0
+    // gain = 1 + 0.005·ips (classic LEGACY, power 2)
+
+    // Pure horizontal → reference_angle = 0 → weight = 2.0
+    // scale = 1 + 0.05·2 = 1.10 → x = 11.0
     vec2d h = { 10.0, 0.0 };
     mod.modify(h, sp, settings, 1.0, 1.0);
-    // noaccel gain = 1.0, scale = 1.0 * weight = 2.0
-    EXPECT_NEAR(h.x, 20.0, 1.0);  // 10 * 2.0
+    EXPECT_NEAR(h.x, 11.0, 1e-6);
 
-    // Pure vertical → weight = 2.0 * cos(π/2) + 0.5 * sin(π/2)
-    //                        = 2.0 * 0 + 0.5 * 1 = 0.5
+    // Pure vertical → reference_angle = π/2 → weight = 2 + (0.5-2)·1 = 0.5
+    // scale = 1 + 0.05·0.5 = 1.025 → y = 10.25
     vec2d v = { 0.0, 10.0 };
     mod.modify(v, sp, settings, 1.0, 1.0);
-    EXPECT_NEAR(v.y, 5.0, 1.0);  // 10 * 0.5
+    EXPECT_NEAR(v.y, 10.25, 1e-6);
 
-    // 45° → weight = 2.0 * cos(π/4) + 0.5 * sin(π/4)
-    //             = 2.0 * 0.707 + 0.5 * 0.707 ≈ 1.768
+    // 45° → speed = 10√2 ≈ 14.1421, angle = π/4
+    // weight = 2 + (0.5-2)·(2/π)·(π/4) = 1.25
+    // gain = 1 + 0.005·14.1421 = 1.07071 → scale = 1 + 0.07071·1.25 ≈ 1.08839
+    // → x = y = 10 · 1.08839 ≈ 10.8839 (scale delta BİLEŞENLERİNE uygulanır)
     vec2d d = { 10.0, 10.0 };
     mod.modify(d, sp, settings, 1.0, 1.0);
     EXPECT(std::isfinite(d.x));
     EXPECT(std::isfinite(d.y));
-    double expected_weight = 2.0 * std::cos(M_PI / 4) + 0.5 * std::sin(M_PI / 4);
-    EXPECT_NEAR(d.x, 10.0 * expected_weight, 2.0);
+    EXPECT_NEAR(d.x, 10.8839, 0.5);
+    EXPECT_NEAR(d.y, 10.8839, 0.5);
 }
 
 static void test_classic_io_sign_with_cap() {
@@ -4494,9 +4731,13 @@ static void test_classic_io_sign_with_cap() {
     EXPECT(g_high >= 1.0);
     EXPECT(std::isfinite(g_mid));
     EXPECT(std::isfinite(g_high));
-    // At cap point (x=20), gain should be close to cap.y = 2.0
+    // GAIN io formunda cap.y=2.0 ASİMPTOT'tur: cap.x=20'de ulaşılmaz.
+    // accel_raised = gain_accel(20, 1, 2, 0) = 0.025 → c(20) = 2 - 10/20 = 1.5
     double g_cap = c(20.0, args);
-    EXPECT_NEAR(g_cap, 2.0, 0.2);
+    EXPECT_NEAR(g_cap, 1.5, 1e-9);
+    // Çok uzakta 1 + cap.y = 2.0 asimptotuna yakınsar (işaret çevrilmez)
+    // Sabit/x terimi 1e6'da ~1/1e6 ≈ 1e-6 kadar yaklaşır → tol 1e-4.
+    EXPECT_NEAR(c(1e6, args), 2.0, 1e-4);
 }
 
 static void test_power_offset_x_guard() {
@@ -4580,11 +4821,14 @@ static void test_speed_clamp_path() {
 static void test_dir_mul_negative_direction() {
     SECTION("R12 — directional DPI multiplier negative direction");
 
+    // Referans: lr/ud oranları SADECE negatif yöne (sol/aşağı) uygulanır,
+    // karşılığı değil; pozitif yön orandan etkilenmez.
+
     profile prof{};
     prof.accel_x.mode = accel_mode::noaccel;
     prof.accel_y = prof.accel_x;
-    prof.lr_output_dpi_ratio = 2.0;  // right = 2x, left = 0.5x
-    prof.ud_output_dpi_ratio = 3.0;  // down = 3x, up = 1/3x
+    prof.lr_output_dpi_ratio = 2.0;  // left = 2x, right değişmez
+    prof.ud_output_dpi_ratio = 3.0;  // up = 3x, down değişmez
 
     modifier_settings settings;
     settings.prof = prof;
@@ -4596,52 +4840,75 @@ static void test_dir_mul_negative_direction() {
     sp.init(prof.speed_processor_args);
     modifier mod;
 
-    // Positive X (right) → multiply by ratio
+    // Positive X (right) → no scaling
     vec2d right = { 10.0, 0.0 };
     mod.modify(right, sp, settings, 1.0, 1.0);
-    EXPECT_NEAR(right.x, 20.0, 1.0);  // 10 * 2.0
+    EXPECT_NEAR(right.x, 10.0, 1e-9);
 
-    // Negative X (left) → multiply by 1/ratio
+    // Negative X (left) → multiply by ratio
     vec2d left = { -10.0, 0.0 };
     mod.modify(left, sp, settings, 1.0, 1.0);
-    EXPECT_NEAR(left.x, -5.0, 1.0);   // -10 * (1/2.0)
+    EXPECT_NEAR(left.x, -20.0, 1e-9);   // -10 * 2.0
 
-    // Positive Y (down) → multiply by ratio
+    // Positive Y (down) → no scaling
     vec2d down = { 0.0, 10.0 };
     mod.modify(down, sp, settings, 1.0, 1.0);
-    EXPECT_NEAR(down.y, 30.0, 1.0);   // 10 * 3.0
+    EXPECT_NEAR(down.y, 10.0, 1e-9);
 
-    // Negative Y (up) → multiply by 1/ratio
+    // Negative Y (up) → multiply by ratio
     vec2d up = { 0.0, -10.0 };
     mod.modify(up, sp, settings, 1.0, 1.0);
-    EXPECT_NEAR(up.y, -10.0 / 3.0, 1.0);  // -10 * (1/3.0)
+    EXPECT_NEAR(up.y, -30.0, 1e-9);     // -10 * 3.0
 }
 
 static void test_synchronous_power_lt_one() {
-    SECTION("R12 — synchronous mode with power < 1 (MIN_SPEED guard)");
+    SECTION("R12 — synchronous LEGACY activation framework (guards + identity)");
 
+    // Referans activation_framework<LEGACY>: x == sync_speed → 1.0;
+    // x > sync_speed → motivity'ye yakınsar (üst sınır 1/motivity .. motivity).
     accel_args args;
-    args.mode = accel_mode::synchronous;
-    args.sync_speed = 5.0;
-    args.exponent_power = 0.3;  // < 1 → gain = pow(x/sync, -0.7) → ∞ as x→0
+    args.mode        = accel_mode::synchronous;
+    args.gain        = false;   // LEGACY yolu
+    args.sync_speed  = 5.0;
+    args.smooth      = 0.5;     // sharpness = 1 → tanh aktivasyon
+    args.motivity    = 1.5;
+    args.gamma       = 1.0;
 
     synchronous s(args);
 
-    // Very small speed → should hit MIN_SPEED guard, not produce Inf
+    // Çok küçük hız → port guard: x<=0 → 1.0, asla Inf/NaN yok
     double g_tiny = s(1e-10, args);
     EXPECT(std::isfinite(g_tiny));
 
-    // Zero speed → return 1.0
+    // Sıfır hız → 1.0 (port x<=0 guard'ı)
     double g_zero = s(0.0, args);
     EXPECT_NEAR(g_zero, 1.0, 1e-9);
 
-    // At sync_speed → gain = pow(1, power-1) = 1.0
+    // sync_speed'de özdeşlik: s(5)=1.0
     double g_sync = s(5.0, args);
     EXPECT_NEAR(g_sync, 1.0, 1e-6);
 
-    // Above sync_speed → gain > 1 (when power < 1, gain = pow(x/sync, power-1) < 1 actually)
+    // Üstünde: artar, motivity (1.5) sınırına yakınsar
     double g_high = s(100.0, args);
     EXPECT(std::isfinite(g_high));
+    EXPECT(g_high > 1.0);
+    EXPECT_NEAR(g_high, 1.5, 1e-6);   // exp(tanh(γ_const·log20)·log_motivity) → motivity
+
+    // Altında: 1'den küçük ama ≥ minimum_sens = 1/motivity = 0.6667
+    double g_low = s(2.0, args);
+    EXPECT(std::isfinite(g_low));
+    EXPECT(g_low < 1.0);
+    EXPECT(g_low > 1.0 / 1.5 - 1e-9);
+    EXPECT_NEAR(g_low, 0.672517, 1e-6); // exp(-tanh(γ_const·log(5/2))·log_motivity)
+
+    // smooth=0 → doğrusal kırpma: min/maks sens arasında sabit
+    accel_args args_clamp = args;
+    args_clamp.smooth = 0.0;
+    synchronous sc(args_clamp);
+    EXPECT_NEAR(sc(1e-6, args_clamp), 1.0 / 1.5, 1e-6);  // log_space < -1 → minimum
+    EXPECT_NEAR(sc(1.0,  args_clamp), 1.0 / 1.5, 1e-6);  // log_space < -1 → minimum
+    EXPECT_NEAR(sc(5.0,  args_clamp), 1.0, 1e-9);        // sync_speed
+    EXPECT_NEAR(sc(100.0, args_clamp), 1.5, 1e-6);       // log_space > 1 → motivity
 }
 
 static void test_natural_legacy_mode() {
@@ -4869,21 +5136,26 @@ static void test_lat_stats_move_semantics() {
 static void test_dpi_factor_precompute() {
     SECTION("R13 — dpi_factor pre-compute consistency");
 
-    // Verify that dpi_factor = dpi / NORMALIZED_DPI for various DPI values
+    // Verify that dpi_factor = NORMALIZED_DPI / dpi for various DPI values.
+    // O6: reference uses input_dpi_normalization_factor = NORMALIZED_DPI / dpi
+    // (was inverted to dpi/NORMALIZED_DPI before the alignment).  With this
+    // convention, speed = counts/ms * dpi_factor is the true movement speed in
+    // inches/sec and the accel curve triggers at the same physical speed
+    // regardless of the sensor DPI.
     for (int dpi : {100, 400, 800, 1600, 3200, 16000, 32000}) {
-        double expected = dpi / NORMALIZED_DPI;
+        double expected = NORMALIZED_DPI / dpi;
         // Simulate what apply_profile does:
-        double computed = std::clamp(dpi, 1, 32000) / NORMALIZED_DPI;
+        double computed = NORMALIZED_DPI / std::clamp(dpi, 1, 32000);
         EXPECT_NEAR(computed, expected, 1e-12);
     }
 
     // Extreme: DPI=1 (min), DPI=32000 (max)
-    EXPECT_NEAR(1.0 / NORMALIZED_DPI, 0.001, 1e-9);
-    EXPECT_NEAR(32000.0 / NORMALIZED_DPI, 32.0, 1e-9);
+    EXPECT_NEAR(NORMALIZED_DPI / 1.0, 1000.0, 1e-9);
+    EXPECT_NEAR(NORMALIZED_DPI / 32000.0, 0.03125, 1e-9);
 
     // Verify the division result is finite and positive for all valid DPI
     for (int dpi = 1; dpi <= 32000; dpi += 1000) {
-        double f = dpi / NORMALIZED_DPI;
+        double f = NORMALIZED_DPI / dpi;
         EXPECT(std::isfinite(f));
         EXPECT(f > 0);
     }
@@ -4931,15 +5203,18 @@ static void test_lut_binary_search_boundaries() {
     SECTION("R15 — LUT binary search boundary exhaustive");
 
     // 2-point LUT: linear interpolation between exactly 2 points
+    // (velocity off → stored y kazanım olarak okunur; referans semantiği)
     {
         accel_args a = make_args(accel_mode::lookup);
+        a.gain = false;  // velocity off → y doğrudan kazanım
         a.data[0] = 10.0f; a.data[1] = 1.0f;  // speed=10 → gain=1.0
         a.data[2] = 50.0f; a.data[3] = 3.0f;  // speed=50 → gain=3.0
         a.length = 4;
         accel_union au; au.init(a);
 
-        // Below first point → clamp to first gain
-        EXPECT_NEAR(au.apply(0.0, a), 1.0, 1e-9);
+        // x <= 0 → 0 (reference lookup: strictly positive domain)
+        EXPECT_NEAR(au.apply(0.0, a), 0.0, 1e-9);
+        // Below first point → fallback to first point's gain
         EXPECT_NEAR(au.apply(5.0, a), 1.0, 1e-9);
         EXPECT_NEAR(au.apply(10.0, a), 1.0, 1e-9);
 
@@ -4949,14 +5224,17 @@ static void test_lut_binary_search_boundaries() {
         // At second point exactly
         EXPECT_NEAR(au.apply(50.0, a), 3.0, 1e-9);
 
-        // Above last point → clamp to last gain
-        EXPECT_NEAR(au.apply(100.0, a), 3.0, 1e-9);
-        EXPECT_NEAR(au.apply(1e6, a), 3.0, 1e-9);
+        // Above last point → referans lerp t>1 ile EKSTRAPOLASYON yapar (kırpma değil).
+        // y = 1 + (100-10)/(50-10)·2 = 5.5
+        EXPECT_NEAR(au.apply(100.0, a), 5.5, 1e-9);
+        // Far extrapolation (float index resolution): ~2 + (1e6-30)/20 ≈ 50000.5
+        EXPECT_NEAR(au.apply(1e6, a), 50000.5, 0.5);
     }
 
     // 3-point LUT: binary search mid calculation
     {
         accel_args a = make_args(accel_mode::lookup);
+        a.gain = false;  // velocity off → y doğrudan kazanım
         a.data[0] = 0.0f;  a.data[1] = 1.0f;
         a.data[2] = 25.0f; a.data[3] = 2.0f;
         a.data[4] = 50.0f; a.data[5] = 4.0f;
@@ -4964,7 +5242,7 @@ static void test_lut_binary_search_boundaries() {
         accel_union au; au.init(a);
 
         // Verify each segment
-        EXPECT_NEAR(au.apply(0.0, a), 1.0, 1e-9);
+        EXPECT_NEAR(au.apply(0.0, a), 0.0, 1e-9);   // x<=0 → 0
         EXPECT_NEAR(au.apply(12.5, a), 1.5, 1e-9);  // midpoint seg 1
         EXPECT_NEAR(au.apply(25.0, a), 2.0, 1e-9);
         EXPECT_NEAR(au.apply(37.5, a), 3.0, 1e-9);  // midpoint seg 2
@@ -4974,6 +5252,7 @@ static void test_lut_binary_search_boundaries() {
     // Max capacity LUT: fill all 257 points and verify endpoints
     {
         accel_args a = make_args(accel_mode::lookup);
+        a.gain = false;  // velocity off → y doğrudan kazanım
         int cap = (int)LUT_POINTS_CAPACITY;
         a.length = cap * 2;
         for (int i = 0; i < cap; i++) {
@@ -4983,11 +5262,11 @@ static void test_lut_binary_search_boundaries() {
         accel_union au; au.init(a);
 
         // First point
-        EXPECT_NEAR(au.apply(0.0, a), 1.0, 1e-4);
+        EXPECT_NEAR(au.apply(0.0, a), 0.0, 1e-4);
         // Last point
         EXPECT_NEAR(au.apply(cap - 1, a), 1.0 + (cap - 1) * 0.01, 0.01);
-        // Beyond last
-        EXPECT_NEAR(au.apply(1000.0, a), 1.0 + (cap - 1) * 0.01, 0.01);
+        // Beyond last → ekstrapolasyon: y = 3.55 + (1000-255)·(3.56-3.55) = 11.0
+        EXPECT_NEAR(au.apply(1000.0, a), 11.0, 0.01);
         // Mid-point interpolation
         EXPECT_NEAR(au.apply(128.5, a), 1.0 + 128.5 * 0.01, 0.01);
     }
@@ -5412,13 +5691,15 @@ static void test_synchronous_edge_cases() {
         EXPECT(std::fabs(g_below - g_above) < 0.1);
     }
 
-    // Zero acceleration → gain = 1.0
+    // Synchronous'ta acceleration kullanılmaz (sigmoide etki etmez).
+    // Default profil (mot=1.5, smooth=0.5, sync=5, gamma=1) GAIN LUT referans
+    // değeri: s(5) = 0.742577 (referans probe ile doğrulandı).
     {
         accel_args a = make_args(accel_mode::synchronous);
         a.acceleration = 0.0;
         a.gain = true;
         accel_union au; au.init(a);
-        EXPECT_NEAR(au.apply(5.0, a), 1.0, 1e-6);
+        EXPECT_NEAR(au.apply(5.0, a), 0.742577, 1e-6);
     }
 }
 
@@ -5479,6 +5760,7 @@ int main(int argc, char** argv) {
     test_json_roundtrip();
     test_json_roundtrip_lut();
     test_file_roundtrip();
+    test_save_config_relative_path();
     test_monotonic();
     test_power_monotonic();
     test_classic_cap_modes();
@@ -5545,6 +5827,7 @@ int main(int argc, char** argv) {
     test_subpixel_cumulative_drift();
     test_classic_gain_mode_cap_consistency();
     test_natural_gain_formula();
+    test_natural_reference_values();
 
     // R10 — EMA smoother, NaN propagation, event batching, config edge cases
     test_ema_smoother_halflife();
@@ -5587,6 +5870,7 @@ int main(int argc, char** argv) {
     // R13 — lat_stats move safety + dpi_factor pre-compute
     test_lat_stats_move_semantics();
     test_dpi_factor_precompute();
+    test_output_dpi_applied();
 
     // R14 — magnitude hypot overflow safety
     test_magnitude_hypot();

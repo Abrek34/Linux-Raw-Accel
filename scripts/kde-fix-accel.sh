@@ -152,7 +152,7 @@ PYEOF
 reload_kwin() {
     echo "  Reloading KWin input settings..."
     local reloaded=0
-    for cmd in qdbus6 qdbus; do
+    for cmd in qdbus6 qdbus-qt6 qdbus; do
         if command -v "$cmd" &>/dev/null; then
             if "$cmd" org.kde.KWin /KWin reconfigure 2>/dev/null; then
                 echo "  ✓ KWin reconfigured via $cmd."

@@ -62,6 +62,8 @@ struct InputDeviceInfo {
 struct AppState {
     app_config  config;
     std::string config_path;
+    std::string lang_path;          // <config_dir>/gui_lang — language preference
+    int         lang_override = -1; // -1 = auto (locale), 0 = English, 1 = Türkçe
     int         current_profile_idx = 0;
     bool        xy_linked  = true;
     bool        updating   = false;
@@ -90,11 +92,13 @@ struct AppState {
     // Auto-detected device properties (from daemon status_json)
     int    detected_dpi          = 0;  // 0 = unknown
     int    detected_polling_rate = 0;  // 0 = unknown
+    int    detected_battery      = -1; // -1 = unknown, 0-100 = percent
     // Auto-fill hint labels and buttons (Device section)
     GtkWidget* dpi_detected_lbl      = nullptr;
     GtkWidget* polling_detected_lbl  = nullptr;
     GtkWidget* dpi_autofill_btn      = nullptr;
     GtkWidget* polling_autofill_btn  = nullptr;
+    GtkWidget* battery_detected_lbl  = nullptr; // battery % label
 
     // ── Widgets ──────────────────────────────────────────────────────────────
     GtkWidget* window            = nullptr;
@@ -106,10 +110,12 @@ struct AppState {
     GtkWidget* daemon_start_btn  = nullptr;
     GtkWidget* daemon_stop_btn   = nullptr;
     GtkWidget* daemon_reload_btn = nullptr;
+    GtkWidget* lang_combo        = nullptr; // header-bar language selector
 
     // Accel X
     GtkWidget* mode_combo         = nullptr;
     GtkWidget* gain_check         = nullptr;
+    GtkWidget* mode_hint_lbl      = nullptr; // one-line "which params apply" note
     GtkWidget* accel_spin         = nullptr;
     GtkWidget* exponent_spin      = nullptr;
     GtkWidget* power_exp_spin     = nullptr;
@@ -125,6 +131,8 @@ struct AppState {
     GtkWidget* gamma_spin         = nullptr;
     GtkWidget* output_offset_spin = nullptr;
     GtkWidget* scale_spin         = nullptr;
+    // Labels of the Accel X params grid rows (index = grid row) — for per-mode show/hide
+    GtkWidget* accel_row_label[15] = {};
 
     // Accel Y
     GtkWidget* xy_link_btn     = nullptr;
@@ -135,6 +143,8 @@ struct AppState {
     GtkWidget* offset_spin_y   = nullptr;
     GtkWidget* cap_y_spin_y    = nullptr;
     GtkWidget* y_axis_frame    = nullptr;
+    // Labels of the Y params grid rows (index = grid row) — for per-mode show/hide
+    GtkWidget* y_row_label[6] = {};
 
     // Device
     GtkWidget* dpi_spin        = nullptr;
@@ -192,6 +202,7 @@ std::string check_duplicate_device_ids(const app_config& cfg);
 pid_t read_daemon_pid();
 bool  daemon_running();
 bool  daemon_send_signal(int sig, std::string* err_out = nullptr);
+bool  daemon_ipc_push_config(const std::string& json);
 void  update_daemon_status(AppState* S);
 
 // profile
@@ -206,7 +217,7 @@ void widgets_to_profile(AppState* S);
 void profile_to_widgets(AppState* S);
 
 // device combo
-void refresh_mice_combo(AppState* S, bool is_auto = false);
+void refresh_mice_combo(AppState* S, bool is_auto = false, bool quiet = false);
 
 // graph / LUT
 void rebuild_lut_list(AppState* S);

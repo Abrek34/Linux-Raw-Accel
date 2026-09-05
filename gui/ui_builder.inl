@@ -18,22 +18,36 @@ void connect_spin(GtkWidget* s, gpointer user_data) {
 }
 
 void grid_row(GtkWidget* grid, int row, const char* label, GtkWidget* w) {
-    GtkWidget* lbl = gtk_label_new(label);
+    GtkWidget* lbl = gtk_label_new(tr(label));
     gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
     gtk_widget_set_margin_end(lbl, 6);
     gtk_grid_attach(GTK_GRID(grid), lbl, 0, row, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), w,   1, row, 1, 1);
+    tr_register(lbl, TR_LABEL, label);
+}
+
+// grid_row variant that also stores the generated label, so the row can be
+// shown/hidden together with its widget when the accel mode changes.
+void grid_row2(GtkWidget* grid, int row, const char* label, GtkWidget* w, GtkWidget** label_out) {
+    GtkWidget* lbl = gtk_label_new(tr(label));
+    gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
+    gtk_widget_set_margin_end(lbl, 6);
+    gtk_grid_attach(GTK_GRID(grid), lbl, 0, row, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), w,   1, row, 1, 1);
+    if (label_out) *label_out = lbl;
+    tr_register(lbl, TR_LABEL, label);
 }
 
 GtkWidget* make_section(const char* markup_title) {
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     GtkWidget* lbl = gtk_label_new(nullptr);
-    gtk_label_set_markup(GTK_LABEL(lbl), markup_title);
+    gtk_label_set_markup(GTK_LABEL(lbl), tr(markup_title));
     gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
     gtk_widget_set_margin_top(lbl, 10);
     gtk_box_append(GTK_BOX(box), lbl);
     GtkWidget* sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_box_append(GTK_BOX(box), sep);
+    tr_register(lbl, TR_MARKUP, markup_title);
     return box;
 }
 
@@ -85,37 +99,51 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     };
     for (auto& b : pbts) {
         GtkWidget* btn = gtk_button_new_from_icon_name(b.icon);
-        gtk_widget_set_tooltip_text(btn, b.tip);
+        trtip(btn, b.tip);
         g_signal_connect(btn, "clicked", b.cb, S);
         gtk_header_bar_pack_start(GTK_HEADER_BAR(hbar), btn);
     }
 
-    // Right side: daemon controls + save/apply
-    S->daemon_status = gtk_label_new("● Checking...");
+    // Right side: daemon controls + save/apply + language selector
+    S->daemon_status = trlbl("● Checking...");
     gtk_widget_set_margin_end(S->daemon_status, 8);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(hbar), S->daemon_status);
 
+    // Language selector — items stay untranslated so the control always reads
+    // "Auto (locale) / English / Türkçe" regardless of the active language.
+    {
+        static const char* LANG_KEYS[] = {"Auto (locale)", "English", "Türkçe", nullptr};
+        GtkStringList* lsl = gtk_string_list_new(nullptr);
+        for (int i = 0; LANG_KEYS[i]; i++) gtk_string_list_append(lsl, tr(LANG_KEYS[i]));
+        S->lang_combo = gtk_drop_down_new(G_LIST_MODEL(lsl), nullptr);
+        g_object_unref(lsl);
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(S->lang_combo), (guint)(S->lang_override + 1));
+        g_signal_connect(S->lang_combo, "notify::selected",
+                         G_CALLBACK(on_lang_changed), S);
+        gtk_header_bar_pack_end(GTK_HEADER_BAR(hbar), S->lang_combo);
+    }
+
     // Daemon control buttons — store pointers in AppState
     // so update_daemon_status() can set the correct sensitivity
-    S->daemon_reload_btn = gtk_button_new_with_label("Reload");
+    S->daemon_reload_btn = trbtn("Reload");
     g_signal_connect(S->daemon_reload_btn, "clicked", G_CALLBACK(on_daemon_reload), S);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(hbar), S->daemon_reload_btn);
 
-    S->daemon_stop_btn = gtk_button_new_with_label("Stop");
+    S->daemon_stop_btn = trbtn("Stop");
     g_signal_connect(S->daemon_stop_btn, "clicked", G_CALLBACK(on_daemon_stop), S);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(hbar), S->daemon_stop_btn);
 
-    S->daemon_start_btn = gtk_button_new_with_label("Start");
+    S->daemon_start_btn = trbtn("Start");
     gtk_widget_add_css_class(S->daemon_start_btn, "suggested-action");
     g_signal_connect(S->daemon_start_btn, "clicked", G_CALLBACK(on_daemon_start), S);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(hbar), S->daemon_start_btn);
 
-    S->apply_btn = gtk_button_new_with_label("Apply & Reload");
+    S->apply_btn = trbtn("Apply & Reload");
     gtk_widget_add_css_class(S->apply_btn, "suggested-action");
     g_signal_connect(S->apply_btn, "clicked", G_CALLBACK(on_apply_clicked), S);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(hbar), S->apply_btn);
 
-    GtkWidget* save_btn = gtk_button_new_with_label("Save");
+    GtkWidget* save_btn = trbtn("Save");
     g_signal_connect(save_btn, "clicked", G_CALLBACK(on_save_clicked), S);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(hbar), save_btn);
 
@@ -153,8 +181,8 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     };
 
     // ── Raw Passthrough ───────────────────────────────────────────────────────
-    S->raw_check = gtk_check_button_new_with_label("Raw Passthrough (bypass all acceleration)");
-    gtk_widget_set_tooltip_text(S->raw_check,
+    S->raw_check = trchk("Raw Passthrough (bypass all acceleration)");
+    trtip(S->raw_check,
         "When enabled, the entire acceleration pipeline is bypassed.\n"
         "No rotation, snap, speed clamp, weights, or sub-pixel accumulation —\n"
         "raw kernel counts are written directly to uinput (1:1 passthrough).");
@@ -169,15 +197,25 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     const char* mode_names[] = {
         "None (1:1)", "Classic", "Power", "Natural", "Jump", "Synchronous",
         "Lookup (LUT)", nullptr };
-    GtkStringList* msl = gtk_string_list_new(mode_names);
-    S->mode_combo = gtk_drop_down_new(G_LIST_MODEL(msl), nullptr);
+    S->mode_combo = gtk_drop_down_new(nullptr, nullptr);
+    tr_combo_fill(S->mode_combo, mode_names);
     gtk_widget_set_hexpand(S->mode_combo, TRUE);
     g_signal_connect(S->mode_combo, "notify::selected", G_CALLBACK(on_notify_param_changed), S);
     grid_row(ag, 0, "Mode:", S->mode_combo);
 
-    S->gain_check = gtk_check_button_new_with_label("Gain mode (recommended)");
+    S->gain_check = trchk("Gain mode (recommended)");
     g_signal_connect(S->gain_check, "toggled", G_CALLBACK(on_param_changed), S);
     gtk_grid_attach(GTK_GRID(ag), S->gain_check, 0, 1, 2, 1);
+    trtip(S->gain_check,
+        "Classic/Jump/Natural/Synchronous: use the integral (output-speed) form of the curve.\n"
+        "Lookup: gain points are treated as output speeds (gain = y / speed).");
+
+    // Mode hint — a one-line note on which params the selected mode actually uses
+    S->mode_hint_lbl = gtk_label_new(nullptr);
+    gtk_label_set_xalign(GTK_LABEL(S->mode_hint_lbl), 0.0);
+    gtk_label_set_wrap(GTK_LABEL(S->mode_hint_lbl), TRUE);
+    gtk_widget_set_margin_top(S->mode_hint_lbl, 2);
+    gtk_grid_attach(GTK_GRID(ag), S->mode_hint_lbl, 0, 2, 2, 1);
 
     S->accel_spin      = make_spin(0,    20,    0.001, 0.005);
     S->exponent_spin   = make_spin(1,    10,    0.05,  2.0);
@@ -202,9 +240,43 @@ void build_ui(AppState* S, GtkApplication* gapp) {
                     S->output_offset_spin, S->scale_spin})
         connect_spin(s, S);
 
+    // Tooltips state which mode(s) each parameter belongs to.
+    trtip(S->accel_spin,
+        "Classic: acceleration coefficient of the power curve.");
+    trtip(S->exponent_spin,
+        "Classic: exponent of the power curve.");
+    trtip(S->power_exp_spin,
+        "Power: exponent of the curve.");
+    trtip(S->limit_spin,
+        "Natural: gain limit above the 1.0 baseline.");
+    trtip(S->offset_spin,
+        "Classic/Natural: speeds below this map to 1.0 (no acceleration).");
+    trtip(S->decay_spin,
+        "Natural: how quickly gain approaches the limit.");
+    trtip(S->cap_x_spin,
+        "Classic/Power: cap input speed (ips) — combined with Cap Mode.\n"
+        "Jump: step position — input speed where the jump occurs.");
+    trtip(S->cap_y_spin,
+        "Classic/Power: cap output gain/DPI multiplier — combined with Cap Mode.\n"
+        "Jump: step amount — gain after the jump.");
+    trtip(S->cap_mode_combo,
+        "Classic/Power: out = clamp gain, in = clamp speed, io = clamp both at a selected point.");
+    trtip(S->sync_speed_spin,
+        "Synchronous: speed where the multiplier = 1.");
+    trtip(S->smooth_spin,
+        "Jump: sigmoid steepness. Synchronous: sharpness of the tanh blend (smaller = smoother).");
+    trtip(S->output_offset_spin,
+        "Power: raises the curve on the output side.");
+    trtip(S->scale_spin,
+        "Power: scale factor of the curve.");
+    trtip(S->motivity_spin,
+        "Synchronous: maximum multiplier (minimum = 1/motivity).");
+    trtip(S->gamma_spin,
+        "Synchronous: width of the activation curve in log space.");
+
     const char* cap_names[] = {"Output (out)", "Input (in)", "I/O (io)", nullptr};
-    GtkStringList* csl = gtk_string_list_new(cap_names);
-    S->cap_mode_combo = gtk_drop_down_new(G_LIST_MODEL(csl), nullptr);
+    S->cap_mode_combo = gtk_drop_down_new(nullptr, nullptr);
+    tr_combo_fill(S->cap_mode_combo, cap_names);
     gtk_widget_set_hexpand(S->cap_mode_combo, TRUE);
     g_signal_connect(S->cap_mode_combo, "notify::selected", G_CALLBACK(on_notify_param_changed), S);
 
@@ -216,21 +288,21 @@ void build_ui(AppState* S, GtkApplication* gapp) {
         gtk_widget_set_margin_start(pg, 4); gtk_widget_set_margin_end(pg, 4);
         gtk_widget_set_margin_top(pg, 4);   gtk_widget_set_margin_bottom(pg, 4);
         gtk_frame_set_child(GTK_FRAME(S->accel_params_frame), pg);
-        grid_row(pg, 0, "Accel:", S->accel_spin);
-        grid_row(pg, 1, "Exp (cls):", S->exponent_spin);
-        grid_row(pg, 2, "Exp (pwr):", S->power_exp_spin);
-        grid_row(pg, 3, "Limit:", S->limit_spin);
-        grid_row(pg, 4, "Input Offset:", S->offset_spin);
-        grid_row(pg, 5, "Decay Rate:", S->decay_spin);
-        grid_row(pg, 6, "Cap X:", S->cap_x_spin);
-        grid_row(pg, 7, "Cap Y:", S->cap_y_spin);
-        grid_row(pg, 8, "Cap Mode:", S->cap_mode_combo);
-        grid_row(pg, 9, "Sync Speed:", S->sync_speed_spin);
-        grid_row(pg, 10, "Smoothing:", S->smooth_spin);
-        grid_row(pg, 11, "Motivity:", S->motivity_spin);
-        grid_row(pg, 12, "Gamma:", S->gamma_spin);
-        grid_row(pg, 13, "Out Offset:", S->output_offset_spin);
-        grid_row(pg, 14, "Scale:", S->scale_spin);
+        grid_row2(pg, 0, "Accel:",         S->accel_spin,        &S->accel_row_label[0]);
+        grid_row2(pg, 1, "Exp (cls):",     S->exponent_spin,     &S->accel_row_label[1]);
+        grid_row2(pg, 2, "Exp (pwr):",     S->power_exp_spin,    &S->accel_row_label[2]);
+        grid_row2(pg, 3, "Limit:",         S->limit_spin,        &S->accel_row_label[3]);
+        grid_row2(pg, 4, "Input Offset:",  S->offset_spin,       &S->accel_row_label[4]);
+        grid_row2(pg, 5, "Decay Rate:",    S->decay_spin,        &S->accel_row_label[5]);
+        grid_row2(pg, 6, "Cap X:",         S->cap_x_spin,        &S->accel_row_label[6]);
+        grid_row2(pg, 7, "Cap Y:",         S->cap_y_spin,        &S->accel_row_label[7]);
+        grid_row2(pg, 8, "Cap Mode:",      S->cap_mode_combo,    &S->accel_row_label[8]);
+        grid_row2(pg, 9, "Sync Speed:",    S->sync_speed_spin,   &S->accel_row_label[9]);
+        grid_row2(pg, 10, "Smoothing:",    S->smooth_spin,       &S->accel_row_label[10]);
+        grid_row2(pg, 11, "Motivity:",     S->motivity_spin,     &S->accel_row_label[11]);
+        grid_row2(pg, 12, "Gamma:",        S->gamma_spin,        &S->accel_row_label[12]);
+        grid_row2(pg, 13, "Out Offset:",   S->output_offset_spin,&S->accel_row_label[13]);
+        grid_row2(pg, 14, "Scale:",        S->scale_spin,        &S->accel_row_label[14]);
     }
     gtk_box_append(GTK_BOX(lvbox), S->accel_params_frame);
 
@@ -247,8 +319,7 @@ void build_ui(AppState* S, GtkApplication* gapp) {
         gtk_frame_set_child(GTK_FRAME(S->lut_frame), lut_vbox);
 
         // Bilgi etiketi
-        GtkWidget* info_lbl = gtk_label_new(nullptr);
-        gtk_label_set_markup(GTK_LABEL(info_lbl),
+        GtkWidget* info_lbl = trmlbl(
             "<small>Left click: add point on graph\n"
             "Right click: remove point on graph\n"
             "Points are speed (ips) → gain pairs.</small>");
@@ -270,14 +341,14 @@ void build_ui(AppState* S, GtkApplication* gapp) {
         g_object_set_data(G_OBJECT(S->lut_list_box), "app-state", S);
 
         // "Nokta Ekle" butonu
-        GtkWidget* add_btn = gtk_button_new_with_label("+ Add Point");
+        GtkWidget* add_btn = trbtn("+ Add Point");
         gtk_widget_add_css_class(add_btn, "suggested-action");
         g_signal_connect(add_btn, "clicked", G_CALLBACK(on_lut_add_point), S);
         gtk_box_append(GTK_BOX(lut_vbox), add_btn);
 
         // "Sort" button — reorder points by speed
-        GtkWidget* sort_btn = gtk_button_new_with_label("Sort");
-        gtk_widget_set_tooltip_text(sort_btn, "Sort points by speed value (ascending)");
+        GtkWidget* sort_btn = trbtn("Sort");
+        trtip(sort_btn, "Sort points by speed value (ascending)");
         g_signal_connect(sort_btn, "clicked", G_CALLBACK(+[](GtkWidget*, gpointer ud) {
             auto* S2 = static_cast<AppState*>(ud);
             auto& ax = cur_prof(S2).prof.accel_x;
@@ -293,7 +364,7 @@ void build_ui(AppState* S, GtkApplication* gapp) {
 
     // ── XY Link ───────────────────────────────────────────────────────────────
     append_section("<b>Y Axis</b>");
-    S->xy_link_btn = gtk_check_button_new_with_label("Same as X (linked)");
+    S->xy_link_btn = trchk("Same as X (linked)");
     gtk_check_button_set_active(GTK_CHECK_BUTTON(S->xy_link_btn), TRUE);
     g_signal_connect(S->xy_link_btn, "toggled", G_CALLBACK(on_xy_link_toggled), S);
     gtk_box_append(GTK_BOX(lvbox), S->xy_link_btn);
@@ -307,8 +378,8 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     gtk_widget_set_margin_top(yg, 6);   gtk_widget_set_margin_bottom(yg, 6);
     gtk_frame_set_child(GTK_FRAME(S->y_axis_frame), yg);
 
-    GtkStringList* msl2 = gtk_string_list_new(mode_names);
-    S->mode_combo_y = gtk_drop_down_new(G_LIST_MODEL(msl2), nullptr);
+    S->mode_combo_y = gtk_drop_down_new(nullptr, nullptr);
+    tr_combo_fill(S->mode_combo_y, mode_names);
     gtk_widget_set_hexpand(S->mode_combo_y, TRUE);
     g_signal_connect(S->mode_combo_y, "notify::selected", G_CALLBACK(on_notify_param_changed), S);
 
@@ -321,12 +392,12 @@ void build_ui(AppState* S, GtkApplication* gapp) {
                     S->limit_spin_y, S->offset_spin_y, S->cap_y_spin_y})
         connect_spin(s, S);
 
-    grid_row(yg, 0, "Mode:",          S->mode_combo_y);
-    grid_row(yg, 1, "Accel:",         S->accel_spin_y);
-    grid_row(yg, 2, "Exp:",           S->exponent_spin_y);
-    grid_row(yg, 3, "Limit:",         S->limit_spin_y);
-    grid_row(yg, 4, "Input Offset:",  S->offset_spin_y);
-    grid_row(yg, 5, "Cap Y:",         S->cap_y_spin_y);
+    grid_row2(yg, 0, "Mode:",          S->mode_combo_y,    &S->y_row_label[0]);
+    grid_row2(yg, 1, "Accel:",         S->accel_spin_y,    &S->y_row_label[1]);
+    grid_row2(yg, 2, "Exp:",           S->exponent_spin_y, &S->y_row_label[2]);
+    grid_row2(yg, 3, "Limit:",         S->limit_spin_y,    &S->y_row_label[3]);
+    grid_row2(yg, 4, "Input Offset:",  S->offset_spin_y,   &S->y_row_label[4]);
+    grid_row2(yg, 5, "Cap Y:",         S->cap_y_spin_y,    &S->y_row_label[5]);
 
     // ── Rotasyon & Snap ───────────────────────────────────────────────────────
     append_section("<b>Rotation &amp; Snap</b>");
@@ -343,9 +414,9 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     grid_row(rg, 1, "Snap (°):",     S->snap_spin);
     grid_row(rg, 2, "LR Ratio:",     S->lr_ratio_spin);
     grid_row(rg, 3, "UD Ratio:",     S->ud_ratio_spin);
-    gtk_widget_set_tooltip_text(S->lr_ratio_spin,
+    trtip(S->lr_ratio_spin,
         "Left/right output DPI ratio (1.0 = off). Values >1 amplify rightward movement.");
-    gtk_widget_set_tooltip_text(S->ud_ratio_spin,
+    trtip(S->ud_ratio_spin,
         "Up/down output DPI ratio (1.0 = off). Values >1 amplify downward movement.");
 
     // ── Speed Limit ───────────────────────────────────────────────────────────
@@ -357,12 +428,10 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     connect_spin(S->speed_max_spin, S);
     grid_row(sg, 0, "Min (ips):", S->speed_min_spin);
     grid_row(sg, 1, "Max (ips):", S->speed_max_spin);
-    gtk_widget_set_tooltip_text(S->speed_min_spin, "Minimum speed clamp (ips). 0 = disabled.");
-    gtk_widget_set_tooltip_text(S->speed_max_spin, "Maximum speed clamp (ips). Set to 0 to disable clamping.");
+    trtip(S->speed_min_spin, "Minimum speed clamp (ips). 0 = disabled.");
+    trtip(S->speed_max_spin, "Maximum speed clamp (ips). Set to 0 to disable clamping.");
     {
-        GtkWidget* speed_hint = gtk_label_new(nullptr);
-        gtk_label_set_markup(GTK_LABEL(speed_hint),
-            "<small>Set Max to 0 to disable speed clamping.</small>");
+        GtkWidget* speed_hint = trmlbl("<small>Set Max to 0 to disable speed clamping.</small>");
         gtk_label_set_xalign(GTK_LABEL(speed_hint), 0.0);
         gtk_box_append(GTK_BOX(lvbox), speed_hint);
     }
@@ -372,11 +441,11 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     GtkWidget* spg = append_grid();
     {
         const char* dist_names[] = {"Euclidean", "Max", "Lp", "Separate", nullptr};
-        GtkStringList* dsl = gtk_string_list_new(dist_names);
-        S->dist_mode_combo = gtk_drop_down_new(G_LIST_MODEL(dsl), nullptr);
+        S->dist_mode_combo = gtk_drop_down_new(nullptr, nullptr);
+        tr_combo_fill(S->dist_mode_combo, dist_names);
         gtk_widget_set_hexpand(S->dist_mode_combo, TRUE);
         g_signal_connect(S->dist_mode_combo, "notify::selected", G_CALLBACK(on_notify_param_changed), S);
-        gtk_widget_set_tooltip_text(S->dist_mode_combo,
+        trtip(S->dist_mode_combo,
             "How speed is calculated from X/Y input:\n"
             "  Euclidean — √(x²+y²)  (default)\n"
             "  Max — max(|x|,|y|)\n"
@@ -386,10 +455,10 @@ void build_ui(AppState* S, GtkApplication* gapp) {
 
         S->lp_norm_spin = make_spin(1.0, 32.0, 0.5, 2.0);
         connect_spin(S->lp_norm_spin, S);
-        gtk_widget_set_tooltip_text(S->lp_norm_spin,
+        trtip(S->lp_norm_spin,
             "Lp-norm exponent (only used when Distance = Lp). 2 = Euclidean, large values → Max.");
         // Build the lp_norm row manually so we can get the label widget for show/hide
-        S->lp_norm_label = gtk_label_new("Lp Norm:");
+        S->lp_norm_label = trlbl("Lp Norm:");
         gtk_label_set_xalign(GTK_LABEL(S->lp_norm_label), 0.0);
         gtk_widget_set_margin_end(S->lp_norm_label, 6);
         gtk_grid_attach(GTK_GRID(spg), S->lp_norm_label, 0, 1, 1, 1);
@@ -403,19 +472,18 @@ void build_ui(AppState* S, GtkApplication* gapp) {
         connect_spin(S->input_hl_spin, S);
         connect_spin(S->scale_hl_spin, S);
         connect_spin(S->output_hl_spin, S);
-        gtk_widget_set_tooltip_text(S->input_hl_spin,
+        trtip(S->input_hl_spin,
             "EMA half-life for input speed smoothing (ms). 0 = off.");
-        gtk_widget_set_tooltip_text(S->scale_hl_spin,
+        trtip(S->scale_hl_spin,
             "EMA half-life for scale smoothing (ms). 0 = off.");
-        gtk_widget_set_tooltip_text(S->output_hl_spin,
+        trtip(S->output_hl_spin,
             "EMA half-life for output speed smoothing (ms). 0 = off.");
         grid_row(spg, 2, "Input HL:", S->input_hl_spin);
         grid_row(spg, 3, "Scale HL:", S->scale_hl_spin);
         grid_row(spg, 4, "Output HL:", S->output_hl_spin);
     }
     {
-        GtkWidget* sp_hint = gtk_label_new(nullptr);
-        gtk_label_set_markup(GTK_LABEL(sp_hint),
+        GtkWidget* sp_hint = trmlbl(
             "<small>HL = EMA half-life in ms. 0 = smoothing off.\n"
             "Separate: X and Y each processed by their own axis.</small>");
         gtk_label_set_xalign(GTK_LABEL(sp_hint), 0.0);
@@ -432,7 +500,7 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     connect_spin(S->dpi_spin, S);
     connect_spin(S->polling_spin, S);
     connect_spin(S->output_dpi_spin, S);
-    gtk_widget_set_tooltip_text(S->output_dpi_spin,
+    trtip(S->output_dpi_spin,
         "Output DPI normalization value (default: 1000).\n"
         "Change this to match your monitor's effective DPI scaling.");
     grid_row(dg, 0, "DPI:", S->dpi_spin);
@@ -447,7 +515,7 @@ void build_ui(AppState* S, GtkApplication* gapp) {
 
         // Dropdown model: "All devices" + discovered mice
         GtkStringList* mlist = gtk_string_list_new(nullptr);
-        gtk_string_list_append(mlist, "All devices (default)");
+        gtk_string_list_append(mlist, tr("All devices (default)"));
         for (auto& m : S->mice_list) {
             // Display: "Name  [/dev/input/eventN]"
             std::string label = m.name + "  [" + m.event_node + "]";
@@ -464,7 +532,7 @@ void build_ui(AppState* S, GtkApplication* gapp) {
 
         // Yenile butonu — fare listesini yeniden tara
         GtkWidget* refresh_btn = gtk_button_new_from_icon_name("view-refresh-symbolic");
-        gtk_widget_set_tooltip_text(refresh_btn, "Rescan connected mice");
+        trtip(refresh_btn, "Rescan connected mice");
         g_signal_connect(refresh_btn, "clicked",
             G_CALLBACK(+[](GtkWidget*, gpointer ud) {
                 refresh_mice_combo(static_cast<AppState*>(ud), /*is_auto=*/false);
@@ -487,8 +555,7 @@ void build_ui(AppState* S, GtkApplication* gapp) {
         }
 
         // Small informational label
-        GtkWidget* hint = gtk_label_new(nullptr);
-        gtk_label_set_markup(GTK_LABEL(hint),
+        GtkWidget* hint = trmlbl(
             "<small>This profile applies only to the selected mouse.\n"
             "The daemon uses the event node as device_id.</small>");
         gtk_label_set_xalign(GTK_LABEL(hint), 0.0);
@@ -524,23 +591,22 @@ void build_ui(AppState* S, GtkApplication* gapp) {
         GtkWidget* warn_icon = gtk_label_new("⚠");
         gtk_box_append(GTK_BOX(warn_inner), warn_icon);
 
-        GtkWidget* warn_lbl = gtk_label_new(nullptr);
-        gtk_label_set_markup(GTK_LABEL(warn_lbl),
+        GtkWidget* warn_lbl = trmlbl(
             "<b>KDE: Mouse acceleration is NOT disabled!</b>  "
             "KDE will apply its own curve on top of RawAccel → double acceleration.");
         gtk_label_set_wrap(GTK_LABEL(warn_lbl), TRUE);
         gtk_widget_set_hexpand(warn_lbl, TRUE);
         gtk_box_append(GTK_BOX(warn_inner), warn_lbl);
 
-        GtkWidget* fix_btn = gtk_button_new_with_label("Fix Now");
-        gtk_widget_set_tooltip_text(fix_btn,
+        GtkWidget* fix_btn = trbtn("Fix Now");
+        trtip(fix_btn,
             "Sets PointerAccelerationProfile=Flat in ~/.config/kwinrc\n"
             "and reloads KWin input settings immediately (no logout needed).");
         g_signal_connect(fix_btn, "clicked", G_CALLBACK(on_kde_fix_clicked), S);
         gtk_box_append(GTK_BOX(warn_inner), fix_btn);
 
-        GtkWidget* manual_btn = gtk_button_new_with_label("Manual");
-        gtk_widget_set_tooltip_text(manual_btn,
+        GtkWidget* manual_btn = trbtn("Manual");
+        trtip(manual_btn,
             "Open KDE System Settings → Input Devices → Mouse\n"
             "and set Pointer Acceleration to Flat.");
         g_signal_connect(manual_btn, "clicked", G_CALLBACK(on_kde_open_settings), nullptr);
@@ -562,8 +628,7 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     gtk_widget_set_margin_bottom(rvbox, 4);
     gtk_paned_set_end_child(GTK_PANED(hpaned), rvbox);
 
-    GtkWidget* graph_lbl = gtk_label_new(nullptr);
-    gtk_label_set_markup(GTK_LABEL(graph_lbl), "<b>Gain Curve</b>  <small>(scroll = zoom)</small>");
+    GtkWidget* graph_lbl = trmlbl("<b>Gain Curve</b>  <small>(scroll = zoom)</small>");
     gtk_label_set_xalign(GTK_LABEL(graph_lbl), 0.0);
     gtk_box_append(GTK_BOX(rvbox), graph_lbl);
 
@@ -608,7 +673,7 @@ void build_ui(AppState* S, GtkApplication* gapp) {
 
             auto& ax = cur_prof(S2).prof.accel_x;
             if (ax.length / 2 >= (int)LUT_POINTS_CAPACITY) {
-                set_status(S2, "Maximum number of points reached.");
+                set_status(S2, tr("Maximum number of points reached."));
                 return;
             }
             auto pts = lut_get_points(ax);
@@ -617,8 +682,8 @@ void build_ui(AppState* S, GtkApplication* gapp) {
             if (S2->xy_linked) cur_prof(S2).prof.accel_y = ax;
             rebuild_lut_list(S2);
             gtk_widget_queue_draw(S2->graph_area);
-            set_status(S2, "LUT point added: speed=" + std::to_string((int)spd) +
-                       " gain=" + std::to_string(gain).substr(0, 5));
+            set_status(S2, trf("LUT point added: speed=%d gain=%s",
+                               (int)spd, std::to_string(gain).substr(0, 5).c_str()));
         }), S);
     gtk_widget_add_controller(S->graph_area, GTK_EVENT_CONTROLLER(lclick));
 
@@ -658,7 +723,7 @@ void build_ui(AppState* S, GtkApplication* gapp) {
             if (S2->xy_linked) cur_prof(S2).prof.accel_y = ax;
             rebuild_lut_list(S2);
             gtk_widget_queue_draw(S2->graph_area);
-            set_status(S2, "LUT point removed.");
+            set_status(S2, tr("LUT point removed."));
         }), S);
     gtk_widget_add_controller(S->graph_area, GTK_EVENT_CONTROLLER(rclick));
 
@@ -683,10 +748,15 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     gtk_widget_set_margin_bottom(status_hbox, 4);
     gtk_widget_set_margin_top(status_hbox, 2);
 
-    S->status_bar = gtk_label_new("Ready.");
+    S->status_bar = gtk_label_new(tr("Ready."));
     gtk_label_set_xalign(GTK_LABEL(S->status_bar), 0.0);
     gtk_widget_set_hexpand(S->status_bar, TRUE);
     gtk_box_append(GTK_BOX(status_hbox), S->status_bar);
+
+    S->battery_detected_lbl = gtk_label_new(tr("<b>Battery: unknown</b>"));
+    gtk_label_set_xalign(GTK_LABEL(S->battery_detected_lbl), 0.0);
+    gtk_widget_add_css_class(S->battery_detected_lbl, "battery-label");
+    gtk_box_append(GTK_BOX(status_hbox), S->battery_detected_lbl);
 
     gtk_box_append(GTK_BOX(outer_vbox), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
     gtk_box_append(GTK_BOX(outer_vbox), status_hbox);
@@ -738,7 +808,7 @@ gboolean on_window_close_request(GtkWindow* win, gpointer user_data) {
     if (!S->unsaved) return FALSE; // no unsaved changes — close immediately
 
     GtkWidget* dlg = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(dlg), "Unsaved Changes");
+    gtk_window_set_title(GTK_WINDOW(dlg), tr("Unsaved Changes"));
     gtk_window_set_transient_for(GTK_WINDOW(dlg), win);
     gtk_window_set_modal(GTK_WINDOW(dlg), TRUE);
     gtk_window_set_default_size(GTK_WINDOW(dlg), 320, -1);
@@ -748,7 +818,7 @@ gboolean on_window_close_request(GtkWindow* win, gpointer user_data) {
     gtk_widget_set_margin_top(vbox, 16);   gtk_widget_set_margin_bottom(vbox, 16);
     gtk_window_set_child(GTK_WINDOW(dlg), vbox);
 
-    GtkWidget* lbl = gtk_label_new("You have unsaved changes.\nDo you want to quit?");
+    GtkWidget* lbl = gtk_label_new(tr("You have unsaved changes.\nDo you want to quit?"));
     gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
     gtk_label_set_wrap(GTK_LABEL(lbl), TRUE);
     gtk_box_append(GTK_BOX(vbox), lbl);
@@ -757,9 +827,9 @@ gboolean on_window_close_request(GtkWindow* win, gpointer user_data) {
     gtk_widget_set_halign(hbox, GTK_ALIGN_END);
     gtk_box_append(GTK_BOX(vbox), hbox);
 
-    GtkWidget* cancel_btn  = gtk_button_new_with_label("Cancel");
-    GtkWidget* discard_btn = gtk_button_new_with_label("Quit Without Saving");
-    GtkWidget* save_btn    = gtk_button_new_with_label("Save and Quit");
+    GtkWidget* cancel_btn  = gtk_button_new_with_label(tr("Cancel"));
+    GtkWidget* discard_btn = gtk_button_new_with_label(tr("Quit Without Saving"));
+    GtkWidget* save_btn    = gtk_button_new_with_label(tr("Save and Quit"));
     gtk_widget_add_css_class(save_btn,    "suggested-action");
     gtk_widget_add_css_class(discard_btn, "destructive-action");
     gtk_box_append(GTK_BOX(hbox), cancel_btn);
@@ -1138,9 +1208,9 @@ static void on_kde_fix_clicked(GtkButton*, gpointer user_data) {
         S->kde_accel_ok = true;
         // Hide the warning bar
         if (S->kde_warn_bar) gtk_widget_set_visible(S->kde_warn_bar, FALSE);
-        set_status(S, "KDE: libinput acceleration disabled. Changes applied immediately.");
+        set_status(S, tr("KDE: libinput acceleration disabled. Changes applied immediately."));
     } else {
-        set_status(S, "KDE: Could not write to kwinrc. Edit manually: System Settings → Input Devices → Mouse → Pointer Acceleration = Flat.");
+        set_status(S, tr("KDE: Could not write to kwinrc. Edit manually: System Settings → Input Devices → Mouse → Pointer Acceleration = Flat."));
     }
 }
 
@@ -1162,6 +1232,12 @@ void on_activate(GtkApplication* gapp, gpointer user_data) {
     S->is_kde     = is_kde_session();
     S->is_wayland = is_wayland_session();
 
+    // Resolve UI language: explicit preference wins, else system locale.
+    // setlocale() must be initialised first so auto-detection sees the real LANG.
+    setlocale(LC_ALL, "");
+    S->lang_override = load_lang_override(S->lang_path);
+    g_lang = resolve_lang(S->lang_override);
+
     // Dark CSS
     GtkCssProvider* css = gtk_css_provider_new();
     gtk_css_provider_load_from_string(css,
@@ -1172,8 +1248,9 @@ void on_activate(GtkApplication* gapp, gpointer user_data) {
         "entry { color: #dcdcdf; }"
         "button.suggested-action { background: #0078d4; color: white; }"
         "button.destructive-action { background: #c0392b; color: white; }"
-        "separator { background-color: #333336; min-height: 1px; }"
-        ".sidebar { background-color: #141416; }"
+"separator { background-color: #333336; min-height: 1px; }"
+    ".sidebar { background-color: #141416; }"
+    ".battery-label { color: #e0e0e0; font-weight: bold; min-width: 80px; }"
     );
     gtk_style_context_add_provider_for_display(
         gdk_display_get_default(),

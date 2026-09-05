@@ -23,6 +23,93 @@ static void update_raw_sensitivity(AppState* S, bool raw) {
     if (S->output_hl_spin)     gtk_widget_set_sensitive(S->output_hl_spin, !raw);
 }
 
+// Which modes consume each curve parameter. Derived from the actual accel_args
+// usage in include/accel-*.hpp (reference-aligned):
+//   classic    → acceleration, exponent_classic, input_offset, cap.x/y, cap_mode
+//   power      → scale, output_offset, exponent_power, cap.x/y, cap_mode
+//   natural    → limit, decay_rate, input_offset, gain (LEGACY/GAIN variants)
+//   jump       → cap.x (step position), cap.y (step amount), smooth
+//   synchronous→ sync_speed, motivity, gamma, smooth
+//   lookup     → LUT points only (edited on the graph)
+//   noaccel    → nothing
+// gain (LEGACY/GAIN switch) is meaningful for unchanged modes: classic
+// (classic<GAIN>) and jump/synchronous (activation_framework<GAIN>); lookup
+// gain toggles the velocity (y/x) interpretation.
+static bool mode_uses(accel_mode m, std::vector<accel_mode> modes) {
+    for (accel_mode x : modes) if (m == x) return true;
+    return false;
+}
+
+static void row_set_visible(GtkWidget* label, GtkWidget* widget, bool vis) {
+    if (label)  gtk_widget_set_visible(label,  vis);
+    if (widget) gtk_widget_set_visible(widget, vis);
+}
+
+// Show/hide the parameter rows so only the settings that apply to the selected
+// mode are visible. Pipeline-level settings (rotation, snap, speed clamps,
+// weights, DPI, speed processor) apply in every mode and are handled by
+// update_raw_sensitivity() instead — they must NOT be hidden here.
+static void update_mode_sensitivity(AppState* S) {
+    if (!S->mode_combo || S->config.profiles.empty()) return;
+    accel_mode mode = idx_to_mode((int)gtk_drop_down_get_selected(GTK_DROP_DOWN(S->mode_combo)));
+    bool raw = cur_prof(S).prof.raw_passthrough;
+
+    // Accel X parameter rows (index == grid row inside accel_params_frame)
+    row_set_visible(S->accel_row_label[0],  S->accel_spin,         mode_uses(mode, {accel_mode::classic}));
+    row_set_visible(S->accel_row_label[1],  S->exponent_spin,      mode_uses(mode, {accel_mode::classic}));
+    row_set_visible(S->accel_row_label[2],  S->power_exp_spin,     mode_uses(mode, {accel_mode::power}));
+    row_set_visible(S->accel_row_label[3],  S->limit_spin,         mode_uses(mode, {accel_mode::natural}));
+    row_set_visible(S->accel_row_label[4],  S->offset_spin,        mode_uses(mode, {accel_mode::classic, accel_mode::natural}));
+    row_set_visible(S->accel_row_label[5],  S->decay_spin,         mode_uses(mode, {accel_mode::natural}));
+    row_set_visible(S->accel_row_label[6],  S->cap_x_spin,         mode_uses(mode, {accel_mode::classic, accel_mode::power, accel_mode::jump}));
+    row_set_visible(S->accel_row_label[7],  S->cap_y_spin,         mode_uses(mode, {accel_mode::classic, accel_mode::power, accel_mode::jump}));
+    row_set_visible(S->accel_row_label[8],  S->cap_mode_combo,     mode_uses(mode, {accel_mode::classic, accel_mode::power}));
+    row_set_visible(S->accel_row_label[9],  S->sync_speed_spin,    mode_uses(mode, {accel_mode::synchronous}));
+    row_set_visible(S->accel_row_label[10], S->smooth_spin,        mode_uses(mode, {accel_mode::jump, accel_mode::synchronous}));
+    row_set_visible(S->accel_row_label[11], S->motivity_spin,      mode_uses(mode, {accel_mode::synchronous}));
+    row_set_visible(S->accel_row_label[12], S->gamma_spin,         mode_uses(mode, {accel_mode::synchronous}));
+    row_set_visible(S->accel_row_label[13], S->output_offset_spin, mode_uses(mode, {accel_mode::power}));
+    row_set_visible(S->accel_row_label[14], S->scale_spin,         mode_uses(mode, {accel_mode::power}));
+
+    // The Gain toggle switches between the LEGACY multiplier form and the
+    // integral (output-speed) GAIN form. Power is not gain-capable yet, so it
+    // stays disabled there; noaccel has no curve at all.
+    bool gain_capable = !mode_uses(mode, {accel_mode::noaccel, accel_mode::power});
+    if (S->gain_check)
+        gtk_widget_set_sensitive(S->gain_check, !raw && gain_capable);
+
+    // The curve frame is pointless when there are no curve parameters.
+    bool show_frame = !mode_uses(mode, {accel_mode::noaccel, accel_mode::lookup});
+    if (S->accel_params_frame) gtk_widget_set_visible(S->accel_params_frame, show_frame);
+    // (lookup additionally toggles lut_frame via update_lut_visibility)
+
+    // Y axis — same rule, driven by the Y mode combo when X/Y are unlinked.
+    accel_mode ymode = S->xy_linked ? mode
+        : idx_to_mode((int)gtk_drop_down_get_selected(GTK_DROP_DOWN(S->mode_combo_y)));
+    row_set_visible(S->y_row_label[1], S->accel_spin_y,    mode_uses(ymode, {accel_mode::classic}));
+    row_set_visible(S->y_row_label[2], S->exponent_spin_y, mode_uses(ymode, {accel_mode::classic}));
+    row_set_visible(S->y_row_label[3], S->limit_spin_y,    mode_uses(ymode, {accel_mode::natural, accel_mode::jump}));
+    row_set_visible(S->y_row_label[4], S->offset_spin_y,   mode_uses(ymode, {accel_mode::classic, accel_mode::natural}));
+    row_set_visible(S->y_row_label[5], S->cap_y_spin_y,    mode_uses(ymode, {accel_mode::classic, accel_mode::power}));
+
+    // Mode hint — restate which parameters this mode actually uses.
+    if (S->mode_hint_lbl) {
+        const char* hint = "";
+        switch (mode) {
+        case accel_mode::noaccel:     hint = "1:1 output — no curve parameters."; break;
+        case accel_mode::classic:     hint = "Uses: Accel, Exp (cls), Input Offset, Cap X/Y, Cap Mode."; break;
+        case accel_mode::power:       hint = "Uses: Scale, Exp (pwr), Output Offset, Cap X/Y, Cap Mode."; break;
+        case accel_mode::natural:     hint = "Uses: Limit, Decay Rate, Input Offset, Gain."; break;
+        case accel_mode::jump:        hint = "Uses: Cap X (step position), Cap Y (step amount), Smooth."; break;
+        case accel_mode::synchronous: hint = "Uses: Sync Speed, Motivity, Gamma, Smooth."; break;
+        case accel_mode::lookup:      hint = "Edit gain points on the curve (right panel)."; break;
+        default: break;
+        }
+        gtk_label_set_markup(GTK_LABEL(S->mode_hint_lbl),
+                             (std::string("<small>") + tr(hint) + "</small>").c_str());
+    }
+}
+
 accel_mode idx_to_mode(int i) {
     static const accel_mode M[] = {
         accel_mode::noaccel, accel_mode::classic, accel_mode::power,
@@ -248,9 +335,9 @@ void profile_to_widgets(AppState* S) {
 #undef SET_CHK
 
     S->updating = false;
-    update_lut_visibility(S); // show the correct panel when a profile is loaded
-
     update_raw_sensitivity(S, dp.prof.raw_passthrough);
+    update_mode_sensitivity(S); // show/hide mode-specific parameters
+    update_lut_visibility(S); // show the correct panel when a profile is loaded
 
     gtk_widget_queue_draw(S->graph_area);
 
@@ -266,8 +353,8 @@ void profile_to_widgets(AppState* S) {
                       ay.length / 2 > (int)LUT_POINTS_CAPACITY;
         if (over_x || over_y) {
             std::string axis = (over_x && over_y) ? "X and Y" : (over_x ? "X" : "Y");
-            set_status(S, "Warning: LUT (" + axis + " axis) was truncated to " +
-                          std::to_string(LUT_POINTS_CAPACITY) + " points (max capacity).");
+            set_status(S, trf("Warning: LUT (%s axis) was truncated to %d points (max capacity).",
+                              axis.c_str(), (int)LUT_POINTS_CAPACITY));
         }
     }
 }
@@ -306,6 +393,7 @@ void on_param_changed(GtkWidget*, gpointer user_data) {
     auto* S = static_cast<AppState*>(user_data);
     widgets_to_profile(S);
     update_lut_visibility(S); // show/hide the LUT panel when the mode changes
+    update_mode_sensitivity(S); // show/hide mode-specific parameters
 }
 
 // "notify::<prop>" signals use a 3-argument callback signature
@@ -325,7 +413,8 @@ void on_profile_changed(GtkDropDown* dd, GParamSpec*, gpointer user_data) {
     // Warn in the status bar if switching away from a profile with unsaved changes.
     // A modal dialog here would be too disruptive for a dropdown switch.
     if (S->unsaved) {
-        set_status(S, "Warning: unsaved changes to \"" + cur_prof(S).name + "\" were discarded.");
+        set_status(S, trf("Warning: unsaved changes to \"%s\" were discarded.",
+                          cur_prof(S).name.c_str()));
         S->unsaved = false;
     }
 
@@ -349,7 +438,7 @@ void on_save_clicked(GtkButton*, gpointer user_data) {
     auto* S = static_cast<AppState*>(user_data);
     // Save As: always ask for a name so the default profile is never overwritten.
     std::string cur_name = S->config.profiles.empty() ? "" : cur_prof(S).name;
-    show_input_dialog(S, "Save Profile As", "Profile name", cur_name.c_str(),
+    show_input_dialog(S, tr("Save Profile As"), tr("Profile name"), cur_name.c_str(),
         [S](const std::string& name) {
             if (name.empty()) return;
             // If a profile with this name already exists, overwrite it;
@@ -381,7 +470,7 @@ void on_apply_clicked(GtkButton*, gpointer user_data) {
     auto* S = static_cast<AppState*>(user_data);
     // Apply & Reload: same Save As logic, then reload the daemon.
     std::string cur_name = S->config.profiles.empty() ? "" : cur_prof(S).name;
-    show_input_dialog(S, "Save Profile As", "Profile name", cur_name.c_str(),
+    show_input_dialog(S, tr("Save Profile As"), tr("Profile name"), cur_name.c_str(),
         [S](const std::string& name) {
             if (name.empty()) return;
             widgets_to_profile(S);
@@ -417,10 +506,10 @@ void on_daemon_start(GtkButton*, gpointer user_data) {
                 update_daemon_status(static_cast<AppState*>(p));
                 return G_SOURCE_REMOVE;
             }, S);
-            set_status(S, "Starting daemon via systemd...");
+            set_status(S, tr("Starting daemon via systemd..."));
             return;
         }
-        set_status(S, err + " Falling back to direct daemon start...");
+        set_status(S, std::string(tr(err.c_str())) + tr(" Falling back to direct daemon start..."));
     }
 
     // Candidate paths in preference order
@@ -448,7 +537,7 @@ void on_daemon_start(GtkButton*, gpointer user_data) {
         if (fs::exists(p)) daemon_path = p;
     }
     if (daemon_path.empty()) {
-        set_status(S, "rawaccel-daemon not found. Install with: sudo scripts/install.sh");
+        set_status(S, tr("rawaccel-daemon not found. Install with: sudo scripts/install.sh"));
         return;
     }
 
@@ -480,7 +569,7 @@ void on_daemon_start(GtkButton*, gpointer user_data) {
             return G_SOURCE_REMOVE;
         }, pid_ptr);
     } else {
-        set_status(S, "fork() failed.");
+        set_status(S, tr("fork() failed."));
         return;
     }
     // Update daemon status after a short delay (daemon needs time to start)
@@ -488,7 +577,7 @@ void on_daemon_start(GtkButton*, gpointer user_data) {
         update_daemon_status(static_cast<AppState*>(p));
         return G_SOURCE_REMOVE;
     }, S);
-    set_status(S, "Starting daemon...");
+    set_status(S, tr("Starting daemon..."));
 }
 
 void on_daemon_stop(GtkButton*, gpointer user_data) {
@@ -500,20 +589,20 @@ void on_daemon_stop(GtkButton*, gpointer user_data) {
                 update_daemon_status(static_cast<AppState*>(p));
                 return G_SOURCE_REMOVE;
             }, S);
-            set_status(S, "Stopping daemon via systemd...");
+            set_status(S, tr("Stopping daemon via systemd..."));
             return;
         }
     }
     std::string err;
     if (!daemon_send_signal(SIGTERM, &err)) {
-        set_status(S, err);
+        set_status(S, tr(err.c_str()));
         return;
     }
     g_timeout_add(800, [](gpointer p) -> gboolean {
         update_daemon_status(static_cast<AppState*>(p));
         return G_SOURCE_REMOVE;
     }, S);
-    set_status(S, "Stopping daemon...");
+    set_status(S, tr("Stopping daemon..."));
 }
 
 void on_daemon_reload(GtkButton*, gpointer user_data) {
@@ -521,7 +610,7 @@ void on_daemon_reload(GtkButton*, gpointer user_data) {
     // Prefer IPC reload (works without signal permissions); fall back to SIGHUP.
     std::string ipc_resp = daemon_ipc_query("reload");
     if (!ipc_resp.empty() && ipc_resp.find("ok") != std::string::npos) {
-        set_status(S, "Daemon reloaded (IPC).");
+        set_status(S, tr("Daemon reloaded (IPC)."));
         update_daemon_status(S);
         return;
     }
@@ -530,17 +619,17 @@ void on_daemon_reload(GtkButton*, gpointer user_data) {
         if (has_systemd_rawaccel_unit()) {
             std::string serr;
             if (pkexec_systemctl_async("reload", &serr)) {
-                set_status(S, "Daemon reloaded (systemd).");
+                set_status(S, tr("Daemon reloaded (systemd)."));
                 update_daemon_status(S);
                 return;
             }
-            set_status(S, err + " | " + serr);
+            set_status(S, std::string(tr(err.c_str())) + " | " + tr(serr.c_str()));
             return;
         } else {
-            set_status(S, err);
+            set_status(S, tr(err.c_str()));
             return;
         }
     }
-    set_status(S, "Daemon reloaded (SIGHUP).");
+    set_status(S, tr("Daemon reloaded (SIGHUP)."));
     update_daemon_status(S);
 }

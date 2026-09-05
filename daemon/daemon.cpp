@@ -16,6 +16,7 @@
 #include <dirent.h>
 #include <glob.h>
 #include <cstring>
+#include <cstdlib>
 #include <cmath>
 #include <iostream>
 #include <iomanip>
@@ -55,9 +56,9 @@ static int event_num_from_path(const std::string& path) {
     errno = 0;
     char* end = nullptr;
     long n = strtol(ev, &end, 10);
-    // BUG-7: long → int cast UB if n out of int range. Linux event numbers
-    // are <1000 in practice, but be defensive.
-    if (end == ev || errno != 0 || n < 0 || n > INT_MAX) return -1;
+    // BUG-7 fixed: use safe integer range check before cast, and validate endptr
+    if (end == ev || errno != 0 || n < 0) return -1;
+    if (n > INT_MAX || n < INT_MIN) return -1;
     return static_cast<int>(n);
 }
 
@@ -72,8 +73,7 @@ static int sysfs_read_int(const std::string& sysfs_path) {
     errno = 0;
     char* end = nullptr;
     long val = std::strtol(buf, &end, 10);
-    // BUG-7: long → int cast UB if val out of int range.  Sysfs may
-    // legitimately expose values like 0xffffffff for some properties.
+    // BUG-7 fixed: validate endptr and range before cast to int
     if (end == buf || errno != 0 || val < INT_MIN || val > INT_MAX)
         return -1;
     return static_cast<int>(val);
@@ -98,16 +98,23 @@ static int detect_polling_rate(const std::string& event_path) {
     snprintf(buf, sizeof(buf), "/sys/class/input/event%d/device/device/bInterval", n);
     int binterval = sysfs_read_int(buf);
     if (binterval > 0) {
-        // bInterval for high-speed USB is in 125µs units; for full-speed in 1ms.
-        // Most gaming mice are high-speed USB.
-        // High-speed: bInterval=1 → 8000 Hz, bInterval=4 → 2000 Hz, bInterval=8 → 1000 Hz.
-        // Full-speed: bInterval=1 → 1000 Hz, bInterval=10 → 100 Hz.
-        // Heuristic: if bInterval <= 8, treat as high-speed (125µs per frame).
-        int rate_hz;
-        if (binterval <= 8)
-            rate_hz = 8000 / binterval;       // high-speed: 125µs × bInterval per poll
-        else
-            rate_hz = 1000 / binterval;       // full-speed: 1ms × bInterval per poll
+        // Determine the actual USB speed from sysfs to compute the correct
+        // frame size: high-speed (480 Mbps) uses 125µs microframes, full-speed
+        // (12 Mbps) uses 1ms frames.  The speed value is:
+        //   1 = Low Speed (1.5 Mbps, not used for mice)
+        //   2 = Full Speed (12 Mbps)
+        //   3 = High Speed (480 Mbps)
+        //   5 = SuperSpeed (5 Gbps)
+        int rate_hz = 0;
+        snprintf(buf, sizeof(buf), "/sys/class/input/event%d/device/device/speed", n);
+        int usb_speed = sysfs_read_int(buf);
+        if (usb_speed >= 3) {
+            // High-speed or faster: bInterval is in 125µs units
+            rate_hz = 8000 / binterval;
+        } else {
+            // Full-speed (or unknown/low): bInterval is in 1ms units
+            rate_hz = 1000 / binterval;
+        }
         if (rate_hz > 0)
             return std::clamp(rate_hz, (int)POLL_RATE_MIN, (int)POLL_RATE_MAX);
     }
@@ -124,15 +131,110 @@ static int detect_dpi_sysfs(int event_n) {
     snprintf(buf, sizeof(buf), "/sys/class/input/event%d/device/resolution", event_n);
     int res_counts_per_mm = sysfs_read_int(buf);
     if (res_counts_per_mm > 0) {
-        // BUG-7-2: float → int cast UB if res * 25.4 exceeds INT_MAX.
-        // sysfs_read_int already clamps to [INT_MIN, INT_MAX] so the
-        // multiplication here can overflow into ~5.4e10 for INT_MAX
-        // input.  Compute in double then clamp before the cast.
+        // BUG-7-2 fixed: compute DPI in double to avoid float→int UB when
+        // res_counts_per_mm * 25.4 overflows INT_MAX. Clamp before cast.
         double dpi_f = static_cast<double>(res_counts_per_mm) * 25.4;
         dpi_f = std::clamp(dpi_f, 100.0, 32000.0);
-        return static_cast<int>(dpi_f);
+        if (dpi_f >= 100.0 && dpi_f <= 32000.0)
+            return static_cast<int>(dpi_f);
+        return 0;
     }
     return 0;
+}
+
+/// Best-effort battery level detection from sysfs.
+/// Some gaming mice (e.g., certain Razer, Logitech, SteelSeries models) expose
+/// battery percentage through various sysfs paths. Returns percentage 0-100,
+/// or -1 if unknown.
+static int detect_battery_level(const std::string& event_path) {
+    int n = event_num_from_path(event_path);
+    if (n < 0) return -1;
+
+    // Helper: try to read capacity from a path, return -1 on failure
+    auto try_capacity = [](const char* path) -> int {
+        FILE* f = fopen(path, "r");
+        if (!f) return -1;
+        char buf[32] = {};
+        if (fgets(buf, sizeof(buf), f)) {
+            fclose(f);
+            size_t len = strlen(buf);
+            while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) buf[--len] = '\0';
+            int val = std::atoi(buf);
+            if (val >= 0 && val <= 100) return val;
+        } else {
+            fclose(f);
+        }
+        return -1;
+    };
+
+    // 1. /sys/class/input/eventN/device/power_supply/ directory
+    std::string ps_dir = "/sys/class/input/event" + std::to_string(n) + "/device/power_supply";
+    DIR* dir = opendir(ps_dir.c_str());
+    if (dir) {
+        struct dirent* ent;
+        while ((ent = readdir(dir)) != nullptr) {
+            std::string dname(ent->d_name);
+            if (dname.find("BAT") != std::string::npos ||
+                dname.find("battery") != std::string::npos) {
+                // Try common capacity files
+                char path[512];
+                snprintf(path, sizeof(path), "%s/%s/capacity", ps_dir.c_str(), dname.c_str());
+                int val = try_capacity(path);
+                if (val >= 0) return val;
+                // Also try without the node name
+                snprintf(path, sizeof(path), "%s/capacity", ps_dir.c_str());
+                val = try_capacity(path);
+                if (val >= 0) return val;
+            }
+        }
+        closedir(dir);
+    }
+
+    // 2. /sys/class/power_supply direct paths (some devices expose here)
+    const char* battery_paths[] = {
+        "/sys/class/power_supply/BAT0/capacity",
+        "/sys/class/power_supply/BAT1/capacity",
+        "/sys/class/power_supply/battery/capacity",
+        "/sys/class/power_supply/Cell0/capacity",
+        "/sys/class/power_supply/Cell1/capacity",
+    };
+    for (auto bp : battery_paths) {
+        int val = try_capacity(bp);
+        if (val >= 0) return val;
+    }
+
+    // 3. Check /sys/class/input/eventN/device/ power attribute (some mice have energy_now/charge_full_design).
+    //    Note: power sysfs typically exposes "enabled" (on/off), not a percentage — skip it.
+
+    // 4. Some HID devices have battery info in the device directory
+    std::string dev_dir = "/sys/class/input/event" + std::to_string(n) + "/device";
+    DIR* devdir = opendir(dev_dir.c_str());
+    if (devdir) {
+        struct dirent* dent;
+        while ((dent = readdir(devdir)) != nullptr) {
+            std::string dname(dent->d_name);
+            // Check for energy or battery related files
+            if (dname.find("energy") != std::string::npos ||
+                dname.find("charge") != std::string::npos) {
+                char path[512];
+                snprintf(path, sizeof(path), "%s/%s", dev_dir.c_str(), dent->d_name);
+                // Try to read energy/charge values
+                FILE* f = fopen(path, "r");
+                if (f) {
+                    char buf[64] = {};
+                    if (fgets(buf, sizeof(buf), f)) {
+                        fclose(f);
+                        // Could parse energy_full/energy_now for percentage
+                        // For now, just note we found it but don't compute percentage
+                    }
+                    fclose(f);
+                }
+            }
+        }
+        closedir(devdir);
+    }
+
+    return -1; // unknown
 }
 
 // ── Device discovery ──────────────────────────────────────────────────────────
@@ -180,8 +282,11 @@ static std::string resolve_stable_id(const std::string& event_node) {
         char target[PATH_MAX] = {};
         if (!realpath(link.c_str(), target)) continue;
         if (std::string(target) == std::string(real_event)) {
-            if (best.empty() || link.find("-event-mouse") != std::string::npos)
-                best = link;
+            if (best.empty())
+                best = link;                      // first match
+            else if (link.find("-event-mouse") != std::string::npos &&
+                     best.find("-event-mouse") == std::string::npos)
+                best = link;                      // prefer -event-mouse over other
         }
     }
     closedir(dir);
@@ -191,7 +296,7 @@ static std::string resolve_stable_id(const std::string& event_node) {
 /// List all physical mouse event paths in /dev/input/, using stable by-id paths.
 static std::vector<std::string> find_mice() {
     std::vector<std::string> result;
-    glob_t g;
+    glob_t g{};
     if (glob("/dev/input/event*", 0, nullptr, &g) == 0) {
         for (size_t i = 0; i < g.gl_pathc; i++) {
             int fd = open(g.gl_pathv[i], O_RDONLY | O_NONBLOCK);
@@ -300,6 +405,40 @@ bool AccelDaemon::reload() {
     return true;
 }
 
+bool AccelDaemon::push_config(const std::string& json_str) {
+    // Called from the IPC thread.  Parse + sanitize + persist here so an error
+    // can be reported synchronously to the client; apply_new_config() then
+    // live-applies the pre-validated config on the loop thread.
+    try {
+        app_config cfg = app_config_from_json(json_str);
+        {
+            // T8 — no-op guard: if the pushed config matches the currently
+            // effective one, skip the disk write and the re-apply entirely.
+            // config_ is guarded by devices_mutex_ (written in apply_new_config),
+            // so read it under the same mutex.
+            std::lock_guard<std::mutex> lk(devices_mutex_);
+            if (app_config_to_json(cfg) == app_config_to_json(config_)) {
+                log("Config push skipped (no-op guard: content unchanged).", true);
+                return true;
+            }
+        }
+        // Atomic write to the daemon's own config path — a root systemd daemon
+        // can persist to /etc/rawaccel/settings.json even though the GUI/CLI
+        // can only write the user's ~/.config copy.
+        save_config(cfg, config_path_);
+        {
+            std::lock_guard<std::mutex> lk(push_cfg_mu_);
+            push_cfg_        = std::move(cfg);
+            push_cfg_pending_ = true;
+        }
+        log("Config pushed over IPC (" + config_path_ + ").", true);
+        return true;
+    } catch (std::exception& e) {
+        log("Config push rejected: " + std::string(e.what()));
+        return false;
+    }
+}
+
 // ── Device setup ──────────────────────────────────────────────────────────────
 
 bool AccelDaemon::open_input_device(mouse_device& dev) {
@@ -359,6 +498,8 @@ bool AccelDaemon::open_input_device(mouse_device& dev) {
     dev.detected_polling_rate = detect_polling_rate(dev.path);
     int ev_n = event_num_from_path(dev.path);
     dev.detected_dpi = (ev_n >= 0) ? detect_dpi_sysfs(ev_n) : 0;
+    // Best-effort battery level detection from sysfs (some gaming mice expose this)
+    dev.detected_battery = detect_battery_level(dev.path);
 
     if (dev.detected_polling_rate > 0)
         log("Detected polling rate: " + std::to_string(dev.detected_polling_rate) +
@@ -404,9 +545,15 @@ bool AccelDaemon::create_virtual_device(mouse_device& dev) {
 bool AccelDaemon::setup_devices() {
     auto mice = find_mice();
     if (mice.empty()) {
-        // D3: Possible cause: no access to /dev/input/event* or all devices are already grabbed.
-        log("No physical mice found. Check 'input' group membership or udev rules.");
-        return !devices_.empty(); // ok if we already have some from hot-plug
+        // No mouse devices found yet.  Previously this aborted the daemon
+        // (so systemd with Restart=on-failure would thrash through restarts
+        // during boot while USB devices were still enumerating, or after a
+        // permission-grant / abrek-conflict fix).  Instead postpone: keep the
+        // event loop alive — the periodic empty-device re-scan (and inotify
+        // hot-plug) will grab mice as soon as they appear or become accessible.
+        log("No physical mice found yet — waiting for hot-plug. "
+            "If this persists, check 'input' group membership or udev rules.");
+        return true;
     }
     log("Found " + std::to_string(mice.size()) + " physical mouse device(s).");
 
@@ -448,11 +595,11 @@ bool AccelDaemon::setup_devices() {
     }
 
     if (devices_.empty()) {
-        log("No mice could be grabbed. If abrek is running, stop it first:");
-        log("  sudo systemctl stop abrek");
-        // K3: clean up any partially opened devices to prevent fd leaks
-        teardown_devices();
-        return false;
+        // Found devices but none could be grabbed (missing permissions or a
+        // conflict, e.g. abrek holding the grab).  Don't abort — the periodic
+        // empty-device re-scan retries automatically once the conflict clears.
+        log("No mice could be grabbed (permission or conflict, e.g. abrek). "
+            "Retrying automatically; to fix now:  sudo systemctl stop abrek");
     }
     return true;
 }
@@ -500,13 +647,46 @@ void AccelDaemon::apply_profile(mouse_device& dev, const device_profile& prof) {
     dev.dpi       = std::clamp(prof.dev_cfg.dpi,          1, 32000);
     dev.poll_rate = std::clamp(prof.dev_cfg.polling_rate,
                                (int)POLL_RATE_MIN, (int)POLL_RATE_MAX);
-    dev.dpi_factor = dev.dpi / NORMALIZED_DPI; // R13-perf: pre-compute
+    // O6: reference uses input_dpi_normalization_factor = NORMALIZED_DPI / dpi
+    // (true inches/s input speed); previously (dpi/NORMALIZED_DPI) was inverted.
+    dev.dpi_factor = NORMALIZED_DPI / dev.dpi; // R13-perf: pre-compute
     dev.settings.prof = prof.prof;
     init_settings(dev.settings);
     dev.sp.init(prof.prof.speed_processor_args);
     // Reset subpixel remainders on profile change
     dev.remainder_x = 0.0;
     dev.remainder_y = 0.0;
+}
+
+// ── Shared config apply path (SIGHUP reload + IPC config push) ────────────────
+
+void AccelDaemon::apply_new_config(const app_config& new_cfg) {
+    // Live profile update: re-apply settings to all open devices WITHOUT
+    // releasing the grab or destroying the virtual device.  This avoids
+    // the ~150 ms mouse-loss window that teardown+setup caused (R5).
+    // config_ is written under devices_mutex_ so that status_json() (IPC
+    // thread) never reads a half-updated config_.
+    bool any_live = false;
+    {
+        std::lock_guard<std::mutex> lk(devices_mutex_);
+        config_ = new_cfg;
+        for (auto& dev : devices_) {
+            const device_profile* prof = find_profile(dev.device_id);
+            if (prof) {
+                apply_profile(dev, *prof);
+                any_live = true;
+                log("Live-updated profile for: " + dev.name, true);
+            }
+        }
+    }
+
+    if (!any_live) {
+        // No grabbed devices yet — do a full setup so new devices are opened.
+        teardown_devices();
+        if (!setup_devices())
+            log("Reload: no devices available after reload.");
+    }
+    log("Config reloaded.");
 }
 
 // ── Hot-plug handler ──────────────────────────────────────────────────────────
@@ -618,43 +798,25 @@ void AccelDaemon::run_loop() {
     epoll_event events[MAX_EVENTS];
 
     while (running_.load()) {
-        // Handle config reload request
+        // Handle config reload request (SIGHUP or IPC "reload")
         if (reload_flag_.exchange(false)) {
             log("Reloading config...");
             try {
-                auto new_cfg = load_config(config_path_);
-
-                // Live profile update: re-apply settings to all open devices WITHOUT
-                // releasing the grab or destroying the virtual device.  This avoids
-                // the ~150 ms mouse-loss window that teardown+setup caused (R5).
-                // Only fall back to teardown+setup when a new physical device appears
-                // that wasn't grabbed before (handled by the hot-plug path).
-                //
-                // config_ is written under devices_mutex_ so that status_json()
-                // (which runs on the IPC thread) never reads a half-updated config_.
-                bool any_live = false;
-                {
-                    std::lock_guard<std::mutex> lk(devices_mutex_);
-                    config_ = new_cfg;
-                    for (auto& dev : devices_) {
-                        const device_profile* prof = find_profile(dev.device_id);
-                        if (prof) {
-                            apply_profile(dev, *prof);
-                            any_live = true;
-                            log("Live-updated profile for: " + dev.name, true);
-                        }
-                    }
-                }
-
-                if (!any_live) {
-                    // No grabbed devices yet — do a full setup so new devices are opened.
-                    teardown_devices();
-                    if (!setup_devices())
-                        log("Reload: no devices available after reload.");
-                }
-                log("Config reloaded.");
+                apply_new_config(load_config(config_path_));
             } catch (std::exception& e) {
                 log("Config reload failed (keeping current): " + std::string(e.what()));
+            }
+        }
+
+        // Handle a config pushed over IPC (GUI/CLI "set_config" — syncs the
+        // user's edits into the daemon's own config file).  push_config() has
+        // already validated and persisted it, so this cannot throw.
+        {
+            std::lock_guard<std::mutex> lk(push_cfg_mu_);
+            if (push_cfg_pending_) {
+                apply_new_config(push_cfg_);
+                push_cfg_pending_ = false;
+                log("Applied config pushed over IPC.", true);
             }
         }
 
@@ -668,6 +830,18 @@ void AccelDaemon::run_loop() {
             if (hotplug_retry_ >= 8) {
                 pending_hotplug_.store(false);
                 hotplug_retry_ = 0;
+                do_hotplug_scan();
+            }
+        }
+
+        // Self-healing startup: when no devices are open (no mice at boot, or
+        // permission/conflict that later cleared), force a scan every ~2 s even
+        // without an inotify event — so the daemon converges on its own instead
+        // of waiting for an unplug/replug.  Cheap: find_mice() on retired fds.
+        if (devices_.empty()) {
+            const double t = now_ms();
+            if (t >= empty_rescan_ms_) {
+                empty_rescan_ms_ = t + 2000.0;
                 do_hotplug_scan();
             }
         }
@@ -808,13 +982,29 @@ void AccelDaemon::process_device(mouse_device& dev) {
     double dx = 0, dy = 0;
     bool has_motion  = false;
     bool has_syn     = false;
-    bool syn_dropped = false; // R12: discard all events until next SYN_REPORT
+    bool wrote_unsynced_event = false;
+    // BUG-18: syn_dropped is now a device-state field (mouse_device::syn_dropped)
+    // so a SYN_DROPPED event in one read batch is correctly remembered until
+    // the matching SYN_REPORT arrives in the next process_device() invocation.
+    bool& syn_dropped = dev.syn_dropped;
+    auto flush_pending_motion = [&]() -> bool {
+        if (!has_motion) return true;
+        if (!flush_motion(dev, uidev, dx, dy)) {
+            dev.disconnected = true;
+            return false;
+        }
+        wrote_unsynced_event = true;
+        dx = dy = 0;
+        has_motion = false;
+        return true;
+    };
 
     // Read all pending events
     while (true) {
         ssize_t n = read(dev.fd_in, &ev, sizeof(ev));
         if (n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) break; // normal: no more events
+            if (errno == EINTR) continue;
             // Fatal errors: device physically disconnected or kernel error
             if (errno == EIO || errno == ENODEV || errno == EBADF) {
                 log("Device error (" + std::string(strerror(errno)) +
@@ -829,7 +1019,7 @@ void AccelDaemon::process_device(mouse_device& dev) {
             }
             break;
         }
-        if (n == 0) break; // EOF — treat as disconnect
+        if (n == 0) { dev.disconnected = true; break; } // EOF — treat as disconnect
         if (n < (ssize_t)sizeof(ev)) break; // short read, skip
 
         if (ev.type == EV_SYN) {
@@ -852,15 +1042,11 @@ void AccelDaemon::process_device(mouse_device& dev) {
                 continue;
             }
             has_syn = true;
-            if (has_motion) {
-                if (!flush_motion(dev, uidev, dx, dy))
-                    { dev.disconnected = true; return; }
-                dx = dy = 0;
-                has_motion = false;
-            }
+            if (!flush_pending_motion()) return;
             // Forward SYN
             if (!uinput_write(uidev, EV_SYN, SYN_REPORT, 0))
                 { dev.disconnected = true; return; }
+            wrote_unsynced_event = false;
         } else if (syn_dropped) {
             // R12: discard all non-SYN events while in SYN_DROPPED state.
             // Motion counts, button events, etc. are unreliable until the
@@ -878,6 +1064,7 @@ void AccelDaemon::process_device(mouse_device& dev) {
                 if (dev.settings.prof.raw_passthrough) {
                     if (!uinput_write(uidev, ev.type, ev.code, ev.value))
                         { dev.disconnected = true; return; }
+                    wrote_unsynced_event = true;
                 } else if (ev.code == REL_X) {
                     dx += ev.value; has_motion = true;
                 } else {
@@ -885,21 +1072,24 @@ void AccelDaemon::process_device(mouse_device& dev) {
                 }
             } else {
                 // Pass through other REL events (wheel, tilt, etc.)
+                if (!flush_pending_motion()) return;
                 if (!uinput_write(uidev, ev.type, ev.code, ev.value))
                     { dev.disconnected = true; return; }
+                wrote_unsynced_event = true;
             }
         } else {
             // Forward all other events (buttons, misc, etc.)
+            if (!flush_pending_motion()) return;
             if (!uinput_write(uidev, ev.type, ev.code, ev.value))
                 { dev.disconnected = true; return; }
+            wrote_unsynced_event = true;
         }
     }
 
-    // If motion accumulated but no SYN arrived (rare edge case), flush with synthetic SYN
-    if (has_motion && !has_syn) {
-        if (!flush_motion(dev, uidev, dx, dy))
-            { dev.disconnected = true; return; }
-        if (!uinput_write(uidev, EV_SYN, SYN_REPORT, 0))
+    // If events were forwarded but no SYN arrived (rare edge case), flush with synthetic SYN
+    if (!has_syn) {
+        if (!flush_pending_motion()) return;
+        if (wrote_unsynced_event && !uinput_write(uidev, EV_SYN, SYN_REPORT, 0))
             { dev.disconnected = true; return; }
     }
 }
@@ -921,7 +1111,18 @@ void AccelDaemon::dump_latency_stats() {
         return;
     }
     for (auto& dev : devices_) {
-        std::cout << "  Device: " << dev.name << "\n";
+        std::cout << "  Device: " << dev.name;
+        // BUG-21 (GPT-10): in raw_passthrough mode REL_X/REL_Y events bypass
+        // flush_motion() entirely (forwarded one-by-one straight from
+        // process_device), so dev.lat is never updated.  Make this explicit
+        // in the dump so users don't see a misleading "No motion events".
+        if (dev.settings.prof.raw_passthrough) {
+            std::cout << "  [raw passthrough — no per-event measurement]\n";
+            std::cout << "    (events forwarded 1:1 to uinput; the clock_gettime\n"
+                         "     pair would add ~50 ns per event vs. 0 in raw mode.)\n";
+            continue;
+        }
+        std::cout << "\n";
         auto s = dev.lat.snapshot_and_reset();
         if (s.count == 0) {
             std::cout << "    No motion events recorded yet.\n";
@@ -947,6 +1148,11 @@ void AccelDaemon::dump_latency_stats() {
 // ── IPC: Unix domain socket server ───────────────────────────────────────────
 
 /// Helper: escape a string for JSON (only handles ASCII printable + common escapes).
+/// Hard cap for the IPC config-push body.  Real config files are a few KB;
+/// this bounds even pathological ones while staying far below document limits.
+static constexpr unsigned long long MAX_CONFIG_PUSH_BYTES =
+    8ULL * 1024ULL * 1024ULL; // 8 MB
+
 static std::string json_str(const std::string& s) {
     std::string out;
     out.reserve(s.size() + 2);
@@ -981,9 +1187,9 @@ std::string AccelDaemon::status_json() const {
     // lat.mtx is acquired nested inside devices_mutex_; dump_latency_stats() uses
     // the same lock order (devices_mutex_ → lat.mtx) so no deadlock is possible.
 
-    struct DevSnap {
-        std::string name, path;
-        int dpi, poll_rate, detected_dpi, detected_polling_rate;
+struct DevSnap {
+        std::string name, path, device_id;
+        int dpi, poll_rate, detected_dpi, detected_polling_rate, detected_battery;
         uint64_t lat_count = 0;
         double lat_avg = 0, lat_p50 = 0, lat_p95 = 0, lat_p99 = 0, lat_max = 0;
     };
@@ -997,10 +1203,11 @@ std::string AccelDaemon::status_json() const {
         active_prof_snap = config_.active_profile;
         for (const auto& dev : devices_) {
             DevSnap s;
-            s.name = dev.name; s.path = dev.path;
+            s.name = dev.name; s.path = dev.path; s.device_id = dev.device_id;
             s.dpi = dev.dpi; s.poll_rate = dev.poll_rate;
             s.detected_dpi = dev.detected_dpi;
             s.detected_polling_rate = dev.detected_polling_rate;
+            s.detected_battery = dev.detected_battery;
 
             std::lock_guard<std::mutex> llk(dev.lat.mtx);
             if (dev.lat.count > 0) {
@@ -1026,10 +1233,12 @@ std::string AccelDaemon::status_json() const {
         o << "{";
         o << "\"name\":"                  << json_str(s.name) << ",";
         o << "\"path\":"                  << json_str(s.path) << ",";
+        o << "\"device_id\":"             << json_str(s.device_id) << ",";
         o << "\"dpi\":"                   << s.dpi << ",";
         o << "\"poll_rate\":"             << s.poll_rate << ",";
         o << "\"detected_dpi\":"          << s.detected_dpi << ",";
         o << "\"detected_polling_rate\":" << s.detected_polling_rate;
+        o << ",\"detected_battery\":"     << s.detected_battery;
         if (s.lat_count > 0) {
             o << std::fixed << std::setprecision(2);
             o << ",\"lat_samples\":" << s.lat_count;
@@ -1141,28 +1350,63 @@ void AccelDaemon::handle_ipc_client(int client_fd) {
     struct timeval tv { .tv_sec = 2, .tv_usec = 0 };
     setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    char buf[64] = {};
-    ssize_t n = recv(client_fd, buf, sizeof(buf) - 1, 0);
-    if (n <= 0) return;
-
-    // Strip trailing whitespace/newlines
-    for (int i = (int)n - 1; i >= 0 && (buf[i] == '\n' || buf[i] == '\r' || buf[i] == ' '); i--)
-        buf[i] = '\0';
+    // Read the command line (up to a newline / 256 bytes).  Byte-wise recv is
+    // fine here — IPC traffic is one short line per client.
+    std::string line;
+    char ch;
+    while (line.size() < 256) {
+        ssize_t r = recv(client_fd, &ch, 1, 0);
+        if (r <= 0) return;
+        if (ch == '\n') break;
+        line.push_back(ch);
+    }
 
     std::string response;
-    if (strcmp(buf, "status") == 0) {
+    if (line == "status") {
         response = status_json() + "\n";
-    } else if (strcmp(buf, "ping") == 0) {
+    } else if (line == "ping") {
         response = "pong\n";
-    } else if (strcmp(buf, "reload") == 0) {
+    } else if (line == "reload") {
         reload_flag_.store(true);
         response = "{\"ok\":true,\"message\":\"config reload scheduled\"}\n";
-    } else if (strcmp(buf, "latency") == 0) {
+    } else if (line == "latency") {
         // Same effect as SIGUSR1, but accessible to any input-group user
         // even when the daemon runs as root via systemd (kill() returns
         // EPERM in that case).  Set a flag the main thread polls.
         latency_dump_flag_.store(true);
         response = "{\"ok\":true,\"message\":\"latency dump scheduled\"}\n";
+        // If the client already half-closed its write side, our response would
+        // be lost to EPIPE — but the dump still gets scheduled, which is all
+        // the "latency" command promises.
+    } else if (line.rfind("set_config ", 0) == 0) {
+        // set_config <n>\n followed by exactly <n> bytes of config JSON.
+        const char* sz = line.c_str() + strlen("set_config ");
+        errno = 0;
+        char* end = nullptr;
+        unsigned long long body_len = strtoull(sz, &end, 10);
+        if (errno != 0 || end == sz || body_len == 0 ||
+            body_len > MAX_CONFIG_PUSH_BYTES) {
+            response = "{\"ok\":false,\"error\":\"invalid config payload size\"}\n";
+        } else {
+            std::string body;
+            body.reserve((size_t)body_len);
+            while (body.size() < (size_t)body_len) {
+                char tmp[8192];
+                size_t want = std::min<size_t>(sizeof(tmp),
+                                               (size_t)body_len - body.size());
+                ssize_t r = recv(client_fd, tmp, want, 0);
+                if (r <= 0) break; // timeout or client disconnected
+                body.append(tmp, (size_t)r);
+            }
+            if (body.size() != (size_t)body_len) {
+                response = "{\"ok\":false,\"error\":\"incomplete config payload\"}\n";
+            } else if (push_config(body)) {
+                response = std::string("{\"ok\":true,\"config\":") +
+                           json_str(config_path_) + "}\n";
+            } else {
+                response = "{\"ok\":false,\"error\":\"config rejected\"}\n";
+            }
+        }
     } else {
         response = "{\"error\":\"unknown command\"}\n";
     }

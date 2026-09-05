@@ -87,7 +87,9 @@ install_deps() {
     if is_arch_like; then
         ok "Arch/CachyOS tespit edildi → pacman"
         # qt6-tools: qdbus6 → KDE Plasma 6 canlı reconfigure
-        pacman -S --needed --noconfirm \
+        # -Sy: paket veritabanı ilk kez yoksa/eskidiyse "bağımlılık hatası"
+        # alınmaması için önce senkronla.
+        pacman -Sy --needed --noconfirm \
             base-devel cmake pkgconf libevdev gtk4 polkit systemd python \
             qt6-tools
     elif is_debian_like; then
@@ -102,22 +104,36 @@ install_deps() {
     elif is_fedora_like; then
         ok "Fedora/RHEL tespit edildi → dnf"
         # qt6-qttools sağlar: qdbus-qt6
+        # make: base-devel/build-essential karşılığı; gcc-c++ make'i çekmez —
+        # minimal Fedora'da build.sh:67 depend'sini verification durdurmasın.
         dnf install -y \
-            gcc-c++ cmake pkgconf-pkg-config libevdev-devel gtk4-devel \
+            gcc-c++ make cmake pkgconf-pkg-config libevdev-devel gtk4-devel \
             polkit polkit-devel systemd python3 \
             qt6-qttools
     else
         warn "Bilinmeyen dağıtım ($DISTRO_ID); el ile şu paketleri kurun:"
-        warn "  g++/clang++, cmake, pkg-config, libevdev (devel), gtk4 (devel),"
-        warn "  systemd, polkit, python3"
+        warn "  g++/clang++, make, cmake, pkg-config, libevdev (devel), gtk4 (devel),"
+        warn "  systemd, polkit, python3, qt6-tools (qdbus6; KDE fix için)"
         warn "Devam etmek için Enter'a basın..."
         read -r
     fi
 
-    # Çekirdek doğrulamaları
-    command -v g++ >/dev/null || command -v clang++ >/dev/null \
-        || die "C++ derleyici bulunamadı."
-    pkg-config --exists libevdev || die "libevdev devel paketi eksik."
+    # ── Tam doğrulama: herhangi biri eksikse "bağımlılık hatası" görmeden
+    #    kurulumu açık mesajla durdur. GUI dahil HER ŞEY kurulacak.
+    say "Kurulu araçlar/kütüphaneler doğrulanıyor..."
+    command -v g++     >/dev/null || command -v clang++ >/dev/null \
+        || die "C++ derleyici yok. Kurun: gcc"
+    command -v make    >/dev/null || die "make yok. Kurun: make (base-devel/build-essential)"
+    command -v cmake   >/dev/null || die "cmake yok. Kurun: cmake"
+    command -v pkg-config >/dev/null || command -v pkgconf >/dev/null \
+        || die "pkg-config yok. Kurun: pkg-config"
+    command -v python3 >/dev/null \
+        || warn "python3 yok — KDE fix (kwinrc düzenleme) çalışmayacak."
+    pkg-config --exists libevdev \
+        || die "libevdev devel paketi eksik. Kurun: libevdev (Arch) / libevdev-dev (Debian) / libevdev-devel (Fedora)"
+    pkg-config --exists gtk4 \
+        || die "gtk4 devel paketi eksik — GUI DERLENEMEZ. Kurun: gtk4 (Arch) / libgtk-4-dev (Debian) / gtk4-devel (Fedora)"
+    ok "Tüm bağımlılıklar mevcut."
 }
 
 # ── 2) Eski kurulumu temizle ──────────────────────────────────────────────────
@@ -142,7 +158,8 @@ clean_old_install() {
     # PID/socket dosyalarını temizle
     rm -f /run/rawaccel.pid /run/rawaccel.sock /tmp/rawaccel.pid /tmp/rawaccel.sock 2>/dev/null || true
 
-    # Eski binary, servis, udev, polkit, desktop dosyaları
+    # Eski binary, servis, udev, polkit, desktop dosyaları (+ PKGBUILD yolları,
+    # + setup.sh tarafından kurulan quirks/modprobe dosyaları)
     local files=(
         /usr/local/bin/rawaccel-daemon
         /usr/local/bin/rawaccel-cli
@@ -154,7 +171,10 @@ clean_old_install() {
         /etc/systemd/user/rawaccel.service
         /usr/lib/systemd/system/rawaccel.service
         /etc/udev/rules.d/99-rawaccel.rules
+        /usr/lib/udev/rules.d/99-rawaccel.rules
         /etc/modules-load.d/rawaccel.conf
+        /etc/modprobe.d/rawaccel.conf
+        /etc/libinput/local-overrides.quirks
         /usr/share/applications/rawaccel.desktop
         /usr/share/polkit-1/actions/org.rawaccel.policy
         /usr/share/polkit-1/rules.d/49-rawaccel.rules
@@ -170,9 +190,13 @@ clean_old_install() {
 build_project() {
     say "[3/7] Derleniyor..."
     [[ -x "$ROOT/scripts/build.sh" ]] || die "scripts/build.sh bulunamadı."
-    if [[ -n "$REAL_USER" ]]; then
+    # Mümkünse gerçek kullanıcı olarak derle (build-manual root'a ait olmasın).
+    # Ama repo dizini bu kullanıcıya yazılabilir değilse root olarak dene —
+    # kurulum "bağımlılık / izin hatası" yüzünden yarıda kalmasın.
+    if [[ -n "$REAL_USER" ]] && sudo -n -u "$REAL_USER" true 2>/dev/null && [[ -w "$ROOT" ]]; then
         sudo -u "$REAL_USER" bash "$ROOT/scripts/build.sh"
     else
+        warn "Gerçek kullanıcı olarak derlenemiyor; root olarak derleniyor."
         bash "$ROOT/scripts/build.sh"
     fi
     [[ -x "$ROOT/build-manual/rawaccel-daemon" ]] || die "Build başarısız."
@@ -196,8 +220,16 @@ do_install() {
         ok "Mevcut config korundu: /etc/rawaccel/settings.json"
     fi
 
-    # Kullanıcı configi varsa, sistem config olarak da kopyala (daemon görsün)
+    # Kullanıcı configi varsa, sistem config olarak da kopyala (daemon görsün).
+    # Mevcut /etc/rawaccel/settings.json'ı timestamp'li yedeğe alıp üzerine yaz —
+    # böylece "kullanıcı configi sistem configini sessizce ezdi" sürprizini önler.
     if [[ -n "$REAL_HOME" && -f "$REAL_HOME/.config/rawaccel/settings.json" ]]; then
+        if [[ -f /etc/rawaccel/settings.json ]] && \
+           ! cmp -s "$REAL_HOME/.config/rawaccel/settings.json" /etc/rawaccel/settings.json; then
+            local backup="/etc/rawaccel/settings.json.bak.$(date +%Y%m%d-%H%M%S)"
+            cp /etc/rawaccel/settings.json "$backup"
+            warn "Mevcut sistem config farklı; yedeklendi: $backup"
+        fi
         cp "$REAL_HOME/.config/rawaccel/settings.json" /etc/rawaccel/settings.json
         ok "Kullanıcı config /etc/rawaccel/'a senkronlandı."
     fi
@@ -293,8 +325,37 @@ fix_kde_plasma() {
 }
 
 # ── 7) Özet ───────────────────────────────────────────────────────────────────
+verify_install() {
+    say "Kurulum doğrulanıyor..."
+    local missing=0
+    for b in rawaccel-daemon rawaccel-cli rawaccel-gui; do
+        if command -v "$b" >/dev/null 2>&1; then ok "Binary mevcut: $(command -v "$b")"
+        else err "Binary EKSİK: $b"; missing=1; fi
+    done
+    [[ -f /etc/rawaccel/settings.json ]]   && ok "Config: /etc/rawaccel/settings.json" || { err "Config EKSİK"; missing=1; }
+    [[ -f /etc/udev/rules.d/99-rawaccel.rules ]] && ok "udev kuralı mevcut" || { err "udev kuralı EKSİK"; missing=1; }
+    [[ -f /usr/share/polkit-1/actions/org.rawaccel.policy ]] && ok "polkit mevcut" || { err "polkit EKSİK"; missing=1; }
+    [[ -f /etc/libinput/local-overrides.quirks ]] && ok "libinput quirk mevcut" || { err "libinput quirk EKSİK"; missing=1; }
+    if systemctl is-active --quiet rawaccel.service; then ok "Servis ÇALIŞIYOR"
+    else err "Servis ÇALIŞMIYOR — journalctl -u rawaccel -n 50"; missing=1; fi
+    if [[ -n "$REAL_USER" ]] && id -nG "$REAL_USER" | grep -qw input; then
+        ok "$REAL_USER 'input' grubunda"
+    else
+        warn "$REAL_USER henüz 'input' grubunda değil (çıkış-giriş gerekir)"
+    fi
+    echo ""
+    if [[ $missing -eq 1 ]]; then
+        err "Yukarıda EKSİK işaretli öğeler var — lütfen tekrar gözden geçirin."
+        echo "(Çoğu durumda: sudo bash setup.sh --reinstall)"
+    else
+        ok "Her şey yerinde — kurulum EKSİKSİZ."
+    fi
+}
+
 print_summary() {
     say "[7/7] Kurulum tamamlandı."
+    echo ""
+    verify_install
     echo ""
     # KDE Plasma 6 için tek-seferlik manuel adım (mimari sınır)
     if command -v kwin_wayland &>/dev/null || command -v plasmashell &>/dev/null; then

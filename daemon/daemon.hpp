@@ -26,6 +26,7 @@ struct mouse_device {
     int              poll_rate = 1000;
     int              detected_dpi          = 0;  // sysfs-detected DPI (0 = unknown)
     int              detected_polling_rate = 0;  // sysfs-detected polling rate in Hz (0 = unknown)
+    int              detected_battery      = -1; // sysfs-detected battery % (0-100, -1 = unknown)
 
     // Per-device state
     modifier_settings  settings;
@@ -34,15 +35,24 @@ struct mouse_device {
 
     // Timing
     double last_time_ms = 0;
-    // R13-perf: pre-computed dpi / NORMALIZED_DPI — updated only on profile change,
+    // R13-perf: pre-computed NORMALIZED_DPI / dpi — updated only on profile change,
     // avoids a floating-point division on every mouse event.
-    double dpi_factor   = 800.0 / NORMALIZED_DPI;
+    // O6: direction matches reference input_dpi_normalization_factor (was dpi/NORMALIZED_DPI).
+    double dpi_factor   = NORMALIZED_DPI / 800.0;
 
     // Subpixel accumulation: carry fractional remainder between frames
     double remainder_x   = 0.0;
     double remainder_y   = 0.0;
     // Set to true when a fatal I/O error occurs; run_loop removes the device
     bool   disconnected  = false;
+
+    // BUG-18: SYN_DROPPED state must persist across process_device() calls.
+    // The Linux input protocol says all events between a SYN_DROPPED and the
+    // next SYN_REPORT are unreliable.  A previous bug had this as a function-
+    // local flag — if SYN_DROPPED fell at the end of one read batch and the
+    // matching SYN_REPORT arrived in the next epoll cycle, the flag was reset
+    // to false in between and the daemon would forward unreliable events.
+    bool   syn_dropped   = false;
 
     // ── Latency statistics — see lat_stats.hpp for the full implementation ──
     // Thread safety: flush_motion() (loop thread) writes; dump_latency_stats()
@@ -68,6 +78,15 @@ public:
     /// Reload config (hot reload via SIGHUP).
     bool reload();
 
+    /// Apply a full config pushed over IPC (the "set_config" RPC used by the
+    /// GUI/CLI).  Parses + sanitizes the JSON, atomically persists it to the
+    /// daemon's own config path (so it survives a daemon restart — this is what
+    /// lets a root systemd daemon pick up edits made in the user's GUI, whose
+    /// ~/.config copy differs from /etc/rawaccel/settings.json), then stores it
+    /// for the event loop to live-apply.  Returns false on parse/persist error
+    /// (the previous config is kept).
+    bool push_config(const std::string& json_str);
+
     bool is_running() const { return running_.load(); }
 
     /// Set callback for logging.
@@ -79,6 +98,15 @@ public:
     /// Print per-device latency statistics to stdout and reset counters.
     /// Call periodically (e.g. on SIGUSR1) to observe real-time performance.
     void dump_latency_stats();
+
+    /// Atomically read-and-clear the IPC latency-dump flag.
+    /// The IPC server (input-group accessible) sets this flag when an
+    /// unprivileged client requests a stats dump; the main thread polls it
+    /// alongside the SIGUSR1 path so latency reporting works without
+    /// kill() permission on the (root-owned) daemon process.
+    bool consume_latency_dump_request() {
+        return latency_dump_flag_.exchange(false);
+    }
 
     /// Build a JSON status string describing the daemon's current state.
     /// Thread-safe: acquires per-device lat_mtx for snapshot reads.
@@ -92,7 +120,12 @@ public:
     //   client → "status\n"  → server → <json>\n
     //   client → "ping\n"    → server → "pong\n"
     //   client → "reload\n"  → server → {"ok":true,...}\n  (schedules config reload)
+    //   client → "latency\n" → server → {"ok":true,...}\n  (schedules latency dump)
+    //   client → "set_config <n>\n" followed by exactly <n> bytes of config JSON
+    //            → server → {"ok":true,"config":path}\n   (persists + live-applies)
     //   client → <other>\n   → server → {"error":"unknown command"}\n
+    // The socket is chmod 0660 root:input, so only members of the input group can
+    // issue these commands (the same trust boundary as grabbing /dev/input anyway).
     bool start_ipc_server(const std::string& sock_path);
     void stop_ipc_server();
     static std::string ipc_sock_path(); ///< Derive socket path from PID-file convention.
@@ -105,14 +138,19 @@ private:
     bool create_virtual_device(mouse_device& dev);
     void process_device(mouse_device& dev);
     void apply_profile(mouse_device& dev, const device_profile& prof);
+    /// Shared apply path for both the SIGHUP reload and the IPC config push.
+    /// Runs on the loop thread; live-updates open devices without dropping the
+    /// grab, and falls back to a full setup when no devices are open yet.
+    void apply_new_config(const app_config& new_cfg);
     /// Searches by device_id match first, then active_profile, then the first profile.
     const device_profile* find_profile(const std::string& dev_id) const;
     void handle_hotplug();
     void do_hotplug_scan();
     void log(const std::string& msg, bool verbose_only = false);
 
-    std::atomic<bool>   running_     { false };
-    std::atomic<bool>   reload_flag_ { false };
+    std::atomic<bool>   running_             { false };
+    std::atomic<bool>   reload_flag_         { false };
+    std::atomic<bool>   latency_dump_flag_   { false };
     std::thread         loop_thread_;
     app_config          config_;
     std::string         config_path_;
@@ -137,6 +175,17 @@ private:
     std::atomic<int> hotplug_retry_ { 0 };
     // Pending hot-plug flag: set by inotify, processed at safe point in loop
     std::atomic<bool> pending_hotplug_ { false };
+    // Next time to run an empty-device re-scan (ms, CLOCK_MONOTONIC_RAW).
+    // When devices_ is empty (no mice at boot, permission/conflict fixed later),
+    // the loop re-scans every ~2 s instead of giving up — self-healing startup.
+    double empty_rescan_ms_ = 0;
+
+    // Config push slot: filled by the IPC thread (push_config), consumed by the
+    // loop thread.  push_cfg_ is fully parsed+sanitized before being stored, so
+    // the loop thread never throws on it.
+    std::mutex   push_cfg_mu_;
+    app_config   push_cfg_;
+    bool         push_cfg_pending_ = false;
 
     // IPC server state
     std::thread         ipc_thread_;

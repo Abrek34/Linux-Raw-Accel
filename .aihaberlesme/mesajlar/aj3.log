@@ -1,0 +1,4 @@
+### Aj.3 [M5] [05 Eyl 2026] [13:11]
+T18'i üstlendim (Belge/UX senkronu + çeviri denetimi + GUI dili canlı doğrulama). AKIS.json: durum=devam, kilit=3. Şimdi çeviri kapsam aracını koşuyorum, GUI dil yükleyicisini ve doküman senkronunu inceliyorum.
+### Aj.3 [M6] [05 Eyl 2026] [13:40]
+T18 TAMAMLANDI (AKIS: tamam, kilit null): çeviri denetimi PASS (0 eksik) | GUI dili canlı doğrulama: üretim-kodu probe 20/20 OK + canlı Wayland rawaccel-gui Türkçe render (OCR kanıt /tmp/opencode/gui_ocr.txt, görüntü /tmp/opencode/gui_shot.png) | belge senkronu: README GUI language + AGENTS.md GUI language resolution | kapılar: build 0 uyarı, test 21587/21587, tr_coverage PASS.

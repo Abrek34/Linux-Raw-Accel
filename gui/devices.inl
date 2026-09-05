@@ -25,9 +25,15 @@ static std::string resolve_stable_id(const std::string& event_node) {
         char target[PATH_MAX] = {};
         if (!realpath(link.c_str(), target)) continue;
         if (std::string(target) == std::string(real_event)) {
-            // Prefer the "-event-mouse" suffix over "-mouse" (more specific)
-            if (best.empty() || link.find("-event-mouse") != std::string::npos)
-                best = link;
+            // Prefer the "-event-mouse" suffix over "-mouse" (more specific).
+            // Keep the first -event-mouse match (do not let a later non-event-
+            // mouse, or a second -event-mouse, clobber it).  Mirrors the daemon's
+            // resolve_stable_id so GUI and daemon store identical device_ids.
+            if (best.empty())
+                best = link;                      // first match
+            else if (link.find("-event-mouse") != std::string::npos &&
+                     best.find("-event-mouse") == std::string::npos)
+                best = link;                      // prefer -event-mouse over other
         }
     }
     closedir(dir);
@@ -143,7 +149,7 @@ static std::vector<InputDeviceInfo> list_mice() {
 /// If is_auto==true (inotify-triggered), only rebuilds the model when the device
 /// list actually changed — avoids the flicker from destroying/recreating the widget
 /// model on every spurious inotify event.
-void refresh_mice_combo(AppState* S, bool is_auto) {
+void refresh_mice_combo(AppState* S, bool is_auto, bool quiet) {
     // O7 + D9: model/selection change triggers "notify::selected" and
     // on_param_changed() → unsaved=true can be a false positive here.
     // updating flag ile bu callback'leri sustur.
@@ -160,12 +166,13 @@ void refresh_mice_combo(AppState* S, bool is_auto) {
     if (list_changed || !is_auto) {
         // Rebuild the GtkStringList model and assign it to the drop-down.
         GtkStringList* sl = gtk_string_list_new(nullptr);
-        gtk_string_list_append(sl, "All devices (default)");
+        gtk_string_list_append(sl, tr("All devices (default)"));
         for (auto& m : S->mice_list) {
             std::string lbl = m.name + "  [" + m.event_node + "]";
             gtk_string_list_append(sl, lbl.c_str());
         }
         gtk_drop_down_set_model(GTK_DROP_DOWN(S->device_id_combo), G_LIST_MODEL(sl));
+        g_object_unref(sl);
     }
 
     // O8: guard against UB in cur_prof() when the profile list is empty
@@ -184,9 +191,9 @@ void refresh_mice_combo(AppState* S, bool is_auto) {
 
     S->updating = prev_updating;
 
-    if (!is_auto) {
-        set_status(S, "Device list refreshed: " +
-                   std::to_string(S->mice_list.size()) + " mouse(s) found.");
+    if (!is_auto && !quiet) {
+        set_status(S, tr("Device list refreshed: ") +
+                   std::to_string(S->mice_list.size()) + tr(" mouse(s) found."));
     }
 }
 

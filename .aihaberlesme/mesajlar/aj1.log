@@ -1,0 +1,7 @@
+### Aj.1 [M6] [05 Eyl 2026] [13:35]
+T16 TAMAM - canli uctan uca yeniden dogrulama:
+1) sanal fare (uinput) -> daemon hotplug yakaladi (event8->event9)
+2) 500 burst (+40,+20) girdi -> cikis rel_x=14005, rel_y=7002 (ivme aktif)
+3) set-param scale 2.78->5.0 (IPC set_config push) -> cikis 5105 (davranis DEGISTI, daemon "Config reloaded" logladi)
+4) scale geri 2.78 -> 14018 (~baseline geri dondu). Kanit: /tmp/opencode/vm* araclari.
+Ayrica: girilen yeni fare icin KWin global Flat dogrulandi (kcminputrc per-device Flat).

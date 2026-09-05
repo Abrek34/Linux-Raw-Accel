@@ -57,7 +57,10 @@ static int kde_libinput_accel_state() {
             line[--len] = '\0';
 
         if (line[0] == '[') {
-            in_libinput = (strncmp(line, "[Libinput]", 10) == 0);
+            // strncmp(...,10) only confirms the prefix matches; a section header
+            // like "[LibinputSomething]" would otherwise be treated as Libinput.
+            // Require the closing ']' right after the 10-byte section name.
+            in_libinput = (strncmp(line, "[Libinput]", 10) == 0 && line[10] == ']');
             continue;
         }
         if (!in_libinput) continue;
@@ -107,14 +110,16 @@ static std::vector<std::string> daemon_sock_candidates() {
     return v;
 }
 
-/// Send a one-line command to the daemon socket and return the response.
+/// Raw IPC send: connect, write the full request bytes, read the response.
+/// The 1 s timeout covers the daemon persisting (with fsync) a rooot-owned
+/// config file before replying — 100 ms was too tight for that path.
 /// Returns an empty string on failure.
-static std::string daemon_ipc_query(const std::string& cmd) {
+static std::string daemon_ipc_send_raw(const std::string& req) {
     for (const auto& sock : daemon_sock_candidates()) {
         int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
         if (fd < 0) continue;
 
-        struct timeval tv { .tv_sec = 0, .tv_usec = 100000 }; // 100 ms
+        struct timeval tv { .tv_sec = 1, .tv_usec = 0 }; // 1 s
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
@@ -126,8 +131,18 @@ static std::string daemon_ipc_query(const std::string& cmd) {
             close(fd); continue; // try the next candidate
         }
 
-        std::string req = cmd + "\n";
-        send(fd, req.c_str(), req.size(), MSG_NOSIGNAL);
+        // Send the full request, tolerating partial sends (loop until done or error).
+        // An incomplete payload would otherwise be rejected by the daemon's
+        // "incomplete config payload" guard even though retrying here is trivial.
+        const char* p = req.data();
+        size_t left = req.size();
+        while (left > 0) {
+            ssize_t w = send(fd, p, left, MSG_NOSIGNAL);
+            if (w <= 0) break; // error / timeout / peer closed
+            p += w;
+            left -= (size_t)w;
+        }
+        if (left > 0) { close(fd); continue; } // could not send fully — next candidate
 
         // Read response (up to 64KB)
         std::string resp;
@@ -142,6 +157,22 @@ static std::string daemon_ipc_query(const std::string& cmd) {
         return resp;
     }
     return {};
+}
+
+/// Send a one-line command to the daemon socket and return the response.
+/// Returns an empty string on failure.
+static std::string daemon_ipc_query(const std::string& cmd) {
+    return daemon_ipc_send_raw(cmd + "\n");
+}
+
+/// Push the full config to the daemon over IPC (the daemon's "set_config" RPC).
+/// The daemon persists it to ITS OWN config path — a root systemd daemon writes
+/// /etc/rawaccel/settings.json even though the GUI's working copy lives in the
+/// user's ~/.config — and live-applies it.  Works for any input-group user.
+/// Returns true only if the daemon acknowledged the config.
+bool daemon_ipc_push_config(const std::string& json) {
+    std::string req = "set_config " + std::to_string(json.size()) + "\n" + json;
+    return daemon_ipc_send_raw(req).find("\"ok\":true") != std::string::npos;
 }
 
 pid_t read_daemon_pid() {
@@ -221,16 +252,51 @@ void update_daemon_status(AppState* S) {
     bool running = daemon_running();
     if (running) {
         gtk_label_set_markup(GTK_LABEL(S->daemon_status),
-            "<span foreground='#40c040'>● Daemon running</span>");
+            tr("<span foreground='#40c040'>● Daemon running</span>"));
     } else {
         gtk_label_set_markup(GTK_LABEL(S->daemon_status),
-            "<span foreground='#c04040'>● Daemon stopped</span>");
+            tr("<span foreground='#c04040'>● Daemon stopped</span>"));
     }
     // Update button sensitivity based on whether the daemon is running
     if (S->apply_btn)        gtk_widget_set_sensitive(S->apply_btn,        running);
     if (S->daemon_start_btn) gtk_widget_set_sensitive(S->daemon_start_btn, !running);
     if (S->daemon_stop_btn)  gtk_widget_set_sensitive(S->daemon_stop_btn,  running);
     if (S->daemon_reload_btn)gtk_widget_set_sensitive(S->daemon_reload_btn,running);
+
+    // Query and display battery level from daemon
+    if (S->battery_detected_lbl) {
+        // Query daemon status via IPC to get detected_battery
+        std::string resp = daemon_ipc_query("status");
+        int battery = -1;
+        size_t pos = resp.find("\"detected_battery\"");
+        if (pos != std::string::npos) {
+            // Find the value after "detected_battery":
+            size_t start = resp.find(':', pos);
+            if (start != std::string::npos) {
+                start = resp.find_first_not_of(" \t", start + 1);
+                size_t end = resp.find_first_of(",}", start);
+                if (end != std::string::npos) {
+                    std::string val_str = resp.substr(start, end - start);
+                    battery = std::atoi(val_str.c_str());
+                }
+            }
+        }
+        if (battery >= 0 && battery <= 100) {
+            gtk_widget_set_visible(GTK_WIDGET(S->battery_detected_lbl), TRUE);
+            if (battery <= 20) {
+                // Low battery warning
+                gtk_label_set_markup(GTK_LABEL(S->battery_detected_lbl),
+                    trf("<b><span foreground='red'>Battery: %d%% (Low!)</span></b>", battery).c_str());
+            } else {
+                gtk_label_set_markup(GTK_LABEL(S->battery_detected_lbl),
+                    trf("<b>Battery: %d%%</b>", battery).c_str());
+            }
+        } else {
+            gtk_widget_set_visible(GTK_WIDGET(S->battery_detected_lbl), TRUE);
+            gtk_label_set_markup(GTK_LABEL(S->battery_detected_lbl),
+                tr("<b>Battery: unknown</b>"));
+        }
+    }
 }
 
 gboolean poll_daemon_status(gpointer user_data) {
@@ -244,7 +310,7 @@ gboolean poll_daemon_status(gpointer user_data) {
 bool daemon_send_signal(int sig, std::string* err_out) {
     pid_t pid = read_daemon_pid();
     if (pid <= 0) {
-        if (err_out) *err_out = "Daemon is not running.";
+        if (err_out) *err_out = tr("Daemon is not running.");
         return false;
     }
     if (kill(pid, sig) == 0) return true;
@@ -253,12 +319,12 @@ bool daemon_send_signal(int sig, std::string* err_out) {
     if (err_out) {
         if (errno == EPERM) {
             *err_out =
-                "Permission denied (EPERM) — cannot signal the daemon.\n"
-                "Fix: ensure you are in the 'input' group:\n"
-                "  sudo usermod -aG input $USER  (then log out and back in)\n"
-                "Or restart the daemon from the GUI using pkexec.";
+                tr("Permission denied (EPERM) — cannot signal the daemon.\n"
+                   "Fix: ensure you are in the 'input' group:\n"
+                   "  sudo usermod -aG input $USER  (then log out and back in)\n"
+                   "Or restart the daemon from the GUI using pkexec.");
         } else {
-            *err_out = std::string("kill() failed: ") + strerror(errno);
+            *err_out = std::string(tr(" kill() failed: ")) + strerror(errno);
         }
     }
     return false;

@@ -6,7 +6,7 @@
 namespace rawaccel {
 
 /// Single source of truth for the version number — read by GUI and daemon.
-inline constexpr const char* RAWACCEL_VERSION = "0.2.0";
+inline constexpr const char* RAWACCEL_VERSION = "0.4.0";
 
 using milliseconds = double;
 
@@ -103,6 +103,7 @@ struct profile {
     accel_args accel_y;
     speed_args speed_processor_args;
     double output_dpi               = NORMALIZED_DPI;
+    double yx_output_dpi_ratio      = 1;
     double lr_output_dpi_ratio      = 1;
     double ud_output_dpi_ratio      = 1;
     double degrees_rotation         = 0;

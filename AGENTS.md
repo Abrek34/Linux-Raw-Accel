@@ -2,6 +2,40 @@
 
 This file documents build, test, and verification commands.
 
+## Install (canonical one-shot setup)
+
+The **single source of truth for installation is `setup.sh`** at the repo root.
+It installs ALL system dependencies, cleans any previous install, builds,
+installs binaries/systemd/udev/polkit/desktop/libinput-quirk, enables the
+service, and applies the KDE Plasma flat-acceleration fix.
+
+```bash
+sudo bash setup.sh             # full install (deps + build + system-wide + KDE fix)
+sudo bash setup.sh --no-deps   # skip system dependency installation
+sudo bash setup.sh --uninstall # fully remove (keeps ~/.config/rawaccel)
+sudo bash setup.sh --reinstall # clean the old install, then reinstall (default)
+```
+
+`scripts/install.sh` is a thin wrapper that forwards to `setup.sh`
+(kept for backwards compatibility — do not add install logic there).
+
+### Dependency policy (IMPORTANT — do not cause install errors again)
+
+- Every dependency the project compiles or runs against MUST be present in
+  `setup.sh` → `install_deps()` for **each** of the three distro branches
+  (pacman / apt / dnf). Missing entries = "dependency error" for the user.
+- Current tool chain: `g++/clang++`, `make`, `cmake`, `pkg-config`/`pkgconf`.
+- Current libraries: `libevdev` (build+runtime), `gtk4` (GUI build+runtime).
+- Runtime/aux: `systemd`, `polkit`, `python3` (kwinrc KDE fix), `qt6-tools`
+  (provides `qdbus6` — live KWin reconfigure on Plasma 6).
+- `nlohmann/json.hpp` is vendored (`include/nlohmann/`) — do NOT add an
+  external nlohmann-json dependency.
+- After the install, `install_deps()` verifies every tool/library via
+  `command -v` / `pkg-config --exists` and aborts with an exact hint if
+  anything is still missing, so the user never sees a cryptic build error.
+- If you introduce a NEW build or runtime dependency: add its package to all
+  three distro branches in `setup.sh` AND update this section.
+
 ## Build
 
 ```bash
@@ -17,15 +51,59 @@ CXX=clang++ bash scripts/build.sh
 
 Output binaries: `build-manual/rawaccel-daemon`, `build-manual/rawaccel-cli`, `build-manual/rawaccel-gui`
 
+Both `scripts/build.sh` and the CMake target apply the same hardening flags
+(`-fstack-protector-strong`, `-fstack-clash-protection`, `-D_FORTIFY_SOURCE=2`,
+`-D_GLIBCXX_ASSERTIONS`, `-fPIE`+`-pie`, `-Wl,-z relro,now,noexecstack,separate-code`,
+`-fcf-protection=full` on x86). `RAWACCEL_PORTABLE=1` turns off `-march=native`.
+
 ## Test
 
 ```bash
 # All unit tests (compile + run)
 bash tests/run_tests.sh
 
+# Same tests under AddressSanitizer + UBSan (slower, catches memory/UB bugs)
+bash tests/run_tests_asan.sh
+
+# Translation coverage: every translatable UI string must have a Turkish entry
+bash tests/run_tr_coverage.sh
+
 # Expected output: "=== Sonuç: N/N geçti ===" (N/N passed)
 # Exits with code 1 if any FAIL line appears.
 ```
+
+## Oracle (reference cross-check)
+
+```bash
+# Differential check: local port vs the OFFICIAL RawAccel reference (vendored)
+bash tests/oracle/run_oracle.sh            # exit 0 = matches, outside known deviations
+bash tests/oracle/run_oracle.sh --verbose # print every mismatching row
+TOL=1e-9 bash tests/oracle/run_oracle.sh  # tighten/loosen relative gain tolerance
+```
+
+The oracle builds the project's own acceleration headers AND verbatim vendored
+`RawAccelOfficial/rawaccel` headers (MIT, `tests/oracle/ref/LICENSE`) over a
+shared parameter grid (`tests/oracle/oracle_cases.hpp`) and compares every
+gain row. Rows that intentionally deviate (classic exponent<=1 "linear path"
+constant gain, and `power`/`synchronous` identity at speed 0) are listed in
+`tests/oracle/known_deviations.txt` and do not fail the run. Run this after
+EVERY change to `include/accel-*.hpp`.
+
+## Translation Coverage
+
+`tests/tr_coverage.cpp` + `tests/run_tr_coverage.sh` statically scans the GUI
+sources (`gui/*.inl`, `gui/main.cpp`) for every translatable call —
+tr / trf / trlbl / trmlbl / trbtn / trchk / trtip / tr_combo_fill /
+grid_row / grid_row2 — collects the keys and cross-checks them against the
+dictionary in `gui/tr.inl`.
+
+- **Key position aware:** `trtip(widget, key)` reads the key from the **2nd**
+  argument, `grid_row`/`grid_row2` from the **3rd** label argument.
+- Exits **1** on any MISSING key (a UI string without a Turkish entry);
+  orphaned dictionary entries are warnings (some are used dynamically).
+- `TRC_DEBUG=1` enables verbose scanning diagnostics on stderr.
+- Run it after EVERY change to GUI strings. Expected output — all MISSING/key
+  summary lines then `Result: PASS` (exit code 0).
 
 Test file: `tests/test_accel.cpp`
 - No external dependencies (standard C++20 + project headers)
@@ -67,6 +145,21 @@ Two harnesses:
 
 Seed corpus: `tests/corpus_config/`
 
+## Continuous Integration
+
+GitHub Actions workflow: `.github/workflows/ci.yml`
+
+Three jobs run on every push/PR (Ubuntu 24.04):
+- **build-and-test** — portable build (`RAWACCEL_PORTABLE=1`), warning-as-failure gate
+  via `grep -E "warning:|error:"`, then `tests/run_tests.sh`.
+- **sanitizers** — rebuilds tests with `-fsanitize=address,undefined` and runs them
+  with `halt_on_error=1` so any leak/UB fails CI.
+- **fuzz-smoke** — 60 s per harness via `tests/run_fuzz.sh 60`. Skipped on PRs to
+  keep them fast; runs on push to main and on `workflow_dispatch`. Crash inputs
+  are uploaded as artifacts on failure.
+
+Concurrency group cancels superseded runs on the same ref.
+
 ## Lint / Warning Check
 
 ```bash
@@ -76,8 +169,9 @@ bash scripts/build.sh 2>&1 | grep -E "warning:|error:"
 
 ## Version Update
 
-Version number lives in a single place: `include/rawaccel-base.hpp` → `RAWACCEL_VERSION`
-Changing it automatically propagates to the daemon, CLI, and GUI.
+Version number lives in `include/rawaccel-base.hpp` → `RAWACCEL_VERSION` (propagates to
+daemon, CLI, and GUI at build time) and must be mirrored in `CMakeLists.txt` →
+`project(rawaccel-linux VERSION ...)`. Bump both together.
 
 ## File Responsibilities
 
@@ -91,8 +185,9 @@ Changing it automatically propagates to the daemon, CLI, and GUI.
 | `daemon/daemon.cpp` | evdev/uinput implementation, hot-plug |
 | `daemon/main.cpp` | Daemon entry point, PID file, signal handling |
 | `cli/main.cpp` | rawaccel-cli commands |
-| `gui/main.cpp` | rawaccel-gui entry point + helpers (~107 lines) |
+| `gui/main.cpp` | rawaccel-gui entry point + helpers (~150 lines) |
 | `gui/app_state.hpp` | AppState struct, shared includes, forward declarations |
+| `gui/tr.inl` | Lightweight localization (tr()/trf() dict, TR_EN/TR), language switch, runtime registry |
 | `gui/devices.inl` | Mouse discovery (stable by-id paths), inotify hot-plug |
 | `gui/daemon_comm.inl` | Daemon PID lookup, status display, signal sending |
 | `gui/graph.inl` | Cairo curve rendering, LUT editor |
@@ -103,7 +198,14 @@ Changing it automatically propagates to the daemon, CLI, and GUI.
 | `tests/fuzz_config.cpp` | libFuzzer harness — config JSON parsing |
 | `tests/fuzz_accel.cpp` | libFuzzer harness — acceleration pipeline |
 | `tests/run_fuzz.sh` | Fuzz test runner (both harnesses) |
+| `tests/run_tests.sh` | Unit test runner (compile + run) |
+| `tests/run_tests_asan.sh` | Unit test runner under ASan + UBSan |
+| `tests/oracle/` | Differential oracle: `run_oracle.sh`, grid `oracle_cases.hpp`, local side `local.cpp`, official-ref side `reference.cpp`, `ref/` (vendored MIT), `known_deviations.txt` |
+| `tests/tr_coverage.cpp` | Translation coverage audit (extracts all tr*()/grid_row keys) |
+| `tests/run_tr_coverage.sh` | Translation coverage runner (exit 1 on MISSING) |
 | `scripts/build.sh` | Quick build script |
+| `setup.sh` | Canonical one-shot installer (all deps + build + system install + KDE fix) |
+| `.github/workflows/ci.yml` | GitHub Actions CI (build + tests + sanitizers + fuzz smoke) |
 
 ## Key Design Decisions
 
@@ -130,6 +232,7 @@ Changing it automatically propagates to the daemon, CLI, and GUI.
 - **Unified clock source**: both `now_ms()` and `now_ns()` use `CLOCK_MONOTONIC_RAW` — eliminates drift between timing sources and reduces syscalls per event from 3 to 2
 - **Y-axis unlinked field sync**: when X/Y axes are unlinked, fields without dedicated Y widgets (cap_mode, exponent_power, decay_rate, scale, output_offset, motivity, gamma, smooth, sync_speed) are copied from X to prevent stale values
 - **Widget sensitivity refactor**: raw passthrough grey-out logic extracted to `update_raw_sensitivity()` — single source of truth for 18 widget enable/disable calls
+- **GUI language resolution**: header-bar dropdown persists `auto`/`en`/`tr` to `<config_dir>/gui_lang`; an explicit preference wins (`load_lang_override`), otherwise `LANG`/`setlocale` decides (`sys_locale_is_turkish`). `tr()` returns the Turkish rendering only when the resolved language is Turkish — English is the dictionary key itself, so missing entries degrade to the source string. `refresh_language()` re-applies every registered widget in place on switch.
 
 ## Known Limitations
 

@@ -15,10 +15,9 @@ struct natural {
     natural() = default;
 
     natural(const accel_args& args) : offset(args.input_offset),
-                                       limit(std::max(0.0, args.limit - 1.0)) {
-        // N8: clamp limit to 0 — same guard as jump mode.
-        // args.limit < 1 → limit < 0 → non-gain output goes below 1 (deceleration/inversion).
-        // GUI enforces limit>=0.1 but JSON/CLI may pass arbitrary values.
+                                       limit(args.limit - 1.0) {
+        // Reference RawAccel allows limit < 1 → negative limit → deceleration
+        // (gain < 1) below the offset band.  We keep that behavior here.
         // O1: avoid operator precedence trap — fabs before ternary, not after.
         // Prevent division by zero when limit ≈ 0 (args.limit ≈ 1).
         double abs_limit = std::fabs(limit);
@@ -33,19 +32,28 @@ struct natural {
 
         if (!gain_mode) {
             // Legacy mode: gain approaches (limit+1) asymptotically.
-            // f(t) = limit * (1 - exp(-accel*t)) + 1
-            return limit * (1.0 - decay) + 1.0;
+            // Reference RawAccel natural<LEGACY>:
+            //   offset_x = offset - x, decay = exp(accel*offset_x)
+            //   gain = limit * (1 - (offset - decay*offset_x)/x) + 1
+            // With offset==0 this reduces to limit*(1 - decay) + 1; the
+            // offset terms are required so the curve starts at 1.0 right
+            // past the offset and approaches (limit+1) at high speed.
+            double offset_x = offset - x;
+            return limit * (1.0 - (offset - decay * offset_x) / x) + 1.0;
         } else {
             // Gain mode: integral form so output speed is smooth.
-            // output_speed = integral of gain * dv
-            // gain(t) = limit*(1 - exp(-a*t)) + 1
-            // output = t + limit*(t + exp(-a*t)/a - 1/a) + constant
+            // Reference RawAccel natural<GAIN>:
+            //   output = limit*(decay/accel - offset_x) + constant
+            //           constant = -limit/accel
+            //   gain = output/x + 1
+            // This is offset-aware and approaches args.limit (not limit+1).
             if (x < 1e-9) return 1.0; // guard: prevent output/x blow-up when x ≈ 0
             // Guard: when accel ≈ 0 (decay_rate ≈ 0), the integral term
-            // (1 - decay)/accel is 0/0 → NaN.  In this regime the gain curve
-            // is flat at 1.0 (no acceleration), so return 1.0 directly.
+            // is 0/0 → NaN.  In this regime the gain curve is flat at 1.0
+            // (no acceleration), so return 1.0 directly.
             if (accel < 1e-12) return 1.0;
-            double output = t + limit * (t - (1.0 - decay) / accel);
+            double offset_x = offset - x;
+            double output   = limit * (decay / accel - offset_x) - limit / accel;
             return output / x + 1.0;
         }
     }

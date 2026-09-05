@@ -7,30 +7,58 @@ namespace rawaccel {
 
 /// Power acceleration: output = (scale * x)^n + C/x
 /// Smooth curve that naturally approaches a cap.
+/// Two forms (reference RawAccel power<GAIN>/<LEGACY>):
+///   gain:   continuous gain curve, cap handled via constant_b/x tail
+///   legacy: raw base curve hard-capped at cap.y (blocky tail)
+/// For legacy + io cap mode the reference uses a special scale derivation
+/// (scale_from_output_point) that ignores the output offset entirely.
 struct power {
-    vec2d  offset   = {};
-    double scale    = 1;
-    double constant = 0;
-    double cap_x    = DBL_MAX;
-    double cap_y    = DBL_MAX;
-    double constant_b = 0;
+    bool   gain_mode    = false;
+    vec2d  offset       = {};
+    double scale        = 1;
+    double constant     = 0;
+    double cap_x        = DBL_MAX;
+    double cap_y        = DBL_MAX;
+    double constant_b   = 0;
+    double legacy_cap   = DBL_MAX; // LEGACY hard cap
 
     power() = default;
 
-    power(const accel_args& args) {
-        // N11: exponent_power == 0 makes gain_inverse/scale_from_gain_point divide by zero.
-        // Clamp to a small positive value; gain_inverse uses 1/n as exponent.
+    power(const accel_args& args) : gain_mode(args.gain) {
         auto n = args.exponent_power > 0 ? args.exponent_power : 1e-4;
 
         if (args.cap_mode_val != cap_mode::io) {
             scale = args.scale;
-        } else {
+        } else if (gain_mode) {
             scale = scale_from_gain_point(args.cap.x, args.cap.y, n);
+        } else {
+            // reference special case: legacy + io — offset is ignored because of
+            // the circular dependency (scale -> constant -> offset).
+            offset = {};
+            constant = 0;
+            scale = scale_from_output_point(args.cap.x, args.cap.y, n, constant);
+            return;
         }
 
         offset.x = gain_inverse(args.output_offset, n, scale);
         offset.y = args.output_offset;
         constant = offset.x * offset.y * n / (n + 1);
+
+        if (!gain_mode) {
+            switch (args.cap_mode_val) {
+            case cap_mode::io:
+                legacy_cap = args.cap.y;
+                break;
+            case cap_mode::in:
+                if (args.cap.x > 0) legacy_cap = base_fn_impl(args.cap.x, args);
+                break;
+            case cap_mode::out:
+            default:
+                if (args.cap.y > 0) legacy_cap = args.cap.y;
+                break;
+            }
+            return;
+        }
 
         switch (args.cap_mode_val) {
         case cap_mode::io:
@@ -57,9 +85,13 @@ struct power {
     }
 
     double operator()(double speed, const accel_args& args) const {
-        // D8: also check input_offset — consistent guard with other accelerators.
-        // offset.x is computed in the constructor via gain_inverse(output_offset,...).
-        if (speed <= 0 || speed <= offset.x) return (offset.x > 0 ? offset.y : 1.0);
+        if (speed <= 0) return 1.0;
+        if (!gain_mode) {
+            double out = base_fn_impl(speed, args);
+            return minsd(out, legacy_cap);
+        }
+        // D8: reference base_fn returns offset.y below offset.x.
+        if (speed <= offset.x) return (offset.x > 0 ? offset.y : 1.0);
         if (speed < cap_x) {
             return base_fn_impl(speed, args);
         } else {
@@ -85,6 +117,11 @@ private:
     static double scale_from_gain_point(double input, double gain, double power) {
         if (input <= 0) return 0; // guard: prevent NaN in io mode when cap.x=0
         return std::pow(gain / (power + 1), 1.0 / power) / input;
+    }
+
+    static double scale_from_output_point(double input, double output, double power, double C) {
+        if (input <= 0) return 0;
+        return std::pow(output - C / input, 1.0 / power) / input;
     }
 
     static double integration_constant(double input, double gain, double output) {
