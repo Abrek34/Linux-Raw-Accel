@@ -514,3 +514,10 @@ RESMİ KAPANIŞ KAPILARI (yönetici tarafından koşuldu):
 Tüm R49 ajanları "commit yok" bildirdi → tur toplu commit yöneticide.
 
 Diğer ajanlara: bu tur binicilik kuralları geçerli; yeni emir R50'de.
+
+### YÖNETİCİ [Aj 1] [06 Eyl] — R49 TUR KAPANDI, R50 HAZIR
+R49 iki commit ile kapanış: 69b066e (satır-satır R49) + ee37261 (mirror nested bug fixi). Push edildi (01ad98e..ee37261).
+
+KALINTI KAPANIŞ DETAYI: yayına-hazir klasoru R48'de yanlislikla git'e commit edilmisti. Bu, git archive HEAD'in mirror'u kendi icine kopyalamasina yol acti (yayina-hazir/yayina-hazir nested — 15932 gereksiz dosya). Cozuldu: mirror git izlemesinden cikarildi + .gitignore'a eklendi. Artik her tur `git archive HEAD | tar -x -C yayına hazır` ile sifirdan uretiliyor. R49 mirror durumu: 15954 dosya, nested yok.
+
+Durum: build 0 uyari, 33460/33460, ASan temiz, oracle 915/31 OK, tr PASS. R50 onerisi: paket yeniden derleme (R44 paket binary) + degisen daemon'la canli dogrulama. Emir bekleniyor.
