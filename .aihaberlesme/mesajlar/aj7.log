@@ -315,3 +315,73 @@ virtmouse-game `locked` senaryo — DERLEME + CANLI DAEMON KOŞUSU:
 
 Doküman: test_window_usage.md tamamlandı (Bölüm 1-6: tam ekran kilit modeli, menü yolu, aile kabul tablosu, ESC/sorun giderme tablosu, 5 dk güvenlik matrisi, §6 locked + ölçülen P109 satırı). real_hardware_test.md üst notunda test_window_usage.md çapraz-referansı zaten mevcuttu → doğrulandı, ek değişiklik gerekmedi.
 AKIS: P109 durum=TAMAM(M28), kilit=''. Aj 7 boş — emir bekliyor.
+
+### Aj 7 [06 Eyl] P117 BUG-RAY PORTER
+Kapsam: README.md + docs/*.md (kullanıcı dokümanları). Kod değişikliği YOK — yalnız rapor (fix Faz 2). Kanıtlar canlı doğrulamayla (oracle, kaynak kod karşılaştırması); mutating CLI komutu çalıştırılmadı.
+
+[BUG-01] `rawaccel-cli latency` "(SIGUSR1)" mekanizma anlatımı bayat (MEDIUM)
+- Kaynak: README.md:176, README.md:591; cli/main.cpp:1302 (--help)
+- Sorun: CLI artık IPC-first: daemon_ipc_query("latency") (cli/main.cpp:1502-1516), SIGUSR1 yalnız eski-daemon fallback'i; daemon "latency" IPC komutunu tanıyor (daemon.cpp:1462). README/--help hâlâ "sends SIGUSR1" diyor. Doğru akış real_hardware_test.md §4.1 ve test_window_usage.md §6'da anlatılmış. cli/main.cpp:1513 journalctl ipucu yalnız fallback yoluna ait.
+- Etki: Kullanıcıya yanlış mekanizma bilgisi; journalctl yönlendirmesi IPC yolunda gereksiz.
+- Önerilen düzeltme (genel): README + --help'i "(IPC; eski daemonlarda SIGUSR1 fallback)" olarak güncelle.
+
+[BUG-02] Arch paket notu R44'ten beri bayat: dosya adı + kurulum yolu + "shadow" iddiası (MEDIUM-HIGH)
+- Kaynak: README.md:73-77
+- Sorun: Not; setup.sh → /usr/local/bin + /etc/systemd/system, paket → /usr/bin + /usr/lib/systemd/system, "/etc unit shadows the packaged one", dosya adı `rawaccel-linux-0.5.0-1-x86_64.pkg.tar.zst` yazıyor. R44 (c40f6b4) setup.sh servis kurulumunu /usr/lib/systemd/system'a taşıdı (setup.sh:276-277) → artık /etc unit yok, shadow mantığı da geçersiz; ikisi aynı yola kuruyor (çakışma/üstüne yazma). Gerçek artefakt `packaging/rawaccel-linux-0.5.0-2-x86_64.pkg.tar.zst` (PKGBUILD:15 pkgrel=2). scripts/rawaccel.service:20 ExecStart=/usr/local/bin/rawaccel-daemon (paket sed ile /usr/bin'e çevirir).
+- Etki: Yükleme rehberi yanlış dosya adı ve yanlış sistemd yerleşimi veriyor.
+- Önerilen düzeltme (genel): Notu R44 sonrası gerçeğe göre yeniden yaz (aynı hedef yola kurulum = çakışma uyarısı; paket adı 0.5.0-2).
+
+[BUG-03] README "Full key list" tam değil — 12 set-param anahtarı eksik (MEDIUM)
+- Kaynak: README.md:155-158
+- Sorun: "Full key list" parantezi set-param anahtarlarının alt kümesini veriyor. Eksik (docs/research/parameter_index.md #28/#39/#40/#41/#42/#43/#37/#38 CLI anahtarları): `raw` (raw_passthrough), `distance_mode`, `lp_norm`, `input_smooth_halflife`, `scale_smooth_halflife`, `output_smooth_halflife`, `domain_weights`, `domain_weight_x`, `domain_weight_y`, `range_weights`, `range_weight_x`, `range_weight_y`.
+- Etki: "Full" iddiası yanıltıcı; kullanıcı bu anahtarları var/ayarlanabilir sanmayabilir.
+- Önerilen düzeltme (genel): Listeyi parameter_index.md'deki set-param anahtarlarıyla birebir yap ya da "kısmi liste" de + bağlantı ver.
+
+[BUG-04] CHANGELOG "Default profile is 1:1 raw passthrough" — davranış beyanı yanlış (HIGH)
+- Kaynak: CHANGELOG.md:16-17
+- Sorun: config/default.json:13 raw_passthrough=false, :25 mode=noaccel; raw passthrough yalnız `disable` presetinde (presets.hpp). R46 P101 (5d6b4ff) aynı "varsayılan profil raw 1:1" ifadesini user_guide/real_hardware_test'ta düzeltti; CHANGELOG gözden kaçtı.
+- Etki: Sürüm notu okuyucusu "varsayılan = hız hattı yok" sanıyor; gerçekte hız hattı açık, ivme kapalı (kazanç 1.00).
+- Önerilen düzeltme (genel): "İvme kapalı noaccel; tam 1:1 için `disable` preseti (raw passthrough)" şekline çevir.
+
+[BUG-05] test_window_usage.md "gerçek grab yok / yakalama başarısız yolu yoktur" koduyla çelişiyor (KRİTİK)
+- Kaynak: docs/test_window_usage.md:23-24 (§1), :149-151 (§4)
+- Sorun: Kod Tier 1'de GERÇEK X11 XGrabPointer kullanıyor (gui/mouse_test.inl:16-20, :93-110), Tier 2 confine (mouse_test.inl:24, :214), Tier 3 Wayland kilitsiz (mouse_test.inl:26-28; :295/:307 "Pointer lock unavailable…The cursor is NOT locked"; :331 "Pointer grab failed — the cursor is confined as best effort"). Doc ise "GTK4'ün kaldırdığı pointer grab API'sine başvurmadan çalışır" ve "P104'te 'yakalama başarısız' diye bir yol yoktur" diyor — ikisi de kodla doğrudan çelişiyor.
+- Etki: X11 kullanıcısına mimari yanlış anlatılıyor; koddaki gerçek sorun giderme yolları (grab reddi → confine; Wayland → kilitsiz uyarı) dokümante edilmemiş.
+- Önerilen düzeltme (genel): §1/§4'ü 3 kademeli gerçek davranışa göre yeniden yaz; "yakalama başarısız" yolunu sorun giderme tablosuna ekle.
+
+[BUG-06] Parametre-aile yanlış atıfları: README param tablosu + CLI --help (motivity/gamma/limit/smooth) (MEDIUM)
+- Kaynak: README.md:265,267,268,273; cli/main.cpp:1337,1339,1340
+- Sorun: `motivity` yalnız synchronous'ta okunur (accel-synchronous.hpp:52), natural DEĞİL → README/help "Natural motivity" yanlış. `gamma` yalnız synchronous'ta (accel-synchronous.hpp:54) → "Classic gamma" yanlış. `limit` yalnız natural'da (accel-natural.hpp:12-23), jump'ta okunmaz → "jump/natural" yanlış. `smooth` jump+sync (accel-synchronous sharpness) → "Jump sigmoid smoothing" eksik. GUI hint (gui/tr.inl:240-247) ve parameter_index.md #14/#16/#17 doğru; README + --help aynı hatayı paylaşıyor.
+- Etki: Hangi modun hangi parametreyi kullandığı yanlış kılavuzlanıyor (natural'da motivity/gamma anlamlı sanılır).
+- Önerilen düzeltme (genel): README tablosu + cli/main.cpp help metnini synchronous/natural gerçek ailesine göre düzelt (parameter_index.md referans).
+
+[BUG-07] Oracle satır sayısı araştırma docs'unda bayat (768 → 915) (LOW)
+- Kaynak: docs/research/deviations.md:4; index.md:18,47; precision.md:20,228; learning.md:88; CHANGELOG.md:26,97
+- Sorun: R46 P98 (5d6b4ff) +147 oracle case ekledi (swing 50 decade + preset aynaları) → grid 915 satır. CANLI doğrulandı: `bash tests/oracle/run_oracle.sh` → "total rows compared : 915 / known 31 / RESULT OK". Docs hâlâ "768 rows / 737 rel 1e-9" diyor (güncel uyum = 884 = 915−31).
+- Etki: Araştırma dokümantasyonu sayısal olarak bayat; +147 oracle caseli okuyucu görmez.
+- Önerilen düzeltme (genel): "915 satır / 884 uyum / 31 sapma" olarak güncelle (run_oracle.sh zaten dinamik sayıyor).
+
+[NOTE-01] Syscall sayısı: README "2 syscalls/event" vs AGENTS "3 hot-path syscalls" — kapsam farkı (LOW, bug değil)
+- Kaynak: README.md:583 vs AGENTS.md:269; daemon.cpp:34,974 (R13 yorumları)
+- Sorun: README yalnız 2 clock okumasını sayıyor (R13 3→2); AGENTS sayımı 2 clock + P93 tek parça uinput write = 3. İkisi de kendi kapsamında doğru.
+- Etki: Okur tüm olay hattını "2 syscall" sanabilir.
+- Önerilen düzeltme (genel): README'ye "(2 clock read; +1 batched uinput write)" kapsam notu ekle.
+
+Doğrulandı / BUG DEĞİL: GUI tr etiketleri (Fare Kilit Testi, Performans, "Daemon çalışmıyor.", ESC mesajı), menü yolu ("Fare Testi" durum çubuğu, ui_builder + tr.inl), preset sayıları (presets.hpp'ten HESAPLANDI: cs2 1.5750@900/1.3188@80, fps 1.7644@900, apex 2.1011@5 çatı 2.2, natural 0.2→1.008/30→1.262/900→1.299, noaccel 1.0, disable telem 0.00), virtmouse `locked` senaryo + P109 ölçümü (§6 tablosu birebir), input grubu (scripts/99-rawaccel.rules GROUP="input"; "uinput" grubu yok, hiçbir doc yanlış grup anlatmıyor), versiyon 0.5.0 tutarlı (rawaccel-base.hpp:9 = CMakeLists.txt:2 = PKGBUILD = cli/daemon --version), CLI arity R46 P99 (rename 2,2 / duplicate 2,2 / create-preset 2,2 / set-param 3,3 / import 1,1 / export 0,1 — --json her iki pozisyon), parameter_index GAP listesi (use_raw_input/disable/lut_data/lut_length), systemd unit kendisi README'nin KDE/Wayland (Wants+After kwin) anlatımıyla uyumlu (scripts/rawaccel.service:9-11).
+
+Kritik 3: BUG-05 (grab mimarisi iddiası kodla çelişiyor), BUG-02 (yükleme yolu + paket adı yanlış), BUG-04 (varsayılan profil davranış beyanı yanlış).
+Öneri: Faz 2'de README/docs + cli/main.cpp help metni düzeltmeleri; hiçbiri çalışma-zamanı hatası değil. Öncelik: BUG-05 → BUG-02 → BUG-04 → BUG-01/03/06 → BUG-07.
+— Aj 7
+
+### Aj 7 [06 Eyl] P124 FAZ-2 FIX
+P117 bug'ları kanal onaylı yaklaşımla düzeltildi (yalnız README.md + CHANGELOG.md + docs/test_window_usage.md; cli/src/gui/daemon/include/tests/research DEĞİŞMEDİ). docs/test_window_usage.md önce `git restore --staged` + `git checkout --` ile HEAD'ten geri getirildi (staging silme yok sayıldı). Commit yok.
+1. BUG-01 (README:180, README:599): `rawaccel-cli latency` anlatımı bayattı — gerçek CLI adımı IPC-önce (cli/main.cpp:1599-1615 daemon_ipc_query("latency")), SIGUSR1 yalnız fallback. Her iki metin IPC-önce / SIGUSR1-fallback olarak güncellendi.
+2. BUG-02 (README:72-83): paket adı 0.5.0-1→0.5.0-2 (PKGBUILD:15 pkgrel=2; packaging/rawaccel-linux-0.5.0-2-x86_64.pkg.tar.zst mevcut); setup.sh systemd yolu /etc/systemd/system iddiası düzeltildi — setup.sh:285-286 artık /usr/lib/systemd/system'e kuruyor; "shadow" iddiası gerçek davranışa çevrildi (pre-install hook packaging/rawaccel-linux.install:8-14 /etc shadow unit + /usr/local/bin + ~/.local/bin temizliyor; hem setup.sh hem paket aynı birim yolunu hedefliyor).
+3. BUG-03 (README:160-163): "Full key list" iddiası kaldırıldı → "Partial key list" + atlanan 12 set-param anahtarı sayıldı (raw, distance_mode, lp_norm, input/scale/output_smooth_halflife, domain_weights(+x/y), range_weights(+x/y)) + docs/research/parameter_index.md referansı. Doğrulama: build-manual/rawaccel-cli --help "Parameters (for set-param)" 45-90 ile birebir.
+4. BUG-04 (CHANGELOG:16-21): "Default profile is 1:1 raw passthrough" yanlıştı → gerçek default noaccel + raw_passthrough=false + output 1000 DPI normalizasyonu (config/default.json:13/25); kesin 1:1 `disable` preset. R46/P101 düzeltmesi CHANGELOG'a işlendi.
+5. BUG-05 (docs/test_window_usage.md): Bölüm 1 (satır 23-55) ve sorun giderme Bölüm 4 (satır 151-187) 3 kademeli gerçek davranışa göre yeniden yazıldı — Tier 1 X11 XGrabPointer (gui/mouse_test.inl:102-112, owner_events=False/event_mask=0/confine_to) sert kilit, Tier 2 grab-red → confine/warp döngüsü (:395-400, uyarı "Pointer grab failed" :187), Tier 3 Wayland → tam ekran HUD (uyarı "Pointer lock unavailable" :188); degrade kuralı (:29-30): grab başarısız olsa da pencere açılır, okuma çalışır. Bölüm 2 çoklu-monitör notu ve Bölüm 5 kontrol listesi de tier uyumlu yapıldı.
+6. BUG-06 (README:264-267, README:273): parametre-aile düzeltmesi — limit=natural (accel-natural.hpp okur; jump okumaz), motivity/gamma=synchronous (accel-synchronous.hpp:52-76), smooth=jump+synchronous (accel-jump.hpp:26-29 + sync:58); exponent_power=açık açık "Power/synchronous" yanlış olduğu için yalnız "Power" yapıldı (synchronous exponent okumuyor — include/accel-synchronous.hpp grep ile teyit). CLI --help 57-65 ile eşleşir.
+7. BUG-07 (CHANGELOG:26, CHANGELOG:97): oracle sayıları güncellendi — 768→915 satır, 737→884 eşleşme (915−31). tests/oracle/run_oracle.sh canlı çıktısıyla teyit: "total rows compared: 915, documented deviations: 31, RESULT OK".
+8. NOTE-01 (README:587-589): "2 syscalls per event" kapsam notu eklendi — yalnız clock okuma; batched REL_X+REL_Y write ile toplam 3 hot-path syscall (AGENTS.md:269 ile uyum; AGENTS tarafı Aj0'da).
+Kapsam: README.md + CHANGELOG.md + docs/test_window_usage.md; cli/main.cpp help metni (latency sig) Aj5'in alanı — DOKUNMADIM.
+— Aj 7 (P124 FAZ-2)

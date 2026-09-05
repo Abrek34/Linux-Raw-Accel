@@ -20,13 +20,21 @@ görmez.
 
 ## 1. Pencere kilit ne demek — ne kilitlenir, ne güvenilmez
 
-Teknik olarak pencere, GTK4'ün kaldırdığı pointer grab API'sine başvurmadan
-çalışır: P104 bunun yerine **tam ekran bir HUD** açar (`gui/mouse_test.inl`).
-HUD bütün masaüstünü kapladığı için imlecin gidebileceği başka pencere yoktur —
-"mouse test edilirken diğer pencereler karışmasın" şikayetinin çözümü tam da
-budur. Tek monitörde imleç HUD'un dışına çıkamaz (klik/dokunmak için açık başka
-hedef yoktur); çoklu monitörde HUD yalnız *etkin* monitörü kaplar (sınırlar
-Bölüm 4'te). Bunun iki sonucu vardır:
+Teknik olarak pencere, GTK4'ün kaldırdığı pointer grab API'si olmadığı için,
+X11/XWayland oturumlarında Xlib'in **`XGrabPointer`**'ını doğrudan çağırır
+(`gui/mouse_test.inl` — Xlib soyutlaması `dlopen` ile çözülür, yeni bağımlılık
+yok). Kilit **üç kademelidir**:
+
+| Kademe | Olduğu ortam | Gerçek mekanizma | Kilit gücü |
+|--------|--------------|------------------|-----------|
+| **Tier 1** | X11 — grab başarılı | `XGrabPointer` (`owner_events=False`, `event_mask=0`): HER imleç olayı yalnız bu pencereye gelir ve yutulur; `confine_to` da görünür imleci pencerenin içinde tutar | **Sert** — hiçbir pencerenin tıklama/kaydırma/hover alması imkânsız, çoklu monitör dâhil |
+| **Tier 2** | X11 — grab reddedildi (başka uygulama grab'li, GrabNotViewable vb.) | Kapsama/sınırlama döngüsü: çerçeve zamanlayıcısı imleç pencere dışına çıkarsa onu geri "warp" eder (yalnız pencere odaktayken) | **En iyi çaba** — ekranda "Pointer grab failed" uyarısı |
+| **Tier 3** | Wayland / X11 backend yok | Pointer grab/warp API'si yok — yalnız **tam ekran HUD** etkin monitörü kaplar | **Yumuşak** — ekranda "Pointer lock unavailable" uyarısı; komşu monitör/pencereler olay alabilir |
+
+Grab açılışta reddedilse bile pencere **yine açılır** ve canlı hız/kazanç
+okuması çalışır — yalnız kilit gücü düşer ve kademeye uygun uyarı ipucu satırına
+yazılır. Tier 1'de "mouse test edilirken diğer pencereler karışmasın" şikayetinin
+çözümü tamdır ve kilit altında masaüstü şöyle davranır:
 
 | Etki | Kilit altındaki pencere | Geri kalan masaüstü |
 |------|-------------------------|---------------------|
@@ -35,14 +43,16 @@ Bölüm 4'te). Bunun iki sonucu vardır:
 | Kaydırma / tekerlek | Pencere içinde | Sayfalar kaymaz |
 | Üzerine gelme (hover) | Yalnız test penceresi | Diğer pencereler hiçbir hover almaz |
 
-Yani **test sırasında diğer sekmeler/pencerekler dokunulmaz** kalır — şikayet
-edilen "sayfaları birbirine sokma" davranışı kilitliyken imkansızdır.
+Yani **Tier 1'de** "sayfaları birbirine sokma" davranışı imkânsızdır. Tier 2/3'te
+kilit "en iyi çaba / yumuşak"tır — oturum/çakışma nedeniyle sızma ihtimali varsa
+ipucu satırı uyarır ve Bölüm 4'teki tablo çözümü anlatır.
 
 > **Güven sınırı:** Kilit yalnız **fare olaylarını** çevreler; klavye HUD'un
-> kendisine gider. ESC kilidi bırakır; pencere yöneticisi kısayolları (Alt+Tab,
-> Super+...) çalışmaya devam eder. Uygulama/oyun kısayolları test süresince
-> hedefe ulaşmaz (hedef uygulama zaten HUD'un altında kapalıdır) — bu, test
-> sırasında istenen davranıştır.
+> kendisine gider (klavye asla grab edilmez). ESC kilidi bırakır; pencere yöneticisi
+> kısayolları (Alt+Tab, Super+...) çalışmaya devam eder. Odak kaybı grab'ı otomatik
+> bırakır (tuzak olmaz), odak geri gelince kilit kademesi yeniden denenir.
+> Uygulama/oyun kısayolları test süresince hedefe ulaşmaz (hedef uygulama zaten HUD'un
+> altında kapalıdır) — bu, test sırasında istenen davranıştır.
 
 ---
 
@@ -59,9 +69,11 @@ alt durum çubuğu** üzerindedir. Test penceresi alt durum çubuğundadır:
 3. **"Fare Kilit Testi"** başlıklı **tam ekran** bir HUD açılır; imleç kendini
    ekranın içinde bulur — masaüstünde başka pencere görünmez.
 
-> **Çoklu monitör:** Tam ekran yalnız *etkin* monitörü kaplar; imleç monitör
-> kenarından diğer monitöre taşabilir. Teste başlamadan önce hedef monitörü
-> aktif edin (fareyi oraya taşıyıp HUD'u açın) — Bölüm 4.
+> **Çoklu monitör:** Etkin monitör HUD'la tam ekran kapanır ve Tier 1'de
+> `confine_to` imleci pencerenin içinde tutar — diğer monitöre sızma olmaz.
+> Tier 2/3'te (grab yok veya reddedildi) imleç komşu monitöre taşabilir; teste
+> başlamadan önce hedef monitörü aktif edin (fareyi oraya taşıyıp HUD'u açın) —
+> Bölüm 4.
 
 Pencere ilk sayfada günlük kullanım yerine doğrudan test moduna girer:
 
@@ -144,18 +156,26 @@ Kilidi bırakmanın garantili yolu **ESC**'dir:
   **"Fare testi: imleç serbest bırakıldı (ESC)."** yazar.
 - `Alt+F4` / görev çubuğundan kapat gibi pencere yöneticisi kapatma istemleri de
   aynı GTK destroy yolundan geçer ve teardown aynıdır (tam ekranda başlık çubuğu
-  görünmediği için × tuşu her zaman erişilemez).
+  görünmediği için × tuşu her zaman erişilemez). Odak kaybı da grab'ı bırakır
+  (Bölüm 1).
 
-**P104'te "yakalama başarısız" diye bir yol yoktur** çünkü gerçek bir grab
-yoktur (GTK4 pointer grab API'sini kaldırdı; tam ekran HUD emülasyonu başarısız
-olacak bir grab adımı içermez). "Kilit tutmadı" hissinin gerçek nedenleri ve
-çözümleri şu tablodadır:
+**Kilit her ortamda aynı güçte değildir** — pencere hangi kademede açıldıysa
+ipucu satırı onu söyler ve hangi kademe olduğu "kilit tutmadı" teşhisinin ilk
+adımıdır:
+
+| Ekrandaki ipucu satırı | Anlamı | Kademe |
+|------------------------|--------|--------|
+| "Pointer is locked inside this fullscreen test window." | `XGrabPointer` başarılı — sert kilit | **Tier 1** |
+| "Pointer grab failed — the cursor is confined as best effort (imleç kilidi yok)…" | X11'de grab reddedildi; yalnız confine/warp döngüsü aktif | **Tier 2** |
+| "Pointer lock unavailable — imleç kilidi yok: this Wayland session cannot grab the pointer…" | Wayland/backendsiz oturum — yalnız tam ekran HUD | **Tier 3** |
+
+"Kilit tutmadı" hissinin gerçek nedenleri ve çözümleri şu tablodadır:
 
 | Belirti | Olası neden | Ne yapmalı |
 |---------|-------------|------------|
-| İmleç HUD açıkken diğer monitöre taşıyor, oradaki pencereleri kaydırıyor | Çoklu monitör: fullscreen tek monitörü kaplar (GTK davranışı) | Test monitörünü öne alın (HUD'u orada açın); diğer monitördeki uygulamaları kapatın veya (KWin) pencereye "tüm ekranlara yay" verin |
-| X11 + pencere yöneticisi fullscreen'i onurlamıyor (nadir) | WM tam ekran ipucunu yok sayabilir; ekranın bir bölümü açık kalır | Alt+F9/KDE tam ekran kısayoluyla yeniden dene; WM'yi değiştir; en kötü ihtimalle testi Wayland oturumunda yap (fullscreen orada kompozitör garantilidir) |
-| Wayland'da HUD ekranı kaplamıyor / komşu ekran karışıyor | Çoklu monitör / kompozitör ölçekleme | KWin "fullscreen tüm çıkışları kaplasın" davranışını kontrol edin; ESC → yeniden açın |
+| İmleç HUD açıkken diğer monitöre/pencerelere taşıyor ve orayı kaydırıyor | Kademe Tier 2/3: Tier 3'te (Wayland) grab/warp API'si yok — fullscreen yalnız etkin monitörü kaplar; Tier 2'de (X11, grab reddi) yalnız warp döngüsü var | Tier 1 almak için çakışan grab'li uygulamaları kapat (ekran seçici, OBS vb.) ve pencereye tekrar tıkla (odak geri gelince grab yeniden denenir); Wayland'da komşu monitördeki uygulamaları kapatın ya da testi X11/XWayland oturumunda yapın |
+| X11'de ipucu "Pointer grab failed…" diyor | `XGrabPointer` reddedildi (başka uygulamada aktif grab, GrabNotViewable vb.) — pencere Tier 2'de | Çakışan uygulamayı kapat; pencereye tıklayıp odağın test penceresinde olduğundan emin ol; yine olmazsa WM'yi değiştir |
+| Wayland'da ipucu "Pointer lock unavailable…" diyor | Oturumda pointer grab/warp API'si yok (GDK Wayland) — kilit yalnız tam ekran HUD | Beklenen davranıştır (Tier 3); okuma yine çalışır; test monitöründe başka pencere açma |
 | Sayılar hiç gelmiyor (— / alt satırda "Hareket bekleniyor…") | Daemon kapalı veya cihaz telemetri üretmiyor | **"Daemon çalışmıyor."** yazısına bakın; `rawaccel-cli status` ile cihazın grab edildiğinden emin olun |
 | Okuma var ama 1:1 hissi yok | Yanlış/raw profil aktif (`disable`) | Bölüm 3'e göre doğru profili Apply edin; `rawaccel-cli status` → `Active:` kontrolü |
 
@@ -188,9 +208,9 @@ hareket/kaydırma/hover görülmesi. Onu görürseniz:
 
 1. `rawaccel-cli status` → hangi cihazlar grab ediliyor, hangi profil aktif?
    (raw 1:1 `disable`'da kazanç 0.00'da — o bir hata değil, Bölüm 3.)
-2. Çoklu monitör mü? → Bölüm 4'teki kilit sınırları tablosu (fullscreen tek
-   monitörü kaplar). HUD'u hedef monitörde açın; o monitörde başka pencere
-   olmadığından emin olun.
+2. Çoklu monitör mü? → Bölüm 4'teki kilit sınırları tablosu (fullscreen yalnız
+   etkin monitörü kaplar; Tier 1'de `confine_to` sert — sızma ancak Tier 2/3'te)
+   — HUD'u hedef monitörde açın; o monitörde başka pencere olmadığından emin olun.
 3. İkisi de değilse → bunu Aj 1'e bildirin: P104 kilitleme davranışı
    kabul dışı bulundu.
 

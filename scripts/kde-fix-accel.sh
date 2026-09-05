@@ -202,6 +202,73 @@ case "$MODE" in
     echo "  Note: adjust the exact value in System Settings → Input Devices → Mouse."
     ;;
 
+--remove)
+    echo "=== Removing RawAccel traces from kwinrc ==="
+    if ! check_kde; then
+        echo "  Not a KDE session. Nothing to do."; exit 0
+    fi
+    # P121/BUG-09: uninstall leaves traces behind — per-device (RawAccel)
+    # libinput override sections survive in kwinrc, and the global profile is
+    # left Flat even though RawAccel is gone.  This removes every nested
+    # "[Libinput][bus][vid][pid][... (RawAccel)]" section AND restores the
+    # global [Libinput] to adaptive (profile=2, accel=-0.5), exactly matching
+    # what --undo promises.  (Backups written by write_kwinrc are kept; they
+    # are the user's own restorable snapshots.)
+    if command -v python3 &>/dev/null; then
+        python3 - "$KWINRC" << 'PYEOF'
+import sys, os, re
+kwinrc = sys.argv[1]
+try:
+    with open(kwinrc) as f:
+        text = f.read()
+except FileNotFoundError:
+    sys.exit(0)
+
+# 1) Drop every nested per-device (RawAccel) override section.
+header = re.compile(r"^\[Libinput\](?:\[[^\]]*\]){4}\[[^\]]*\(RawAccel\)\]$")
+lines = text.split("\n")
+out, i, skip = [], 0, False
+while i < len(lines):
+    line = lines[i]
+    if header.match(line):
+        skip = True            # remove this block until the next section header
+        i += 1
+        continue
+    if skip:
+        if line.startswith("["):
+            skip = False       # next section header ends the stripped block
+        else:
+            i += 1
+            continue
+    out.append(line)
+    i += 1
+text = "\n".join(out)
+
+# 2) Restore the global [Libinput] section to adaptive (kde-fix-accel --undo).
+def upsert(text, header, kv):
+    esc = re.escape(header)
+    pat = re.compile(r"(?ms)^%s\s*\n(.*?)(?=^\[|\Z)" % esc)
+    body = "".join(f"{k}={v}\n" for k, v in kv)
+    block = f"{header}\n{body}"
+    if pat.search(text):
+        return pat.sub(block, text, count=1)
+    return text.rstrip("\n") + "\n\n" + block + "\n"
+
+text = upsert(text, "[Libinput]", [("PointerAccelerationProfile", "2"),
+                                   ("PointerAcceleration", "-0.5")])
+tmp = kwinrc + ".tmp"
+with open(tmp, "w") as f:
+    f.write(text)
+os.replace(tmp, kwinrc)
+print(f"  ✓ Removed (RawAccel) per-device sections and restored adaptive global.")
+PYEOF
+    else
+        write_kwinrc "2" "-0.5"
+    fi
+    reload_kwin
+    echo "  ✓ RawAccel traces removed from kwinrc (profile=2, accel=-0.5)."
+    ;;
+
 --fix|*)
     echo "=== KDE RawAccel Fix: Disable Pointer Acceleration ==="
     if ! check_kde; then

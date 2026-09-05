@@ -90,6 +90,11 @@ static bool mouse_test_x11_ready(GdkDisplay* d) {
     return d && b.grab && b.ungrab && GDK_IS_X11_DISPLAY(d);
 }
 
+// Open test window — semantic text-staters (forward decls; defined in the
+// status/hint section, used by grab/lock/poll handlers declared above it).
+static void mouse_test_set_status(AppState* S, int state);
+static void mouse_test_set_hint(AppState* S, int state);
+
 /// Tier 1: real X server pointer grab.  owner_events=False + event_mask=0 means
 /// every pointer event is redirected to our toplevel and NOT reported anywhere
 /// (no other window ever sees input); confine_to = the toplevel keeps the
@@ -125,9 +130,7 @@ static bool mouse_test_try_grab_locked(AppState* S) {
 #pragma GCC diagnostic pop
     if (!xd || xw == 0) return false;
     if (!mouse_test_try_grab(S, xd, xw)) return false;
-    if (S->test_hint_lbl)
-        gtk_label_set_text(GTK_LABEL(S->test_hint_lbl),
-            tr("Pointer is locked inside this fullscreen test window.\nMove the mouse to see live speed/gain.\nPress ESC to release."));
+    mouse_test_set_hint(S, 0); // Tier-1 hint
     return true;
 }
 
@@ -153,6 +156,58 @@ static bool mouse_test_x11_ready(GdkDisplay*) { return false; }
 static void mouse_test_release(AppState* S) { S->test_grabbed = false; }
 #endif
 
+// ── Status / hint text management (BUG-09) ────────────────────────────────────
+// The test window's transient labels are NOT registered in the refresh_language
+// widget registry, so a language switch while the window is open left them in
+// the old language.  Every text assignment now goes through these two setters,
+// which remember the semantic STATE rather than the translated string; on a
+// language switch mouse_test_refresh_language() replays the states in the new
+// language.
+
+static void mouse_test_set_status(AppState* S, int state) {
+    S->test_status_state = state;
+    if (!S->test_status_lbl) return;
+    const char* txt = "";
+    switch (state) {
+        case 0: txt = ""; break;                         // live — no note
+        case 1: txt = tr("Awaiting motion…"); break;
+        case 2: txt = tr("Daemon is not running."); break;
+        case 3: txt = tr("Mouse test: pointer lock released (window unfocused)."); break;
+        default: txt = ""; break;
+    }
+    gtk_label_set_text(GTK_LABEL(S->test_status_lbl), txt);
+}
+
+static void mouse_test_set_hint(AppState* S, int state) {
+    S->test_hint_state = state;
+    if (!S->test_hint_lbl) return;
+    const char* txt = "";
+    switch (state) {
+        case 0: txt = tr("Pointer is locked inside this fullscreen test window.\nMove the mouse to see live speed/gain.\nPress ESC to release."); break;
+        case 1: txt = tr("Pointer grab failed — the cursor is confined as best effort (imleç kilidi yok).\nMove the mouse to see live speed/gain.\nPress ESC to release."); break;
+        case 2: txt = tr("Pointer lock unavailable — imleç kilidi yok: this Wayland session cannot grab the pointer.\nThe cursor is NOT locked inside this window (fullscreen coverage only).\nMove the mouse, then press ESC to close."); break;
+        default: txt = ""; break;
+    }
+    gtk_label_set_text(GTK_LABEL(S->test_hint_lbl), txt);
+}
+
+/// Re-apply every translated string of an open test window (BUG-09).  Called
+/// from refresh_language() (tr.inl) on language switch; a no-op while the
+/// window is closed.
+void mouse_test_refresh_language(AppState* S) {
+    if (!S->mouse_test_win) return;
+    const char* names[3] = { tr("In (ips):"), tr("Out (ips):"), tr("Gain (×):") };
+    for (int i = 0; i < 3 && S->test_name_lbls[i]; i++)
+        gtk_label_set_text(GTK_LABEL(S->test_name_lbls[i]), names[i]);
+    if (S->test_title_lbl)
+        gtk_label_set_markup(GTK_LABEL(S->test_title_lbl),
+            (std::string("<b><span size='xx-large'>") +
+             tr("Mouse Lock Test") + "</span></b>").c_str());
+    gtk_window_set_title(GTK_WINDOW(S->mouse_test_win), tr("Mouse Lock Test"));
+    mouse_test_set_status(S, S->test_status_state);
+    mouse_test_set_hint(S, S->test_hint_state);
+}
+
 /// Remove the telemetry poll timer (the poll re-arms nothing and self-stops).
 static void mouse_test_stop_poll(AppState* S) {
     if (S->test_poll_id) {
@@ -162,34 +217,44 @@ static void mouse_test_stop_poll(AppState* S) {
 }
 
 /// 250 ms poll: refresh live speed/gain readouts from the daemon status JSON.
-/// The socket has a 1 s timeout (daemon_comm.inl) so a dead daemon can never
-/// wedge the UI; a missing daemon shows "—" but keeps the timer alive.
+/// The socket timeout (150 ms in daemon_comm.inl) is smaller than this tick, so
+/// a dead-but-listening daemon can never wedge the UI (BUG-05).  One status
+/// query per tick does double duty as the up-check — no separate ping round
+/// trip.  A missing/unreachable daemon shows "—" but keeps the timer alive.
 static gboolean mouse_test_poll(gpointer user_data) {
     auto* S = static_cast<AppState*>(user_data);
     if (!S->mouse_test_win) return G_SOURCE_REMOVE; // popup closed earlier
 
-    if (!daemon_running()) {
+    // Skip the IPC entirely when no socket exists (cheap stat) — BUG-10 gate.
+    if (!daemon_socket_exists()) {
         if (S->test_speed_lbl) gtk_label_set_text(GTK_LABEL(S->test_speed_lbl), "—");
         if (S->test_out_lbl)   gtk_label_set_text(GTK_LABEL(S->test_out_lbl),   "—");
         if (S->test_gain_lbl)  gtk_label_set_text(GTK_LABEL(S->test_gain_lbl),  "—");
-        if (S->test_status_lbl)
-            gtk_label_set_text(GTK_LABEL(S->test_status_lbl), tr("Daemon is not running."));
+        mouse_test_set_status(S, 2); // daemon not running
         return G_SOURCE_CONTINUE;
     }
     std::string resp = daemon_ipc_query("status");
-    double in  = daemon_json_field(resp, "telem_in_ips");
-    double out = daemon_json_field(resp, "telem_out_ips");
-    double gain = daemon_json_field(resp, "telem_gain");
+    if (resp.empty()) {
+        // No complete response within the timeout — treat as daemon down.
+        if (S->test_speed_lbl) gtk_label_set_text(GTK_LABEL(S->test_speed_lbl), "—");
+        if (S->test_out_lbl)   gtk_label_set_text(GTK_LABEL(S->test_out_lbl),   "—");
+        if (S->test_gain_lbl)  gtk_label_set_text(GTK_LABEL(S->test_gain_lbl),  "—");
+        mouse_test_set_status(S, 2);
+        return G_SOURCE_CONTINUE;
+    }
+    // BUG-02: read the ACTIVE profile's device slice, not the first device.
+    double in  = daemon_device_field(resp, S, "telem_in_ips");
+    double out = daemon_device_field(resp, S, "telem_out_ips");
+    double gain = daemon_device_field(resp, S, "telem_gain");
     if (in < 0) {
         // Daemon answered but has not seen a motion sample yet.
-        if (S->test_status_lbl)
-            gtk_label_set_text(GTK_LABEL(S->test_status_lbl), tr("Awaiting motion…"));
+        mouse_test_set_status(S, 1); // awaiting motion
         return G_SOURCE_CONTINUE;
     }
     if (S->test_speed_lbl) gtk_label_set_text(GTK_LABEL(S->test_speed_lbl), fmt_us(in).c_str());
     if (S->test_out_lbl)   gtk_label_set_text(GTK_LABEL(S->test_out_lbl),   fmt_us(out).c_str());
     if (S->test_gain_lbl)  gtk_label_set_text(GTK_LABEL(S->test_gain_lbl),  fmt_us(gain).c_str());
-    if (S->test_status_lbl) gtk_label_set_text(GTK_LABEL(S->test_status_lbl), "");
+    mouse_test_set_status(S, 0); // live
     return G_SOURCE_CONTINUE;
 }
 
@@ -260,9 +325,7 @@ static void mouse_test_focus_changed(GtkWindow* win, GParamSpec*,
 #endif
     } else if (S->test_grabbed) {
         mouse_test_release(S);
-        if (S->test_status_lbl)
-            gtk_label_set_text(GTK_LABEL(S->test_status_lbl),
-                tr("Mouse test: pointer lock released (window unfocused)."));
+        mouse_test_set_status(S, 3); // pointer lock released (unfocused)
     }
 }
 
@@ -274,7 +337,18 @@ static void mouse_test_teardown(GtkWidget* widget, gpointer user_data) {
         gtk_widget_remove_tick_callback(widget, S->test_confine_id);
         S->test_confine_id = 0;
     }
-    S->mouse_test_win = nullptr;
+    // Drop every transient-widget pointer so a language refresh (BUG-09) and a
+    // possibly-still-queued poll tick can never dereference freed widgets.
+    S->mouse_test_win   = nullptr;
+    S->test_speed_lbl   = nullptr;
+    S->test_out_lbl     = nullptr;
+    S->test_gain_lbl    = nullptr;
+    S->test_status_lbl  = nullptr;
+    S->test_hint_lbl    = nullptr;
+    S->test_title_lbl   = nullptr;
+    for (int i = 0; i < 3; i++) S->test_name_lbls[i] = nullptr;
+    S->test_hint_state   = 0;
+    S->test_status_state = -1;
     mouse_test_stop_poll(S);
 }
 
@@ -290,9 +364,7 @@ static void mouse_test_realize(GtkWidget* win, gpointer user_data) {
         // Wayland backend on a both-backends GTK4 build (or no X display):
         // Tier 3 — GDK has no grab/warp here, warn that nothing is locked.
         S->test_x11 = false;
-        if (S->test_hint_lbl)
-            gtk_label_set_text(GTK_LABEL(S->test_hint_lbl),
-                tr("Pointer lock unavailable — imleç kilidi yok: this Wayland session cannot grab the pointer.\nThe cursor is NOT locked inside this window (fullscreen coverage only).\nMove the mouse, then press ESC to close."));
+        mouse_test_set_hint(S, 2);
         return;
     }
     // X11 display: the window maps a moment later, and XGrabPointer on a not
@@ -302,9 +374,7 @@ static void mouse_test_realize(GtkWidget* win, gpointer user_data) {
 #else
     (void)win;
     S->test_x11 = false;
-    if (S->test_hint_lbl)
-        gtk_label_set_text(GTK_LABEL(S->test_hint_lbl),
-            tr("Pointer lock unavailable — imleç kilidi yok: this Wayland session cannot grab the pointer.\nThe cursor is NOT locked inside this window (fullscreen coverage only).\nMove the mouse, then press ESC to close."));
+    mouse_test_set_hint(S, 2);
 #endif
 }
 
@@ -326,9 +396,7 @@ static void mouse_test_arm_lock(gpointer user_data) {
         if (S->test_confine_id == 0)
             S->test_confine_id = gtk_widget_add_tick_callback(S->mouse_test_win,
                 mouse_test_confine_tick, S, nullptr);
-        if (S->test_hint_lbl)
-            gtk_label_set_text(GTK_LABEL(S->test_hint_lbl),
-                tr("Pointer grab failed — the cursor is confined as best effort (imleç kilidi yok).\nMove the mouse to see live speed/gain.\nPress ESC to release."));
+        mouse_test_set_hint(S, 1); // Tier-2 confine warning
     }
 #else
     (void)user_data;
@@ -362,6 +430,7 @@ void on_mouse_test_clicked(GtkButton*, gpointer user_data) {
          tr("Mouse Lock Test") + "</span></b>").c_str());
     gtk_label_set_xalign(GTK_LABEL(title), 0.5);
     gtk_box_append(GTK_BOX(vbox), title);
+    S->test_title_lbl = title;
 
     GtkWidget* grid = gtk_grid_new();
     gtk_grid_set_column_spacing(GTK_GRID(grid), 16);
@@ -372,6 +441,8 @@ void on_mouse_test_clicked(GtkButton*, gpointer user_data) {
     // Three telemetry rows.  The name labels are created with tr() directly so
     // the translation-coverage scanner sees the keys (grid_row-style lambdas
     // would hide them — the name labels are transient, not registered widgets).
+    // Their pointers are kept in test_name_lbls so mouse_test_refresh_language()
+    // can re-translate them on a language switch while the window is open (BUG-09).
     auto value_lbl = []() {
         GtkWidget* l = gtk_label_new("—");
         gtk_label_set_xalign(GTK_LABEL(l), 0.0);
@@ -384,21 +455,25 @@ void on_mouse_test_clicked(GtkButton*, gpointer user_data) {
         return l;
     };
 
-    gtk_grid_attach(GTK_GRID(grid), name_lbl(tr("In (ips):")), 0, 0, 1, 1);
+    S->test_name_lbls[0] = name_lbl(tr("In (ips):"));
+    gtk_grid_attach(GTK_GRID(grid), S->test_name_lbls[0], 0, 0, 1, 1);
     S->test_speed_lbl = value_lbl();
     gtk_grid_attach(GTK_GRID(grid), S->test_speed_lbl, 1, 0, 1, 1);
 
-    gtk_grid_attach(GTK_GRID(grid), name_lbl(tr("Out (ips):")), 0, 1, 1, 1);
+    S->test_name_lbls[1] = name_lbl(tr("Out (ips):"));
+    gtk_grid_attach(GTK_GRID(grid), S->test_name_lbls[1], 0, 1, 1, 1);
     S->test_out_lbl = value_lbl();
     gtk_grid_attach(GTK_GRID(grid), S->test_out_lbl, 1, 1, 1, 1);
 
-    gtk_grid_attach(GTK_GRID(grid), name_lbl(tr("Gain (×):")), 0, 2, 1, 1);
+    S->test_name_lbls[2] = name_lbl(tr("Gain (×):"));
+    gtk_grid_attach(GTK_GRID(grid), S->test_name_lbls[2], 0, 2, 1, 1);
     S->test_gain_lbl = value_lbl();
     gtk_grid_attach(GTK_GRID(grid), S->test_gain_lbl, 1, 2, 1, 1);
 
     S->test_status_lbl = gtk_label_new(tr("Awaiting motion…"));
     gtk_label_set_xalign(GTK_LABEL(S->test_status_lbl), 0.5);
     gtk_box_append(GTK_BOX(vbox), S->test_status_lbl);
+    mouse_test_set_status(S, 1); // awaiting motion
 
     S->test_hint_lbl = gtk_label_new(
         tr("Pointer is locked inside this fullscreen test window.\nMove the mouse to see live speed/gain.\nPress ESC to release."));

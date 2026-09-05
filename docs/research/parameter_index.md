@@ -16,8 +16,8 @@
 | **CLI'den HİÇ erişilemeyen (GAP)** | **4** (`use_raw_input`, `disable`, `lut_data`, `lut_length`) |
 
 **Yönetici turu için gerçek boşluklar (set-param'tan erişilemeyen):**
-- `use_raw_input` — CLI'de hiçbir anahtar yok (JSON elle düzenleme / config-push yoluyla ayarlanır). Daemon hattında ayrıca **tüketilmiyor** (dormant).
-- `disable` (`profiles[].disable`) — CLI'de hiçbir anahtar yok. Daemon hattında **tüketilmiyor** (dormant).
+- `use_raw_input` — CLI'de hiçbir anahtar yok (JSON elle düzenleme / config-push yoluyla ayarlanır). Daemon hattında ayrıca **tüketilmiyor** (dormant). **R48 kararı:** saklı bayrak olarak kalır (kaldırılmaz); ham 1:1 hattı `raw_passthrough`'tur (P101), bayrak R48'den itibaren CLI durum çıktısında görünür (P120/A5-09).
+- `disable` (`profiles[].disable`) — CLI'de hiçbir anahtar yok. Daemon hattında **tüketilmiyor** (dormant). **R48 kararı:** saklı bayrak olarak kalır; yalnız saklanır/görünür (P120/A5-09), işlevsel etkisi yok.
 - `lut_data` / `lut_length` — lookup tablosu yalnızca GUI LUT editöründe (`gui/graph.inl` `lut_set_points`) veya JSON'da; CLI'de lookup verisi set etme komutu yok.
 - `whole` — doğrudan anahtar yok; yalnızca `distance_mode separate|max|lp|euclidean` üzerinden dolaylı (ayrı parametre olarak kabul edilmeli).
 - `version` — şema sürümü, kaydederken otomatik yazılır; kullanıcı parametresi değildir (GAP sayılmaz).
@@ -25,7 +25,7 @@
 ## Sözleşme / gösterim
 
 - **JSON key**: `src/config.cpp` serileştirme/parse anahtarı (nlohmann::json).
-- **CLI key**: `rawaccel-cli set-param <profil> <key> <value>` anahtarı (`cli/main.cpp:747-858`).
+- **CLI key**: `rawaccel-cli set-param <profil> <key> <value>` anahtarı (`cmd_set_param()`; domain bloğu, ikiz set, tek set).
   Çoğu set-param anahtarı X ve Y eksenine **birlikte** yazar (ikiz set).
 - **Domain/range**: `sanitize_*()` (`src/config.cpp`) sonrası garanti edilen aralık; NaN/Inf önce
   güvenli varsayılana dönüştürülür.
@@ -43,8 +43,8 @@
 | 2 | **use_raw_input** | `use_raw_input` | **YOK (GAP)** | bool | `true` | — | tümü |
 | 3 | **version** | `version` | **oto (set edilmez)** | string şema sürümü | `"0.5.0"` | — | tümü (migration) |
 
-1. Hangi kaydın/kayda ait yapılandırmanın etkin olduğunu seçer; `rawaccel-cli set <ad>` ile değiştirilir (set-param değil). `cli/main.cpp:342`.
-2. Ham giriş bayrağı — varsayılan `true`; daemon sıcak yolu bu alanı okumuyor (dormant; yalnızca JSON'da taşınıyor).
+1. Hangi kaydın/kayda ait yapılandırmanın etkin olduğunu seçer; `rawaccel-cli set <ad>` ile değiştirilir (set-param değil). `cmd_set()`.
+2. Ham giriş bayrağı — varsayılan `true`; daemon sıcak yolu bu alanı okumuyor (dormant; yalnızca JSON'da taşınıyor). **R48:** saklı bayrak olarak kalır; durum çıktısında görünür (P120/A5-09) — gerçek ham hat `raw_passthrough` (P101).
 3. Config şema sürümü; `save_config` her yazımda günceller, `migrate_config` migration kararlarını sürüme göre verir (P43-BF1). Elle değiştirilmez.
 
 ## 2. Cihaz profili düzeyi (`device_profile`, `profiles[]`)
@@ -58,10 +58,10 @@
 | 8 | **disable** | `profiles[].disable` | **YOK (GAP)** | bool | `false` | — | tümü (dormant) |
 
 4. Profil adı; daemon/CLI komutları hedefi bu ada göre bulur (ilk eşleşme). Dış (`device_profile.name`) ve iç (`profile.name`) ikizi birlikte yazılır.
-5. Profil-fare eşlemesi; boş `""` tüm eşleşmemiş farelere uygulanır. CLI'de dize olarak verilir (numerik ayrıştırma kapalı, `cli/main.cpp:797`).
+5. Profil-fare eşlemesi; boş `""` tüm eşleşmemiş farelere uygulanır. CLI'de dize olarak verilir (numerik ayrıştırma kapalı; atama `cmd_set_param()` `device_id` dalında).
 6. Sensör çözünürlüğü; `NORMALIZED_DPI=1000` normalizasyonu için `dpi_factor` hesabında kullanılır (`daemon.cpp` `apply_profile`).
 7. Raporlama hızı; zaman bütçesi / alt-saniye zamanlama için saklanır.
-8. Kayıt-dışı bayrak; serileşir ama daemon sıcak yolu okumuyor (dormant — `device_config::disable`).
+8. Kayıt-dışı bayrak; serileşir ama daemon sıcak yolu okumuyor (dormant — `device_config::disable`). **R48:** saklı bayrak olarak kalır; durum çıktısında görünür (P120/A5-09), işlevsel etkisi yok.
 
 ## 3. Hızlandırıcı düzeyi (`accel_args`, `profile.accel_{x,y}.*`)
 
@@ -71,18 +71,18 @@
 | 10 | **gain** | `gain` | `gain` | bool | `true` | — | classic, power, natural, jump, synchronous, lookup |
 | 11 | **acceleration** | `acceleration` | `acceleration` | reel (NaN→0; negatif serbest, classic tam-sayılı üsle decel) | `0.005` | boyutsuz (ips-normalize) | classic |
 | 12 | **exponent_classic** | `exponent_classic` | `exponent_classic` | 1–10 | `2` | boyutsuz | classic |
-| 13 | **exponent_power** | `exponent_power` | `exponent_power` | ≥ 1e-4 | `0.05` | boyutsuz | power |
+| 13 | **exponent_power** | `exponent_power` | `exponent_power` | 1e-4–5 (üst = `EXP_POWER_MAX`, GUI gauge üstü) | `0.05` | boyutsuz | power |
 | 14 | **limit** | `limit` | `limit` | ≥ 0 | `1.5` | boyutsuz (gain asimptotu) | natural (stored-only diğerleri) |
 | 15 | **decay_rate** | `decay_rate` | `decay_rate` | ≥ 0 | `0.1` | 1/ips (e-yarılanma) | natural |
 | 16 | **motivity** | `motivity` | `motivity` | ≥ 0 | `1.5` | boyutsuz (duyarlılık aralığı) | synchronous (stored-only diğerleri) |
 | 17 | **gamma** | `gamma` | `gamma` | ≥ 0 | `1` | boyutsuz | synchronous (stored-only diğerleri) |
 | 18 | **input_offset** | `input_offset` | `input_offset` | ≥ 0 | `0` | ips | classic, natural |
-| 19 | **output_offset** | `output_offset` | `output_offset` | ≥ 0 | `0` | ips (çıkış uzayı) | power (stored-only diğerleri) |
-| 20 | **scale** | `scale` | `scale` | ≥ 0 (negatif→0) | `1` | boyutsuz | power (stored-only diğerleri) |
+| 19 | **output_offset** | `output_offset` | `output_offset` | 0–100 (üst = `OUTPUT_OFFSET_MAX`) | `0` | ips (çıkış uzayı) | power (stored-only diğerleri) |
+| 20 | **scale** | `scale` | `scale` | 0–100 (üst = `SCALE_MAX`; negatif→0) | `1` | boyutsuz | power (stored-only diğerleri) |
 | 21 | **sync_speed** | `sync_speed` | `sync_speed` | ≥ 1e-4 | `5` | ips | synchronous |
 | 22 | **smooth** | `smooth` | `smooth` | ≥ 0 | `0.5` | boyutsuz (0=sert) | jump, synchronous |
-| 23 | **cap_x** | `cap[0]` | `cap_x` | ≥ 0 (üst sınır yok) | `15` | ips (giriş cap'ı / jump adım konumu) | classic, power, jump |
-| 24 | **cap_y** | `cap[1]` | `cap_y` | ≥ 0 (üst sınır yok) | `1.5` | boyutsuz (gain/çıkış cap'ı / jump adımı) | classic, power, jump |
+| 23 | **cap_x** | `cap[0]` | `cap_x` | 0–500 (üst = `CAP_X_MAX`) | `15` | ips (giriş cap'ı / jump adım konumu) | classic, power, jump |
+| 24 | **cap_y** | `cap[1]` | `cap_y` | 0–100 (üst = `CAP_Y_MAX`) | `1.5` | boyutsuz (gain/çıkış cap'ı / jump adımı) | classic, power, jump |
 | 25 | **cap_mode** | `cap_mode` | `cap_mode` | `in|out|io` (CLI ayrıca `both`/`in_out`) | `out` | — | classic, power |
 | 26 | **lut_data** | `lut_data` | **YOK (GAP — GUI LUT editörü)** | 0–514 float; (hız, çıktı) çiftleri; hız artan sıralı | `[]` (boş → noaccel) | ips (x), ips (y; gain modu: çıktı hızı) | lookup |
 | 27 | **lut_length** | `lut_length` | **YOK (GAP — lut_data ile otomatik)** | 0–514, çift | `0` | adet (float eleman) | lookup |
@@ -96,13 +96,13 @@
 15. Natural çürüme: iç katsayı `decay_rate / |limit−1|`; gain eğrisinin asimptota eğimi.
 16. Synchronous sigmoid duyarlılık aralığı `1/m → m`; log-motivity: `log(motivity)`. Başka modlar okumaz.
 17. Synchronous log-uzayı eğimi: `gamma / log(motivity)` (linear clamp dalı). Başka modlar okumaz.
-18. Hız eşiği; altında `operator() → 1.0` (ivme başlamaz). Classic + natural offset bandı.
-19. Power çıkış eğrisinin offset'i; `gain_inverse` ile `offset.x` çözülür; cap_mode=io+legacy'de yok sayılır.
-20. Power dikey/hız ölçeği; `io` cap modunda `scale_from_gain_point`/`scale_from_output_point` ile türetilir (legacy+io).
+18. Hız eşiği; altında `operator() → 1.0` (ivme başlamaz). Classic + natural offset bandı. **Power'da INERT (P110/P118): `accel-power.hpp` bu alanı hiç okumaz** — power'ın offset kolu `output_offset`'tur; `input_offset=20` ile korunan yavaş 1:1 bant power'a geçince sessizce kaybolur (bkz. precision.md §8.2).
+19. Power çıkış eğrisinin offset'i; `gain_inverse` ile `offset.x` çözülür; cap_mode=io+legacy'de yok sayılır. P120 üst sınırı `OUTPUT_OFFSET_MAX=100` (config.h'te GUI gauge üstü).
+20. Power dikey/hız ölçeği; `io` cap modunda `scale_from_gain_point`/`scale_from_output_point` ile türetilir (legacy+io). P120 üst sınırı `SCALE_MAX=100`.
 21. Synchronous sigmoid orta noktası (gain 1.0 kavşak hızı).
 22. Jump: adım genişliği sinyali (`2π/(smooth·cap.x)`); synchronous: `sharpness = 0.5/smooth`.
-23. `cap[0]` — in/io modlarında giriş hızı limiti; jump'ta adımın olduğu hız.
-24. `cap[1]` — out/io modlarında gain/çıktı limiti; jump'ta adım büyüklüğü (`cap.y−1` kazanç adımı).
+23. `cap[0]` — in/io modlarında giriş hızı limiti; jump'ta adımın olduğu hız. P120 üst sınırı `CAP_X_MAX=500`.
+24. `cap[1]` — out/io modlarında gain/çıktı limiti; jump'ta adım büyüklüğü (`cap.y−1` kazanç adımı). P120 üst sınırı `CAP_Y_MAX=100`.
 25. Cap uzayı: `in`=giriş hızında, `out`=çıkış gain'inde, `io`=ikisi birden (classic/power yorumu moda göre değişir).
 26. Lookup eğri noktaları; `lookup::operator()` ikiye böler; yalnız `mode=lookup` iken serileşir (synchronous GAIN LUT'u karışmasın diye kapı var). Sanitize: float tarama + finite clamp (P99).
 27. `data[]` içindeki float eleman sayısı (2×nokta); `lut_data` ile birlikte yazılır; int overflow'a karşı double-guard (BUG-5).
@@ -219,11 +219,11 @@ set-param **dışı** CLI yolları: `set <profil>` → 1 (active_profile); `crea
 
 | # | Parametre | Durum | Etki |
 |---|-----------|-------|------|
-| 2 | `use_raw_input` | JSON elle düzenleme / GUI yok / CLI yok | Daemon hattı okumuyor (dormant) — ya CLI anahtarı eklenmeli ya da tamamen kaldırılmalı |
-| 8 | `disable` | JSON elle düzenleme / GUI yok / CLI yok | Daemon hattı okumuyor (dormant) |
+| 2 | `use_raw_input` | JSON elle düzenleme; set-param anahtarı YOK; **durum çıktısında GÖRÜNÜR** (P120/A5-09) | Dormant (daemon okumuyor; ham 1:1 `raw_passthrough`'tan). **R48 kararı:** saklı bayrak olarak kalır — bağlanmaz/kaldırılmaz; gerçek ham hat `raw_passthrough=true` |
+| 8 | `disable` | JSON elle düzenleme; set-param anahtarı YOK; **durum çıktısında GÖRÜNÜR** (P120/A5-09) | Dormant (hiçbir kod yolu okumuyor). **R48 kararı:** saklı bayrak olarak kalır; etkisi yoktur, yalnız saklanır/görünür |
 | 26 | `lut_data` | GUI LUT editörü + JSON; CLI yok | Lookup profili CLI'den kurulsuz — `import` yolu geçici çözüm |
 | 27 | `lut_length` | lut_data ile otomatik; CLI anahtarı yok | Ayrı anahtar gerekmez, ancak lut_data set etme yeteneğiyle birlikte değerlendirilmeli |
-| 39 | `whole` | Dolaylı: yalnız `distance_mode`; doğrudan anahtar yok | Küçük tutarsızlık: `stored_value_str` da `whole` anahtarını bilmiyor (`cli/main.cpp:636-641`) |
+| 39 | `whole` | Dolaylı: yalnız `distance_mode`; doğrudan anahtar yok | Küçük tutarsızlık: `stored_value_str()` da `whole` anahtarını bilmiyor (yalnız `distance_mode` dalı) |
 | 3 | `version` | Oto-yönetilen; kullanıcı parametresi değil | GAP sayılmaz (schema migration aracı) |
 | 1 | `active_profile` | CLI `set <profil>` var; set-param değil | GAP sayılmaz (ayrı komut mevcut) |
 | 4 | `name` | CLI `create/rename/duplicate/import` var; set-param değil | GAP sayılmaz |
@@ -242,8 +242,10 @@ set-param **dışı** CLI yolları: `set <profil>` → 1 (active_profile); `crea
   (geleceğe dönük / GUI paritesi). Algılama: hangi `accel_*.hpp` o alanı referanslıyor.
 - `output_offset` power dışında; `input_offset` classic+natural dışında hiçbir algoritmada
   okunmaz; `cap` classic/power/jump okur; `smooth` jump+synchronous okur.
-- GUI spin aralıkları sanitize ile her zaman eşleşmez: ör. GUI power exp `0.01–5` (üst 5),
-  classic exp `1–10` (sanitize ile aynı), cap/gain spinleri GUI'de sınırlıdır. Bu indeks
-  **config sanitize domain**'ini döker; GUI aralıkları için `gui/ui_builder.inl` `make_spin` çağrıları.
-- `sanitize_accel_args` `cap.x/cap.y` için üst sınır yoktur (yalnızca ≥0); pratikte
-  classic GAIN `cap_x/cap_y → DBL_MAX` guard'ı sınırsızlığı yutar (`accel-classic.hpp:156-158`).
+- GUI spin aralıkları ile sanitize **R48'den beri eşleşiyor** (P120/BUG-3): power exp `0.01–5`,
+  scale `0.01–100`, cap_x `0–500`, cap_y `0–100`, output_offset `0–100` — `sanitize_accel_args`
+  bu beş alanı GUI gauge maksimumlarıyla sınırlar (`config.hpp:18-22`). Diğer alanlarda
+  GUI aralığı için `gui/ui_builder.inl` `make_spin` çağrıları.
+- `sanitize_accel_args` `cap.x/cap.y` üst sınırı (P120): `CAP_X_MAX=500`, `CAP_Y_MAX=100`;
+  bu cap'ler GUI gauge üstü = R15 boundary round-trip değerleri. classic GAIN yine de
+  `cap_x/cap_y → DBL_MAX` guard'ı ile bozuk/NaN cap'leri yutar (`accel-classic.hpp`).

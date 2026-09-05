@@ -218,9 +218,9 @@ daemon, CLI, and GUI at build time) and must be mirrored in `CMakeLists.txt` →
 ## Live Telemetry & Seqlock
 
 Per-device last-motion telemetry is published by the daemon in the `status` JSON:
-`telem_in_ips`, `telem_out_ips`, `telem_gain`, `telem_dx`, `telem_dy` (updated on every
-motion event; `telem_wall_ms` is kept in the struct but not serialized). Design keeps
-the hot path lock-free:
+`telem_in_ips`, `telem_out_ips`, `telem_gain`, `telem_dx`, `telem_dy` plus
+`telem_wall_ms` (CLOCK_MONOTONIC_RAW ms since boot — P121/BUG-06, lets consumers
+compute sample staleness). Design keeps the hot path lock-free:
 
 - **Writer** — `flush_motion()` (loop thread): relaxed stores to the six doubles, then an
   atomic release-bump of `telem_samples`. No allocation, no extra syscall.
@@ -230,8 +230,12 @@ the hot path lock-free:
 - **Movability** — `telem_samples` is `std::unique_ptr<std::atomic<uint64_t>>` (T30 fix) so
   `mouse_device` stays movable for the `devices_` vector (copy/move ops in `daemon.cpp`).
 - **Semantics** — `telem_in_ips` = |(dx,dy)| · dpi_factor / dt using the same normalization
-  as `modifier::modify()`; `telem_gain` = out/in (0 when in == 0). Raw-passthrough fills
-  the sample counter and deltas only.
+  as `modifier::modify()`; `telem_gain` = out/in (0 when in == 0). Raw 1:1 passthrough
+  does NOT fill telemetry: REL_X/REL_Y are forwarded per-event inline in
+  `process_device()` so `flush_motion()` is never reached → `telem_*` keep their
+  previous values, `telem_ok=false`, and `lat_*` fields stay absent (P121/BUG-05 doc;
+  clients should treat missing telemetry as "raw passthrough active", and use
+  `telem_wall_ms` to judge freshness when it is present).
 - **Cross-check** — live fields vs the P31 `hotpath_prof` synthetic results validate the
   per-event pipeline end to end on real hardware.
 
@@ -265,7 +269,7 @@ the hot path lock-free:
 - **Lookup zero-width segment guard**: a duplicated X (denominator 0) falls through to the next point's `by` instead of producing ±Inf; valid strictly-increasing tables are unaffected (P55-O2)
 - **Pre-computed dpi_factor**: `mouse_device::dpi_factor` is computed once in `apply_profile()` instead of dividing on every mouse event — eliminates a floating-point division from the hot path
 - **Overflow-safe magnitude**: `magnitude()` uses `std::hypot(x,y)` instead of `sqrt(x*x+y*y)` — prevents intermediate overflow/underflow for extreme delta values
-- **Unified clock source**: both `now_ms()` and `now_ns()` use `CLOCK_MONOTONIC_RAW` — eliminates drift between timing sources and reduces syscalls per event from 3 to 2
+- **Unified clock source**: both `now_ms()` and `now_ns()` use `CLOCK_MONOTONIC_RAW` — eliminates drift between timing sources and reduces the per-event `clock_gettime` read count from 3 to 2 (start + end; P100)
 - **P93 batched REL write**: `uinput_write_rel()` forwards REL_X+REL_Y in a SINGLE `write()` syscall (kernel uinput injects every `input_event` in the buffer), collapsing two per-event syscalls into one with a byte-identical event stream. Zero-valued axes are skipped (same as the old two conditional writes). Missed timestamps are untouched — `flush_motion` still reads start/end (2 × `clock_gettime`) plus the one batched write = 3 hot-path syscalls per motion event.
 - **Y-axis unlinked field sync**: when X/Y axes are unlinked, fields without dedicated Y widgets (cap_mode, exponent_power, decay_rate, scale, output_offset, motivity, gamma, smooth, sync_speed) are copied from X to prevent stale values
 - **Widget sensitivity refactor**: raw passthrough grey-out logic extracted to `update_raw_sensitivity()` — single source of truth for 18 widget enable/disable calls

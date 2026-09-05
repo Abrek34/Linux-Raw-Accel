@@ -169,14 +169,23 @@ static bool g_json = false;
 /// flag.  When the flag is set the change is written to the local config file
 /// only; the user can later push it with `rawaccel-cli reload` (or rerun
 /// without --no-daemon).  P82-CRIT-1.
-static void daemon_apply_if_enabled(const app_config& cfg) {
+/// @return  0 on success (config saved + daemon push ok or skipped via -n).
+/// @return  1 if the daemon push failed — the config WAS saved locally, but the
+///          running daemon may not have picked it up (P115-A5-05: this used to
+///          be silent with rc=0).
+static int daemon_apply_if_enabled(const app_config& cfg) {
     if (g_no_daemon) {
         std::cout << "Config updated locally (not applied to daemon — "
                      "use 'rawaccel-cli reload' or remove --no-daemon)\n";
-        return;
+        return 0;
     }
-    if (daemon_apply_config(cfg))
+    if (daemon_apply_config(cfg)) {
         std::cout << "Daemon reloaded.\n";
+        return 0;
+    }
+    std::cerr << "Warning: config saved locally but the daemon did not reload it.\n"
+              << "  Re-run without the change, or apply with: rawaccel-cli reload\n";
+    return 1;
 }
 
 /// Print a uniform "couldn't reach daemon" diagnostic.  Suggests the right
@@ -273,6 +282,11 @@ static void print_accel_args(const accel_args& a, const std::string& prefix = " 
 static void print_profile(const device_profile& dp) {
     auto& p = dp.prof;
     std::cout << "Profile: " << dp.name << "\n";
+    // P115-A5-09: a disabled profile (per-device disable flag) used to be
+    // invisible in every listing — status claimed the profile was active while
+    // its acceleration was actually bypassed.
+    if (dp.dev_cfg.disable)
+        std::cout << "  disabled:     true  (device bypasses all processing)\n";
     std::cout << "  device_id:    " << (dp.device_id.empty() ? "(all)" : dp.device_id) << "\n";
     if (p.raw_passthrough) {
         std::cout << "  raw:          true  (all processing bypassed)\n";
@@ -355,7 +369,7 @@ static int cmd_set(app_config& cfg, const std::string& config_path, const std::s
             std::cout << "Active profile set to: " << name << "\n";
             // Push the new config to the daemon (IPC set_config) so it takes
             // effect even when the daemon reads a different file (systemd /etc).
-            daemon_apply_if_enabled(cfg);
+            return daemon_apply_if_enabled(cfg);
             return 0;
         }
     }
@@ -396,7 +410,7 @@ static int cmd_create(app_config& cfg, const std::string& config_path, const std
     cfg.profiles.push_back(dp);
     if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Created profile: " << name << "\n";
-    daemon_apply_if_enabled(cfg);
+    return daemon_apply_if_enabled(cfg);
     return 0;
 }
 
@@ -411,11 +425,16 @@ static int cmd_delete(app_config& cfg, const std::string& config_path, const std
     // If we just deleted the active profile, fall back to the first remaining one.
     if (cfg.active_profile == name && !cfg.profiles.empty())
         cfg.active_profile = cfg.profiles[0].name;
+    // P115-A5-08: deleting the LAST profile used to leave a dangling
+    // active_profile persisted as {"active_profile":"p","profiles":[]}.
+    // Clear it so the JSON never advertises a profile that no longer exists.
+    if (cfg.profiles.empty())
+        cfg.active_profile.clear();
     if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Deleted profile: " << name << "\n";
     if (cfg.active_profile != name)
         std::cout << "Active profile is now: " << cfg.active_profile << "\n";
-    daemon_apply_if_enabled(cfg);
+    return daemon_apply_if_enabled(cfg);
     return 0;
 }
 
@@ -460,7 +479,7 @@ static int cmd_duplicate(app_config& cfg, const std::string& config_path,
     cfg.profiles.push_back(std::move(dst));
     if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Duplicated profile: '" << src_name << "' → '" << dst_name << "'\n";
-    daemon_apply_if_enabled(cfg);
+    return daemon_apply_if_enabled(cfg);
     return 0;
 }
 
@@ -492,12 +511,21 @@ static int cmd_create_preset(app_config& cfg, const std::string& config_path,
     cfg.profiles.push_back(dp);
     if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Created profile '" << profile_name << "' from preset '" << preset_name << "'\n";
-    daemon_apply_if_enabled(cfg);
+    return daemon_apply_if_enabled(cfg);
     return 0;
 }
 
 /// Validate config file and report issues without modifying it.
 static int cmd_validate(const std::string& config_path) {
+    // P120-FAZ2 (A5-03): a missing config is an explicit error (rc=1) with a
+    // clear "config yok" message — never a silent false-PASS, and validation
+    // must not CREATE the file (main() dispatches validate before any default
+    // creation).  An existing-but-broken config reports errors to stderr and
+    // the file is never written to.
+    if (::access(config_path.c_str(), F_OK) != 0) {
+        std::cerr << "ERROR: config yok (not found): " << config_path << "\n";
+        return 1;
+    }
     std::cout << "Validating config: " << config_path << "\n";
     try {
         app_config cfg = load_config(config_path);
@@ -812,7 +840,10 @@ static int cmd_set_param(app_config& cfg, const std::string& config_path,
         if (!range_ok(key.c_str(), 0.01, 100)) return 1;
     } else if (key == "exponent_classic") {
         if (!range_ok("exponent_classic", 1, 10)) return 1;
-    } else if (key == "exponent_power" || key == "sync_speed") {
+    } else if (key == "exponent_power") {
+        // P120-FAZ2 (Aj8 BUG-3): clipped at the GUI gauge max (EXP_POWER_MAX).
+        if (!range_ok(key.c_str(), 1e-4, EXP_POWER_MAX)) return 1;
+    } else if (key == "sync_speed") {
         if (!min_ok(key.c_str(), 1e-4)) return 1;
     } else if (key == "lp_norm") {
         if (v <= 0) {
@@ -820,10 +851,20 @@ static int cmd_set_param(app_config& cfg, const std::string& config_path,
                       << "  (must be > 0)\n";
             return 1;
         }
-    } else if (key == "cap_x" || key == "cap_y" || key == "limit" ||
-               key == "decay_rate" || key == "motivity" || key == "gamma" ||
-               key == "input_offset" || key == "output_offset" ||
-               key == "scale" || key == "smooth" ||
+    } else if (key == "cap_x") {
+        // P120-FAZ2: GUI gauge max CAP_X_MAX.
+        if (!range_ok(key.c_str(), 0, CAP_X_MAX)) return 1;
+    } else if (key == "cap_y") {
+        // P120-FAZ2: GUI gauge max CAP_Y_MAX.
+        if (!range_ok(key.c_str(), 0, CAP_Y_MAX)) return 1;
+    } else if (key == "output_offset") {
+        // P120-FAZ2: GUI gauge max OUTPUT_OFFSET_MAX.
+        if (!range_ok(key.c_str(), 0, OUTPUT_OFFSET_MAX)) return 1;
+    } else if (key == "scale") {
+        // P120-FAZ2: GUI gauge max SCALE_MAX.
+        if (!range_ok(key.c_str(), 0, SCALE_MAX)) return 1;
+    } else if (key == "limit" || key == "decay_rate" || key == "motivity" ||
+               key == "gamma" || key == "input_offset" || key == "smooth" ||
                key == "speed_min" || key == "speed_max" ||
                key == "input_smooth_halflife" || key == "scale_smooth_halflife" ||
                key == "output_smooth_halflife") {
@@ -889,6 +930,16 @@ static int cmd_set_param(app_config& cfg, const std::string& config_path,
         // (profile then applies to all unmatched mice).  Non-empty values are
         // matched against the daemon's composite ID "usb:VVVV:PPPP:serial" or a
         // /dev/input/{by-id,eventN} node path — copy verbatim.
+        // P115-A5-01: the load-side cap is MAX_DP_DEVICE_ID (256) in
+        // src/config.cpp.  A longer value used to be accepted and then silently
+        // truncated on the next reload+resave — same trap P82-MED-1 fixed for
+        // names.  Reject up front so the stored ID always equals what the user
+        // supplied.
+        if (val.size() > 256) {
+            std::cerr << "device_id too long: " << val.size()
+                      << " chars (max 256).\n";
+            return 1;
+        }
         dp->device_id = val;
     }
     else if (key == "rotation")         { dp->prof.degrees_rotation = v; }
@@ -911,7 +962,13 @@ static int cmd_set_param(app_config& cfg, const std::string& config_path,
         }
         else if (val == "lp") {
             dp->prof.speed_processor_args.whole = true;
-            /* lp_norm set separately */
+            // P115-A5-06: switching to lp-mode must not leave a stale max-mode
+            // sentinel (lp_norm=9999) behind — that kept the LAST lp_norm value
+            // and made stored_value_str() echo "max" after the user asked for
+            // "lp".  An explicit lp_norm set BEFORE this call is preserved
+            // (semantics: "lp, at my norm"); the sentinel is the only victim.
+            if (dp->prof.speed_processor_args.lp_norm >= 16)
+                dp->prof.speed_processor_args.lp_norm = 2.0;
         }
         else if (val == "euclidean") {
             dp->prof.speed_processor_args.whole = true;
@@ -954,7 +1011,7 @@ static int cmd_set_param(app_config& cfg, const std::string& config_path,
     // e.g. `dpi 999999` → 32000, or resolved speed_min/speed_max ordering).
     std::cout << "Set " << key << " = " << stored_value_str(*dp, key)
               << " in profile '" << profile_name << "'\n";
-    daemon_apply_if_enabled(cfg);
+    return daemon_apply_if_enabled(cfg);
     return 0;
 }
 
@@ -993,19 +1050,33 @@ static int cmd_import(app_config& cfg, const std::string& config_path, const std
     // JSON to count the original lut_data array size and warn at import time.
     try {
         auto raw = nlohmann::json::parse(content);
-        auto check_lut_raw = [&](const char* axis_key, const char* axis) {
-            if (!raw.contains(axis_key)) return;
-            auto& ax = raw[axis_key];
-            if (!ax.contains("lut_data") || !ax["lut_data"].is_array()) return;
-            size_t n = ax["lut_data"].size();
+        // P120-FAZ2 (A5-04): an imported LUT larger than the engine capacity
+        // (> 514 raw elements, i.e. > 257 speed/gain points) is REJECTED with
+        // rc=1 + an explicit error.  Previously import warned and silently
+        // truncated the curve — that could swap a legit 257-point table for an
+        // unrelated prefix.  No silent truncation.
+        auto check_lut_raw = [&](const char* axis_key, const char* axis) -> bool {
+            // P115-A5-04: the raw LUT sits under "profile" (device_profile
+            // JSON), not at the top level — the previous check looked at
+            // raw["accel_x"] and never matched, silently dropping the
+            // truncation warning.
+            if (!raw.contains("profile")) return true;
+            auto& ax = raw["profile"];
+            if (!ax.contains(axis_key)) return true;
+            auto& a = ax[axis_key];
+            if (!a.contains("lut_data") || !a["lut_data"].is_array()) return true;
+            size_t n = a["lut_data"].size();
             if (n / 2 > LUT_POINTS_CAPACITY) {
-                std::cerr << "Warning: LUT (" << axis << " axis) in imported "
-                          << "profile has " << (n/2) << " points; truncated to "
-                          << LUT_POINTS_CAPACITY << ".\n";
+                std::cerr << "ERROR: LUT (" << axis << " axis) in imported "
+                          << "profile has " << (n/2) << " points; maximum is "
+                          << LUT_POINTS_CAPACITY << " (" << LUT_RAW_DATA_CAPACITY
+                          << " raw elements). Import rejected — fix the file.\n";
+                return false;
             }
+            return true;
         };
-        check_lut_raw("accel_x", "X");
-        check_lut_raw("accel_y", "Y");
+        if (!check_lut_raw("accel_x", "X")) return 1;
+        if (!check_lut_raw("accel_y", "Y")) return 1;
     } catch (const std::exception& e) {
         std::cerr << "Warning: could not inspect raw LUT size: " << e.what() << "\n";
     }
@@ -1034,7 +1105,7 @@ static int cmd_import(app_config& cfg, const std::string& config_path, const std
         return 1;
     }
     std::cout << "Imported profile: " << dp.name << "\n";
-    daemon_apply_if_enabled(cfg);
+    return daemon_apply_if_enabled(cfg);
     return 0;
 }
 
@@ -1081,7 +1152,7 @@ static int cmd_rename(app_config& cfg, const std::string& config_path, const std
     }
     if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Renamed profile: '" << old_name << "' → '" << new_name << "'\n";
-    daemon_apply_if_enabled(cfg);
+    return daemon_apply_if_enabled(cfg);
     return 0;
 }
 
@@ -1117,9 +1188,11 @@ static int cmd_status_json(const std::string& config_path) {
     out["daemon"] = running ? "running" : "stopped";
     out["config"] = config_path;
     out["profiles"] = nlohmann::json::array();
+    bool config_ok = true;
     try {
         auto cfg = load_config(config_path);
         out["active_profile"] = cfg.active_profile;
+        out["use_raw_input"] = cfg.use_raw_input;
         for (auto& p : cfg.profiles) {
             nlohmann::json po;
             po["name"]      = p.name;
@@ -1127,6 +1200,9 @@ static int cmd_status_json(const std::string& config_path) {
             po["device_id"] = p.device_id;
             po["dpi"]       = p.dev_cfg.dpi;
             po["polling_rate"] = p.dev_cfg.polling_rate;
+            // P115-A5-09: expose the per-profile disable flag so status --json
+            // can't claim a bypassed profile is active.
+            po["disable"]   = p.dev_cfg.disable;
             const char* mode_s = "noaccel";
             if (p.prof.raw_passthrough) {
                 mode_s = "raw";
@@ -1155,24 +1231,34 @@ static int cmd_status_json(const std::string& config_path) {
             }
         }
     } catch (...) {
+        config_ok = false;
         out["config_error"] = true;
     }
     std::cout << out.dump(2) << "\n";
-    return running ? 0 : 1;
+    // P115-A5-07: config_error must be a failure exit, not daemon-status-only.
+    return (running && config_ok) ? 0 : 1;
 }
 
 static int cmd_status(const std::string& config_path) {
     if (g_json) return cmd_status_json(config_path);
     bool running = daemon_running();
     std::cout << "Daemon:  " << (running ? "running" : "stopped") << "\n";
+    bool config_ok = true;
     try {
         auto cfg = load_config(config_path);
         std::cout << "Config:  " << config_path << "\n";
         std::cout << "Active:  " << cfg.active_profile << "\n";
+        // P115-A5-09: surface the global raw-input mode; it silently stayed
+        // hidden when set (status only showed per-profile fields before).
+        if (cfg.use_raw_input)
+            std::cout << "Raw-input passthrough flag: true  (daemon bypasses input processing)\n";
         std::cout << "Profiles (" << cfg.profiles.size() << "):\n";
         for (auto& p : cfg.profiles) {
             bool is_active = (p.name == cfg.active_profile);
             std::cout << "  " << (is_active ? "* " : "  ") << p.name;
+            // P115-A5-09: flag disabled profiles in status output too.
+            if (p.dev_cfg.disable)
+                std::cout << "  [disabled]";
             // Show device assignment if set
             if (!p.device_id.empty())
                 std::cout << "  [device: " << p.device_id << "]";
@@ -1269,9 +1355,13 @@ static int cmd_status(const std::string& config_path) {
         if (running)
             std::cout << "\nTip: rawaccel-cli latency  → dump latency stats\n";
     } catch (...) {
-        std::cout << "Config:  " << config_path << " (unreadable or missing)\n";
+        config_ok = false;
+        std::cerr << "Config:  " << config_path << " (unreadable or missing)\n";
     }
-    return running ? 0 : 1;
+    // P115-A5-07: a broken config used to print to STDOUT and exit 0 whenever
+    // the daemon happened to be running — scripts saw "success" while the
+    // effective config was actually unreachable.  Report on stderr and fail.
+    return (running && config_ok) ? 0 : 1;
 }
 
 // ── Help ──────────────────────────────────────────────────────────────────────
@@ -1333,18 +1423,18 @@ REJECTED (exit 1, config untouched); default = fresh `create` profile value:
   acceleration      Acceleration multiplier. Domain any finite (negative = classic
                     decel). Default 0.005.
   exponent_classic  Classic exponent. Domain 1–10. Default 2.
-  exponent_power    Power/synchronous exponent. Domain ≥ 1e-4. Default 0.05.
-  limit             Upper multiplier asymptote, jump/natural. Domain ≥ 0. Default 1.5.
+  exponent_power    Power/synchronous exponent. Domain 1e-4–5. Default 0.05.
+  limit             Upper multiplier asymptote (natural mode). Domain ≥ 0. Default 1.5.
   decay_rate        Natural decay rate. Domain ≥ 0. Default 0.1.
-  motivity          Natural motivity. Domain ≥ 0. Default 1.5.
-  gamma             Classic gamma. Domain ≥ 0. Default 1.
+  motivity          Synchronous motivity. Domain ≥ 0. Default 1.5.
+  gamma             Synchronous gamma. Domain ≥ 0. Default 1.
   input_offset      Speed offset before acceleration starts. Domain ≥ 0. Default 0.
-  output_offset     Output offset (power mode). Domain ≥ 0. Default 0.
-  scale             Scale factor (power mode). Domain ≥ 0. Default 1.
+  output_offset     Output offset (power mode). Domain 0–100. Default 0.
+  scale             Scale factor (power mode). Domain 0–100. Default 1.
   sync_speed        Synchronous sync speed. Domain ≥ 1e-4. Default 5.
-  smooth            Jump smoothness. Domain ≥ 0. Default 0.5.
-  cap_x             Input speed cap. Domain ≥ 0. Default 15.
-  cap_y             Output gain cap. Domain ≥ 0. Default 1.5.
+  smooth            Jump/synchronous smoothness. Domain ≥ 0. Default 0.5.
+  cap_x             Input speed cap. Domain 0–500. Default 15.
+  cap_y             Output gain cap. Domain 0–100. Default 1.5.
   cap_mode          out|in|io  (cap mode). Default out.
   rotation          Rotation in degrees. Domain any finite (normalized mod 360:
                     −45 → 315, 400 → 40). Default 0.
@@ -1398,6 +1488,12 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             config_path = argv[++i];
+            config_path_explicit = true;
+        } else if (strncmp(argv[i], "--config=", 9) == 0) {
+            // P115-A5-10: accept the `--config=path` (= form) like the daemon's
+            // parser does (P53).  Previously this was rejected as an unknown
+            // command with a 101-line help dump to stdout — CLI/daemon parity gap.
+            config_path = argv[i] + 9;
             config_path_explicit = true;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_help();
@@ -1499,6 +1595,7 @@ int main(int argc, char* argv[]) {
     if (args[0] == "reload") return cmd_reload();
     if (args[0] == "stop")   return cmd_stop();
     if (args[0] == "status") return cmd_status(config_path);
+    if (args[0] == "validate") return cmd_validate(config_path);
     if (args[0] == "latency") {
         // Try the IPC "latency" command first — works for any user in the
         // input group regardless of who owns the daemon.  Falls back to
@@ -1576,7 +1673,6 @@ int main(int argc, char* argv[]) {
     if (cmd == "rename") return cmd_rename(cfg, config_path, args[1], args[2]);
     if (cmd == "duplicate") return cmd_duplicate(cfg, config_path, args[1], args[2]);
     if (cmd == "create-preset") return cmd_create_preset(cfg, config_path, args[1], args[2]);
-    if (cmd == "validate") return cmd_validate(config_path);
     if (cmd == "set-param") return cmd_set_param(cfg, config_path, args[1], args[2], args[3]);
     if (cmd == "export") return cmd_export(cfg, args.size() >= 2 ? args[1] : "");
     if (cmd == "import") return cmd_import(cfg, config_path, args[1]);

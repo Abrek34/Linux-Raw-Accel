@@ -185,6 +185,11 @@ private:
     int inotify_wd_ = -1;
     // Track which paths are already opened (avoid re-grabbing on spurious events)
     std::set<std::string> opened_paths_;
+    // P121/BUG-02: paths with failed I/O are denied re-open until this
+    // (ms, CLOCK_MONOTONIC_RAW).  A broken-but-still-listed node would
+    // otherwise churn grab/uinput-create/destroy every ~2 s forever.
+    // Access only from the loop thread (setup + hotplug) — no sync needed.
+    std::unordered_map<std::string, double> path_deny_until_ms_;
     // O(1) fd -> device index lookup (avoids linear scan in hot path)
     std::unordered_map<int, size_t> fd_to_dev_;
     // Hot-plug retry counter — accessed only from run_loop() thread; no sync needed.

@@ -70,14 +70,17 @@ sudo bash setup.sh --reinstall    # clean old install, then reinstall (default)
 backwards compatibility).
 
 > **Arch package coexistence**: on Arch-based distros you can instead install
-> the packaged binary (`packaging/rawaccel-linux-0.5.0-1-x86_64.pkg.tar.zst`,
+> the packaged binary (`packaging/rawaccel-linux-0.5.0-2-x86_64.pkg.tar.zst`,
 > `sudo pacman -U ...`) or publish it via an AUR package. Do **not** mix
-> `setup.sh` and the pacman package: setup.sh installs to `/usr/local/bin` +
-> `/etc/systemd/system`, the package to `/usr/bin` + `/usr/lib/systemd/system`,
-> and the `/etc` unit shadows the packaged one. Since 0.5.0-1 the package
-> auto-cleans legacy setup.sh files and never overwrites your existing
-> `/etc/rawaccel/settings.json`. If you have an old manual install, either run
-> `setup.sh --uninstall` first, or let the package's pre-install hook clean it.
+> `setup.sh` and the pacman package: both install the systemd unit to the same
+> path (`/usr/lib/systemd/system/rawaccel.service`), while binaries land in
+> `/usr/local/bin` (setup.sh) vs `/usr/bin` (package) — a stale copy on PATH
+> keeps grabbing your mouse after the other install. Since 0.5.0-2 the package
+> auto-cleans legacy setup.sh files in its pre-install hook (the old
+> `/etc/systemd/system` shadow unit plus `/usr/local/bin` and `~/.local/bin`
+> binaries) and never overwrites your existing `/etc/rawaccel/settings.json`.
+> If you have an old manual install, either run `setup.sh --uninstall` first,
+> or let the package's pre-install hook clean it.
 
 Uninstall (keeps your `~/.config/rawaccel` and `/etc/rawaccel/settings.json`):
 
@@ -152,10 +155,11 @@ rawaccel-cli set-param gaming exponent_classic 2
 rawaccel-cli set-param gaming limit 1.8
 rawaccel-cli set-param gaming dpi 800
 rawaccel-cli set-param gaming yx_ratio 1.0    # Y-axis output DPI ratio (vs X)
-# Full key list: rawaccel-cli --help (mode, gain, acceleration, exponent_*,
-# limit, decay_rate, motivity, gamma, input/output_offset, scale, sync_speed,
-# smooth, cap_x/cap_y/cap_mode, rotation, snap, dpi, polling_rate,
-# speed_min/max, output_dpi, lr_ratio, ud_ratio, yx_ratio, device_id)
+# Partial key list — the most-used subset.  The complete set-param key set —
+# raw, distance_mode, lp_norm, input/scale/output_smooth_halflife,
+# domain_weights/domain_weight_x/_y, range_weights/range_weight_x/_y, plus
+# every key below — is documented in docs/research/parameter_index.md
+# ("CLI erişilebilirlik denetimi (set-param)") and in `rawaccel-cli --help`.
 
 # Switch active profile (signals daemon to reload)
 rawaccel-cli set gaming
@@ -173,7 +177,7 @@ rawaccel-cli import backup.json
 rawaccel-cli validate            # check config for errors/warnings
 rawaccel-cli reload              # reload daemon config (SIGHUP)
 rawaccel-cli stop                # stop daemon (SIGTERM)
-rawaccel-cli latency             # per-device processing latency stats (SIGUSR1)
+rawaccel-cli latency             # per-device processing latency stats (IPC first, SIGUSR1 fallback)
 ```
 
 ### Daemon
@@ -261,16 +265,16 @@ are missing, GUI/CLI create a default config automatically.
 | `gain` | Enable gain mode (recommended) | `true` |
 | `acceleration` | Acceleration multiplier | `0.005` |
 | `exponent_classic` | Classic mode exponent | `2.0` |
-| `exponent_power` | Power/synchronous mode exponent | `0.05` |
-| `limit` | Maximum gain asymptote (jump/natural) | `1.5` |
+| `exponent_power` | Power mode exponent | `0.05` |
+| `limit` | Natural mode upper gain asymptote | `1.5` |
 | `decay_rate` | Natural mode decay rate | `0.1` |
-| `motivity` | Natural mode motivity | `1.5` |
-| `gamma` | Classic mode gamma | `1.0` |
-| `input_offset` | Speed threshold before acceleration starts (ips) | `0` |
+| `motivity` | Synchronous mode motivity | `1.5` |
+| `gamma` | Synchronous mode gamma | `1.0` |
+| `input_offset` | Speed threshold before acceleration starts (ips) — **classic/natural only**; inert in power/jump/synchronous (stored, never read) | `0` |
 | `output_offset` | Output offset (power mode) | `0` |
 | `scale` | Scale factor (power mode) | `1.0` |
 | `sync_speed` | Synchronous mode reference speed (ips) | `5.0` |
-| `smooth` | Jump sigmoid smoothing | `0.5` |
+| `smooth` | Jump + synchronous sigmoid smoothing | `0.5` |
 | `cap_x` | Input speed cap (ips) | `15` |
 | `cap_y` | Output gain cap | `1.5` |
 | `cap_mode` | Cap mode: `out`, `in`, `io` | `out` |
@@ -581,6 +585,8 @@ RawAccel Linux processes mouse events with sub-microsecond latency in the daemon
 - **Subpixel accumulation**: no micro-movements are silently lost
 - **Hot path contract**: single loop thread, no per-event allocations; `dpi_factor`
   pre-computed per device; single `CLOCK_MONOTONIC_RAW` source → 2 syscalls per event
+  (clock reads only; the batched `REL_X`+`REL_Y` write adds one more — 3 hot-path
+  syscalls per motion event)
 - **Grab safety**: `EVIOCGRAB` takes raw input; live config reload never releases the
   grab → no dropout window; `SYN_DROPPED` discards events until the next `SYN_REPORT`
   so nothing partially-read reaches uinput; uinput write failure marks the device
@@ -588,7 +594,9 @@ RawAccel Linux processes mouse events with sub-microsecond latency in the daemon
 
 ### Latency statistics
 
-Per-device histogram (µs) snapshot via `rawaccel-cli latency` (sends `SIGUSR1`):
+Per-device histogram (µs) snapshot via `rawaccel-cli latency` (tries the daemon's
+IPC `latency` RPC first — works for any user in the `input` group; falls back to
+`SIGUSR1` only if the running daemon doesn't speak that command yet):
 
 ```bash
 rawaccel-cli latency

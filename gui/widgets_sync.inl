@@ -88,7 +88,7 @@ static void update_mode_sensitivity(AppState* S) {
         : idx_to_mode((int)gtk_drop_down_get_selected(GTK_DROP_DOWN(S->mode_combo_y)));
     row_set_visible(S->y_row_label[1], S->accel_spin_y,    mode_uses(ymode, {accel_mode::classic}));
     row_set_visible(S->y_row_label[2], S->exponent_spin_y, mode_uses(ymode, {accel_mode::classic}));
-    row_set_visible(S->y_row_label[3], S->limit_spin_y,    mode_uses(ymode, {accel_mode::natural, accel_mode::jump}));
+    row_set_visible(S->y_row_label[3], S->limit_spin_y,    mode_uses(ymode, {accel_mode::natural}));
     row_set_visible(S->y_row_label[4], S->offset_spin_y,   mode_uses(ymode, {accel_mode::classic, accel_mode::natural}));
     row_set_visible(S->y_row_label[5], S->cap_y_spin_y,    mode_uses(ymode, {accel_mode::classic, accel_mode::power}));
 
@@ -636,23 +636,6 @@ void on_daemon_reload(GtkButton*, gpointer user_data) {
 
 // ── Latency stats view ────────────────────────────────────────────────────────
 
-/// Extract a numeric JSON field value (first occurrence) from an IPC response.
-/// Returns -1 when the key is absent or unparseable.
-static double daemon_json_field(const std::string& resp, const char* key) {
-    std::string needle = "\"" + std::string(key) + "\":";
-    size_t pos = resp.find(needle);
-    if (pos == std::string::npos) return -1;
-    size_t start = resp.find_first_not_of(" \t", pos + needle.size());
-    size_t end = resp.find_first_of(",}", start);
-    if (end == std::string::npos || end <= start) return -1;
-    std::string val = resp.substr(start, end - start);
-    errno = 0;
-    char* e = nullptr;
-    double v = std::strtod(val.c_str(), &e);
-    if (e == val.c_str() || errno != 0 || !std::isfinite(v)) return -1;
-    return v;
-}
-
 /// Format a latency figure with 2 decimals ('' '.' decimal separator — C++
 /// streams keep the "C" locale even after setlocale(LC_ALL, "")).
 static std::string fmt_us(double v) {
@@ -662,10 +645,11 @@ static std::string fmt_us(double v) {
 }
 
 /// "Performans" button in the status bar: read the daemon's latency snapshot
-/// (same IPC channel as update_daemon_status) and show Avg/p50/p95/p99/Max.
+/// and show Avg/p50/p95/p99/Max — from the ACTIVE PROFILE's device slice
+/// (daemon_device_field, Bug-02) instead of the first device in the array.
 /// The daemon status_json exposes these per-device µs stats (histogram bucket
 /// midpoints); a Min is not part of the snapshot, so Max stands in as the tail
-/// bound. Non-blocking: the IPC query itself carries a 1 s socket timeout.
+/// bound. Non-blocking: the IPC query itself carries a 150 ms socket timeout.
 void on_perf_clicked(GtkButton*, gpointer user_data) {
     auto* S = static_cast<AppState*>(user_data);
     if (!daemon_running()) {
@@ -673,17 +657,17 @@ void on_perf_clicked(GtkButton*, gpointer user_data) {
         return;
     }
     std::string resp = daemon_ipc_query("status");
-    double samples = daemon_json_field(resp, "lat_samples");
+    double samples = daemon_device_field(resp, S, "lat_samples");
     if (samples <= 0) {
         gtk_label_set_text(GTK_LABEL(S->latency_lbl),
             tr("Latency: no samples recorded yet."));
         return;
     }
-    double avg = daemon_json_field(resp, "lat_avg_us");
-    double p50 = daemon_json_field(resp, "lat_p50_us");
-    double p95 = daemon_json_field(resp, "lat_p95_us");
-    double p99 = daemon_json_field(resp, "lat_p99_us");
-    double mx  = daemon_json_field(resp, "lat_max_us");
+    double avg = daemon_device_field(resp, S, "lat_avg_us");
+    double p50 = daemon_device_field(resp, S, "lat_p50_us");
+    double p95 = daemon_device_field(resp, S, "lat_p95_us");
+    double p99 = daemon_device_field(resp, S, "lat_p99_us");
+    double mx  = daemon_device_field(resp, S, "lat_max_us");
     gtk_label_set_text(GTK_LABEL(S->latency_lbl),
         trf("Latency: Avg %s · p50 %s · p95 %s · p99 %s · Max %s µs",
             fmt_us(avg).c_str(), fmt_us(p50).c_str(), fmt_us(p95).c_str(),

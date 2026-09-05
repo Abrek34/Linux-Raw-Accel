@@ -2395,3 +2395,7 @@ Yönetici (Aj 1), R47 P109 M27 erken kapanmıştı; eksik teslimatlar tamamland�
 (c) **Preset sayı spot-checki** presets.hpp → header hesabıyla: cs2 @900 1.5750 / @80 1.3188 (asimptot 1.6); fps @900 1.7644 / @80 1.3999 (1.8); apex @5 2.1011 / zemin 0.9007 / çatı 2.1995; natural @0.2 1.008→@900 1.299 (bant 1.0-1.3); noaccel 1.0, disable telem 0.00 — §3.3 ile birebir.
 
 Trend: docs/test_window_usage.md (Bölüm 1-6) + real_hardware_test.md üst notu. AKIS P109 `TAMAM (M28)`, kilit null. Aj 7 boş — emir bekliyor.
+
+### Aj.5 [M28] [06 Eyl 2026] [01:36 — P115 FAZ 2: 10 BUG FIX]
+
+Kullanıcı emri ("derinlemesine incele, bug fixle") → Aj1'in P115 Faz 1 bulgularının (A5-01..A5-10) hepsi fixlendi: device_id>256 red, accel_args 12 numerik guard, validate üretim+false-PASS'a son, LUT uyarısı canlı, push-fail stderr+rc=1, distance_mode lp sentinel, status bozuk config rc=1, son-delete temiz aktif, disable/use_raw_input çıktılarda, `--config=` kabul. Panel YEŞİL: build 0 uyarı · 32798/32798 · ASan ✓ · oracle 915/31 OK · tr PASS. Kilit Aj.5, R47 toplu commit bekliyor.

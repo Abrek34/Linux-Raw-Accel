@@ -79,21 +79,19 @@ private:
         if (x == syncspeed) return 1.0;
 
         double log_diff = std::log(x) - log_syncspeed;
-        // Reference uses pow(log_space, sharpness); for motivity<1 the log_space
-        // sign flips negative and pow(negative, fractional sharpness) is NaN in
-        // the reference too. The tanh activation is even in log_space, so using
-        // |log_space| repairs that degenerate case without changing motivity>1.
-        if (log_diff > 0) {
-            double log_space = gamma_const * log_diff;
-            double exponent  = std::pow(std::tanh(std::pow(std::abs(log_space), sharpness)),
-                                        sharpness_recip);
-            return std::exp(exponent * log_motivity);
-        } else {
-            double log_space = -gamma_const * log_diff;
-            double exponent  = -std::pow(std::tanh(std::pow(std::abs(log_space), sharpness)),
-                                         sharpness_recip);
-            return std::exp(exponent * log_motivity);
-        }
+        // BUG-01: odd-symmetric tanh activation in log space z = gamma_const·(log x − log sync_speed):
+        //   exponent = sign(z) · pow(tanh(|z|^sharpness), 1/sharpness)
+        // For motivity<1, gamma_const is negative, so z — not log_diff — carries the
+        // curve's sign (negative on the high-speed side). Branching on log_diff with a
+        // |log_space| repair dropped the tanh's odd sign, inverting the curve relative
+        // to the smooth=0 linear-clamp path (m=0.3/smooth=0.5: local m vs ref 1/m).
+        // |z| keeps pow(·, fractional sharpness) finite while sign(z) restores the odd
+        // symmetry that matches the clamp path. motivity>1 is bit-identical.
+        double z        = gamma_const * log_diff;
+        double exponent = std::pow(std::tanh(std::pow(std::abs(z), sharpness)),
+                                   sharpness_recip);
+        if (z < 0) exponent = -exponent;
+        return std::exp(exponent * log_motivity);
     }
 
     void init(const fp_rep_range& r, bool vel) {

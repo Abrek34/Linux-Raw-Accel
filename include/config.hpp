@@ -8,6 +8,19 @@ namespace rawaccel {
 
 static constexpr const char* DEFAULT_CONFIG_PATH = "/etc/rawaccel/settings.json";
 
+// P120-FAZ2 (Aj8 BUG-3): upper bounds for the accel_args fields that drive
+// output gain.  Sanitize (config load / IPC push), the CLI set-param domains
+// and the CLI help text all share these so a value can never exceed what the
+// GUI gauge itself allows (gui/ui_builder.inl: scale 0.01..100, power_exp
+// 0.01..5, cap_x 0..500, cap_y 0..100, output_offset 0..100).  They are also
+// exactly the boundary values the R15 round-trip test requires to be
+// load-preserved, so sanitize must clamp at these maxima (never below).
+static constexpr double SCALE_MAX          = 100.0;
+static constexpr double EXP_POWER_MAX      = 5.0;
+static constexpr double CAP_X_MAX          = 500.0;
+static constexpr double CAP_Y_MAX          = 100.0;
+static constexpr double OUTPUT_OFFSET_MAX  = 100.0;
+
 struct device_config {
     bool   disable         = false;
     int    dpi             = 800;

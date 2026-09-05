@@ -17,19 +17,34 @@ STD="-std=c++20"
 
 TOL="${TOL:-1e-9}"   # relative tolerance on gain (identical math ⇒ ~1e-15)
 VERBOSE=0
-[ "${1:-}" = "--verbose" ] && VERBOSE=1
+# P114 BUG-E: --tolerance <val> flag'i gerçekten parse ediliyor (TOL env korunur).
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --verbose)   VERBOSE=1 ;;
+        --tolerance) if [ $# -lt 2 ]; then
+            echo "Hata: --tolerance <val> sayısal değer gerekli" >&2
+            exit 2
+        fi
+        TOL="$2" ; shift ;;
+        *)
+            echo "Hata: bilinmeyen argüman '$1' (kullanım: --verbose | --tolerance REL)" >&2
+            exit 2 ;;
+    esac
+    shift
+done
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 # My machine is x86-64; drop -march/-O3 to keep the diff pure algorithm.
+# $CXX onurlandırılır (P114 BUG-D).
 echo "[oracle] compiling official reference ..."
-g++ $STD -O1 -fpermissive -Wno-changes-meaning \
+"$CXX" $STD -O1 -fpermissive -Wno-changes-meaning \
     -I "$REF_DIR" -include "$REF_DIR/refcompat.hpp" \
     "$HERE/reference.cpp" -o "$work/ref_bin" || exit 1
 
 echo "[oracle] compiling local port ..."
-g++ $STD -O1 -I "$REPO" \
+"$CXX" $STD -O1 -I "$REPO" \
     "$HERE/local.cpp" -o "$work/local_bin" || exit 1
 
 echo "[oracle] running reference ..."
@@ -87,15 +102,29 @@ for (name, spd) in r:
     if rel > tol:
         worst.append((rel, name, spd, rv, lv, (name, spd) in known))
 
-unknown = [w for w in worst if not w[-1]]
-known_cnt = sum(1 for w in worst if w[-1])
+# P114 BUG-C: STALE/known-integrity bookkeeping runs at the CANONICAL strict
+# tolerance (1e-9) regardless of the user's TOL. `deviating` decides whether a
+# documented deviation "really deviates today" — loosening TOL (or a perfectly
+# clean run) must NOT flag every documented row as a stale lie and hard-fail a
+# green run. The user's TOL above governs only *unknown* row drift below.
+strict = 1e-9
+deviating = set()
+for (name, spd) in r:
+    rv, lv = r[(name, spd)], l[(name, spd)]
+    denom = max(abs(rv), abs(lv), 1e-300)
+    rel = abs(rv - lv) / denom
+    if rel > strict:
+        deviating.add((name, spd))
 
-deviating = {(w[1], w[2]) for w in worst}
+unknown = [w for w in worst if not w[-1]]
+# documented rows that still genuinely deviate at the canonical tolerance
+known_cnt = len(known & deviating)
+
 stale = sorted(known - deviating)
 
 print(f"total rows compared : {len(r)}")
 print(f"documented deviations: {len(known)} (known_deviations.txt)")
-print(f"known deviations seen: {known_cnt} (actually drifting beyond tolerance)")
+print(f"known deviations seen: {known_cnt} (genuinely drifting beyond canonical tolerance)")
 
 if stale:
     print(f"ERROR: {len(stale)} documented deviation(s) are NO LONGER deviations:")

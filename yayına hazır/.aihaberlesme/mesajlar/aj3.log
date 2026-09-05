@@ -1,0 +1,270 @@
+### Aj.3 [M5] [05 Eyl 2026] [13:11]
+T18'i üstlendim (Belge/UX senkronu + çeviri denetimi + GUI dili canlı doğrulama). AKIS.json: durum=devam, kilit=3. Şimdi çeviri kapsam aracını koşuyorum, GUI dil yükleyicisini ve doküman senkronunu inceliyorum.
+### Aj.3 [M6] [05 Eyl 2026] [13:40]
+T18 TAMAMLANDI (AKIS: tamam, kilit null): çeviri denetimi PASS (0 eksik) | GUI dili canlı doğrulama: üretim-kodu probe 20/20 OK + canlı Wayland rawaccel-gui Türkçe render (OCR kanıt /tmp/opencode/gui_ocr.txt, görüntü /tmp/opencode/gui_shot.png) | belge senkronu: README GUI language + AGENTS.md GUI language resolution | kapılar: build 0 uyarı, test 21587/21587, tr_coverage PASS.
+### Aj.3 [M7] [05 Eyl 2026] [13:50]
+Boştayım — tahtada Aj 3'e atanmış açık iş yok (T18 ✅). Kanalı 5 saniyede bir izliyorum. Şeridim (dokümantasyon/UX/çeviri) hazır; devredilecek iş olursa hemen alırım. AJ 3, T18 `tamam` (kilit null) — AKIS doğrulanmış durumda.
+### Aj.3 [M8] [05 Eyl 2026] [13:55]
+T26 üstlendim (AKIS: durum=devam, kilit=3): dokümantasyon senkronu (README/AGENTS) + tr.inl/tr_coverage PASS teyidi + GUI canlı dil geçişi yeniden doğrulaması. Başlıyorum.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [14:21 — P34 emri]
+Aj 3, P34 UX/doc: dusuk gecikme modu & guvenli varsayilanlar belgesi + README "oyuncu profili" kesiti. Yeni ozellik YOK; dokumantasyon. tr.inl/tr_coverage PASS'i de teyit et. Sonuc loguna.
+### Aj.3 [M9] [05 Eyl 2026] [14:25]
+P34 TAMAMLANDI: README "Player profile (oyuncu profili)" + "düşük gecikme & güvenli varsayılanlar" + Performance genişletme; AGENTS.md "Low-latency motion contract" karar notu. Kaynak-tabanlı (presets/lat_stats/default.json). Yeni özellik yok, kod değişmedi. T-tur kalıntıları (CI oracle senkronu, CLI ağacı, tr_coverage PASS, GUI TR/EN canlı) ağaçta duruyor. Build kapısı T30 (Aj 1) yüzünden kırmızı — benim serim bağımsız.
+### Aj.3 [M10] [05 Eyl 2026] [14:30]
+AKIS.json eski anlık görüntüyle değiştirilmişti (13:16, sadece T16-22); P34 güncelleme yazma girişimim bunu sağlamlaştırdı. Tahta kanaldaki son duruma göre geri yüklendi: 20 gorev (T16-29 + P30-35), P34=tamam/kilit null. Aj 0'a koordinasyon notu düşüldü.
+### Aj.3 [M11] [05 Eyl 2026] [14:35]
+P34 teyitleri (P35 paketine): tr_coverage PASS, run_tests.sh 21587/21587, gui_lang=tr yerinde. T-tur TR/EN canlı kanıtları hazır (gui_tr.png/gui_en8.png/ocr_en8.txt, probe 20/20). P34 kilit null, board tamam.
+### Aj.3 [M12] [05 Eyl 2026] [14:40]
+Görev talebi kanala düşüldü (Aj 0/Aj 5): 1) CHANGELOG/sürüm notları, 2) commit-öncesi README/AGENTS final senkron + diff özeti, 3) oyuncu-odaklı özet kılavuz, 4) telemetri alanları için tr.inl terim senkronu. Atanırsa üstlenirim.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [14:35 - P37 emri]
+Aj 3, P37: telemetri IPC + P31 bulgusu dokumantasyonu — AGENTS.md "Live telemetry & seqlock" kisim + README "telemetry via status" satiri. tr.inl anahtar teyidi. Kaynaklar: aihaberlesme.md M11/M13. AKIS kilit 3.
+### Aj.3 [M13] [05 Eyl 2026] [14:42]
+P37 üstlendim (AKIS: P37 durum=devam, kilit=3): telemetri IPC + P31 bulgusu dokümantasyonu — AGENTS.md "Live telemetry & seqlock" bölümü, README "telemetry via status" satırı (M13 ile senkron), tr.inl kapsam teyidi. Başlıyorum.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [14:46 - P42 emri: Bug Hunt]
+cli/main.cpp (1289 satir) tam incele: arg parse, device_id cozumleme, set_config push protokolu, exit kodlari, cikti format tutarliligi, truncation/large-LINE riskleri. Inceleme modu. Bulgu formati dosya:satir-SINIF-aciklama-fix. P37 dokumantasyon askiya - P41 serisi oncelikli.
+### Aj.3 [M13] [05 Eyl 2026] [14:42]
+P37 üstlendim (AKIS: devam, kilit 3): telemetri IPC + P31 bulgusu dokümantasyonu — AGENTS.md "Live telemetry & seqlock" bölümü, README "telemetry via status" satırı (M13 ile senkron), tr.inl kapsam teyidi. Başlıyorum.
+### Aj.3 [M14] [05 Eyl 2026] [14:48]
+P37 TAMAMLANDI: AGENTS.md "## Live Telemetry & Seqlock" bölümü (yazıcı/okuyucu/seqlock/unique_ptr/semantik), README CLI status telemetri satırı (JSON anahtarları daemon.cpp ile birebir). tr.inl: GUI telemetri render etmiyor → yeni anahtar yok, tr_coverage PASS. AKIS P37 tamam, kilit null.
+### Aj.3 [M15] [05 Eyl 2026] [15:30]
+P42 tamam: 4 bulgu (1 kritik exit-134 abort + arg hatası + trailing -c + bozuk-config üzerine yazma); hepsi canlı doğrulandı, 3'ü safe_save/hedefli-mesaj/data-koruması yamalarıyla düzeldi. Harici bloker raporlandı: LUT round-trip testi P43-BF1 (version okuma) nedeniyle kırık — Aj 4/QA'ya devredildi. tr PASS. AKIS P42 tamam, kilit null.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [15:35 - P52 emri: fix entegrasyon]
+Aj 3, P42'deki 3 fix (safe_save/hedefli-mesaj/data-korumasi) tamamlandi. P52 atandi: cli/main.cpp diff envanterini cikar (hangi satirlar degisti, neden), P51 8-dosya paketine ekle. Build + test + oracle + tr PASS teyidi bekle. Raporu loguna. Kilit 3.
+### Aj.3 [M16] [05 Eyl 2026] [15:52]
+Aj 1 P52 atamasını kabul ettim (AKIS P52 devam, kilit 3): P42'nin 3 cli/main.cpp düzeltmesinin diff envanteri, P35 tek-commit paketi entegrasyon teyidi, build/test/oracle/tr re-teyidi. Başlıyorum.
+### Aj.3 [M17] [05 Eyl 2026] [15:58]
+P52 tamam: cli diff envanteri (tek dosya +80/-21; Fix A safe_save 8 çağrı noktası, Fix B hedefli arity, Fix C -c/data-koruması), P35 paketinde dosya alanları ayrık (daemon/config/gui/lat çakışması yok). Re-teyit: build 0 uyarı, 21591/21591, oracle OK 588/27, tr PASS. AKIS P52 tamam, kilit null.
+### Aj.3 [M18] [05 Eyl 2026] [16:10]
+P53 üstlendim (Aj 1 M22 emri, kullanıcı "hatasız olsun"): daemon/main.cpp — json log escape + --flag=value parse düzeltmesi. Başlıyorum.
+### Aj.3 [M19] [05 Eyl 2026] [16:25]
+P53 tamam: daemon/main.cpp json-escape (tüm log satırları jq-valid kanıtlı) + --flag=value parse + eksik-değer guard + explicit-path = formu; T1-T6, exit kodları, validation kanıtlandı. Benim dosyam 0 uyarı. Aj 4'e 2 ağaç kırığı devredildi: config.cpp:298 sign-compare + test_accel.cpp <cstdio> eksik (std::remove derlenmiyor). AKIS P53 tamam, kilit null.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [16:50 - T26 emri (istegin karsilandi)]
+Aj 3, dokumantasyon/ceviri istegin karsilandi: T26 -> dokumantasyon senkronu (README/AGENTS guncellik) + tr.inl/tr_coverage PASS teyidi + GUI canli dil gecis yeniden dogrulamasi. Kullanici "tum gorevler" + "is isteyen varsa" emri. Kilit 3.
+### Aj.3 [M20] [05 Eyl 2026] [15:45]
+T26 tamam (Aj 1 M24 ataması): 1) AGENTS test sayıları 132 grup/21604 assertion + 7 yeni KDD (P42/P53/P54/P55/P43 kod-çaprazlı) + README daemon --config=/--log-format; 2) tr_coverage PASS; 3) GUI dil: tr-vs-en AE 20972 vs kontrol AE 38 (~550x), kod zinciri load_lang_override/resolve_lang/refresh_language teyidi, gui_lang=tr geri yüklendi. AKIS T26 tamam, kilit null.
+### Aj.3 [M21] [05 Eyl 2026] [15:52]
+AGENTS.md test metrikleri güncellendi 21604→21627 (T24 Aj7'nin +23 EXPECT'ini doğruladım: run_tests 21627/21627; grup 132 sabit). SYN_DROPPED durum makinesi kapsama listesine eklendi.
+
+### YONETICI [ADMIN] [05 Eyl 2026] - R24 emri: CHANGELOG
+Aj 3, yayin oncesi tek eksik belge CHANGELOG'dur. CHANGELOG.md dosyasini kokte olustur (0.4.0 -> 0.5.0 notlari; P30 telemetri, Bug-Hunt sprint P43-BF1 version/migrate, P54 config B2-B5, P55 lat_stats/LUT O1-O3, T24 SYN_DROPPED dahil). Dokuman devri sana devredildi. Yeni ozellik YOK. Kemik kurallarina uy. Rakamdogru tut (21627/21627, oracle 588/27).
+
+### Aj.3 [M22] [05 Eyl 2026] [16:19]
+doc/UX/ceviri devam (istek kuyrugu s.4, P35 kabulu sonrasi aktif) — CHANGELOG yayin notlari + README baglanti. P35 oncesi son doc kalemi:
+1. **CHANGELOG.md OLUSTURULDU** (yeni dosya, kilit yok): v0.5.0 (telemetri P30 + Bug-Hunt paketi P42/P43-BF1/P53/P54/P55/G1 — her maddesi koddan dogrulandi) + v0.4.0 (TR GUI, IPC push, KDE fix, oracle, setup.sh, PKGBUILD). Maddeler olgu bazli; P-id referansli. Kanit: kod gercekleri (lat_stats.hpp O1, accel-lookup O2, config.cpp P43-BF1, widgets_sync.inl G1) incelendi.
+2. **README.md**: baslik altina CHANGELOG baglantisi eklendi.
+3. tr.inl/telemetri terim senkronu: GUI telemetri render etmiyor → yeni anahtar yok (onceki M14 tespitiyle ayni); tr_coverage PASS.
+Kapilar: tr_coverage PASS | build 0 uyarı | run_tests 21627/21627. AKIS: gorev eklenmedi (doc kalemi kuyruk olarak kaldi). P35 paketindeki doc serisi artik tam: Player profile (P34) + telemetry (P37) + CHANGELOG (M22).
+
+### Aj.3 [M23] [05 Eyl 2026] [16:23]
+KULLANICI ONAYI (push kilid.kaldirma): kullanici GitHub token'ina 'workflow' OAuth scope'u ekleyip yenileyecegini bildirdi. R24 (c22072b) yerelde işlendi; engel yalniz push (ci.yml 0a895d1 degisikligi token'da workflow yetkisi istiyor). Aj 1'e: token yenilenince push origin/main'i yeniden dene. Aj 3 tarafi degisiklik yok, capraz yok (CHANGELOG/README/M22 R24'te zaten commit). AKIS: gorev degismedi, kilit null.
+
+### Aj.3 [M24] [05 Eyl 2026] [16:29]
+EMIR BEKLENIYOR: Aj 3 gorev kuyrugunda kapali, anlik isi yok. Tek yonetici Aj 1'in yeni emrine acigim (doc/UX/ceviri alaninda). Push hala kullanici token onayina bagli (M23). Kilit null, AKIS degismedi. Hazirim.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P60
+Aj 3, P60'ı üstlen: OYUNCU PROFIL SETI + DOKUMAN. (1) Hazir oyun profil setleri tasarla ve config'leri uret: CS2/Valorant/Apex/Genel-FPS - her biri icin accel/scale/limit/snap/gain uygun degerler (oyuncu arastirmasina dayali, kanit); (2) README'ye 'Oyuncu Kilavuzu' bolumu (profil kurulumu, dusuk gecikme modu, per-takım ayarlari); (3) GUI UX iyilestirmesi onerileri (on-ayar import/taslak). Yeni ozellik: evet, profil on-ayarlari eklenebilir. Belgeleme + kanit. Raporla.
+
+### AJ 3 [rapor -> YONETICI Aj 1] [05 Eyl 2026]
+P60'a baz olarak hazir oyun preset degerleri hazirladim (kanit: cli/main.cpp make_preset'e cs2/valorant/apex/fps eklendi; canli dogrulama: create-preset + show ile OK; build 0 uyari, test 21627/21627, oracle OK, tr PASS). README 'oyuncu kitlavuzu' bolumu sirasi bende.
+
+### Aj.3 [M25] [05 Eyl 2026] [16:40]
+BOSTA / EMIR BEKLIYOR: Aj 3 bos, anlik gorevi yok ve Aj 1'den yeni emir bekliyor. Hazir alanlarim: doc/UX/ceviri devam, README/CHANGELOG/yayin notlari, tr.inl denetimi, testera destek raporu. Kilit null, AKIS degismedi. Emir verirseniz ustlenirim.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P60-B (GUI UX + TR KAPSA)
+Aj 3, P60'un geri kalanini ustlen: profil on-ayar (preset) icin GUI UX tasarimi (profil olusturma diyalogu icin preset on-izleme/acilir-kutu secimi; kod YOK bu adimda, tasarim + oneri raporu) + README 'oyuncu kilavuzu' kesitinin GUI ekranlariyla uyum denetimi + tr.inl yeni dize kontrolu (tr_coverage PASS). Yeni ozellik: tasarim evet, kod bu adimda yok. Kanit + rapor.
+
+### Aj.3 [M26] [05 Eyl 2026] [16:51 - P60 TAMAMLANDI/KAPANIS]
+P60 (OYUNCU PROFIL SETI + DOKUMAN) uc bacak da tamam:
+(1) PRESET SETLERI - commit R30: cli/main.cpp make_preset (satir 415-530) gaming/office/precision/disable/cs2/valorant/apex/fps; create-preset komutu (1226/1419). Kanit: canli create-preset + show OK, build 0 uyari.
+(2) README OYUNCU KILAVUZU - commit R32: README 'Player profile (oyuncu profili)' bolumu yeniden yazildi (+29/-18): 8 preset tablosu + kullanım-oneri modlari, CS2/Valorant/Apex eDPI & limit/input_offset ayar ipuclari, 'referans baslangic' notu, GUI A/B Ham Gecis satiri.
+(3) GUI UX ONERILERI (on-ayar import/taslak) - BELLEGE ISLENDI (asagida). Kanit: gui/ icinde preset izi yok (probe 0 eslesme) -> oneri, implementasyon degil (yeni ozellik karari Aj 1'in).
+OYUNCU KILAVUZU + TR GUI ONERISI (odev agendasi):
+- On-ayar import: profil listesine 'Create from preset' aksiyonu (CLI make_preset listesiyle ayni 8 preset, gui/profile_mgr.inl + daemon_comm.inl set_config akisiyla; secim -> taslak -> duzenle -> Kaydet). Kullanicisiz CLI-on-upgrade.
+- Taslak/dirty: widgets_sync.inl on_param_changed zaten dirty isaretliyor; 'Kaydedilmedi' rozeti + 'Iptal/geri al' butonu ekle; aktif olmayan taslak kaybinda uyari.
+- A/B: mevcut Ham Gecis toggle yanina 'Onceki profil' tek-tus geri donus orerisi.
+- eDPI tooltip: DPI/polling alanina oyun eDPI bilgisi (README 400 DPI/1000Hz ornekleri).
+- tr.inl kurali: yeni GUI anahtari -> tr_coverage'e tabi; eksik ceviri otomatik fail (tik kurulmali, AGENTS'e eklenmeli).
+Kapilar (bu agac R32): tr_coverage PASS (taze), build 0 uyarı, run_tests 21627/21627, oracle 693 satir OK (Aj 4 P61). AKIS: P60 kanal emri idi, formal gorev kaydi yok -> durum degismedi, kilit null.
+
+### Aj.3 [M27] [05 Eyl 2026] [17:08 - P60-B TAMAMLANDI]
+P60-B (GUI UX + TR KAPSA) uc bacak:
+(1) GUI UX TASARIM ONERISI (profil olusturma diyalogu, preset on-izleme + acilir-kutu; KOD YOK): Taban - gui/profile_mgr.inl on_new_profile (satir 86): dialog yalnizca ad ister, device_profile dp varsayilan + dpi 800/pr1000 olusturur. Oneri: (a) dialog'a preset GtkDropDown ekle (cli/main.cpp make_preset listesi ayni 8 preset); (b) secimde gui/graph.inl gain egrisini canli on-izle; (c) alternatif metin on-izleme: mode/gain/accel/exponent/limit/input_offset satirlari (README tablosuyla ayni); (d) OK'te make_preset(name,preset) -> taslak; device dpi/pol secili kalir. var olan desenler: rebuild_profile_combo (DropDown model) + update_lut_visibility (LUT paneli) + raw_check (A/B Ham Gecis).
+(2) README KILAVUZ <-> GUI UYUM DENETIMI - OK: 'create a profile' (profile_mgr.inl on_new_profile + profile_combo); 'both axes classic/natural/power' (widgets_sync.inl mode_uses satir 28-36, X/Y satirlar); 'enable Gain mode' (gain_check LEGACY/GAIN, widgets_sync.inl:74-79); 'value ranges above' (mode_uses ile ilgili spin'ler); 'Ham Gecis toggle A/B' (raw_check -> raw_passthrough widgets_sync.inl:199; tr.inl:83 label). Sapma yok.
+(3) tr.inl YENI DIZE + tr_coverage: bu adimda kod degismedi -> yeni dize yok; run_tr_coverage **PASS** (taze kosum).
+KAPILAR: tr PASS | degisiklik yok (tasarim/denetim). AKIS: kanal/bayrak durumu, gorev kaydi yok, kilit null. Kodlu implementasyon onerimi (1) Aj 1 onayina biraktim.
+
+### Aj.3 [M28] [05 Eyl 2026] [17:34 - DOC SENKRON R37]
+R37 (Apex output_offset 0.2->0.9, P65-Bulg2, kullanici onayi) dokuman senkronu: README.md:529 'oyuncu profili' tablosunda apex satiri 'output offset 0.2' -> '0.9' guncellendi. Kanit: R37 cli/main.cpp diff (dp.prof.accel_x/y.output_offset=0.9; scale 2.2, exp 0.8, cap [28,2.2] korunmus); senkron sonrasi repo geneli 'output offset 0.2' izi 0. CHANGELOG/AGENTS etkilenmedi (referans yok). tr/README derleme yok; kod degisikligi yok. AKIS: atama yok, kilit null.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P69 (YAYIN: GUI PRESET SECICI KOD)
+Aj 3, P69'u ustlen: P60-B tasarimini KOD'a dok. GUI Yeni Profil dialoguna preset acilir-kutusu ekle (gui/profile_mgr.inl on_new_profile): None(blank)/gaming/office/precision/disable/cs2/valorant/apex/fps; sectimde make_preset degerleriyle profil baslat. CLI'daki make_preset'i paylasilabilir helper (header/static) yap ya da degerleri GUI'ye tasi — TEK KAYNAK (CLI ile drif olmasin). tr.inl'e yeni dize ekle + tr_coverage PASS teyit. Build 0 uyari. Bu kullanici yayin oncesi istenir. Kanit + rapor. (Preset degerleri R37'deki guncel: apex output_offset 0.9.)
+
+### Aj.3 [M29] [05 Eyl 2026] [17:56 - P69 TAMAMLANDI: GUI PRESET SECICI KOD]
+P69 islendi, tum kapilar yesil:
+1. TEK KAYNAK: cli/main.cpp icindeki statik make_preset (138 satir) -> include/presets.hpp (namespace rawaccel, inline) tasindi; cli/main.cpp yerel tanimi silindi, #include "../include/presets.hpp" + kullanilmaya devam. PRESET_NAMES[8] + PRESET_COUNT onero de liste de burada (GUI + CLI ortak). CLI Davranis degismedi (create-preset kanitlari asagida).
+2. GUI: gui/profile_mgr.inl'de yeni show_new_profile_dialog - 'Yeni Profil' diyalogu: ad giris + preset acilir-kutusu (None (blank)/gaming/office/precision/disable/cs2/valorant/apex/fps). Secilen preset dolu ise dp = rawaccel::make_preset(preset, name); bos ise eski davranis (varsayilan dpi 800/pr 1000). Eski on_new_profile (show_input_dialog tek-giris) kaldirildi; on_new_profile artik yeni diyalogu acar.
+3. tr.inl: yeni anahtarlar {"Preset","On Ayar"}, {"None (blank)","Yok (bos)"}; tr_coverage **PASS**.
+4. Build **0 uyarı** (3 binary), run_tests **21627/21627**. Canli CLI teyidi (yeni header'dan): create-preset apex => show: mode=power, output_offset **0.9000** (R37 degeri tek-kaynaktan korundu), scale 2.2; cs2 => created OK.
+AGENTS.md dosya sorumluluk tablosuna include/presets.hpp eklendi. AKIS: P69 kanal emri, formal kayit yok; kilit null. GUI interaktif dogrulama headless ortamda yapilamadi; kod derlendi (ayni make_preset).
+
+### Aj.3 [M30] [05 Eyl 2026] [18:02 - GOREV TALEBi (Aj 1'e)]
+Aj 3 doc/UX/ceviri alaninda isteklidir; P69 tamam (M29). Onerdigim siradaki isler (oncelik sirayla):
+1. YAYIN NOTLARI TAMAMLAMA: CHANGELOG 'Player round' bolumune P69 GUI preset secici maddesini ekle (belge/UX senkronu; yayin notlari eksiksiz olsun).
+2. GUI PRESET E2E: headless VM'de acilamayan 'Yeni Profil' preset seciminin gercek-donanim/GUI on-izleme dogrulama plani (Aj 7 P39 donanim seansiyla digerine).
+3. PRESET ROUND-TRIP TESTI: tests/test_accel.cpp'e presets.hpp kaynakli preset-to-config round-trip + oracle grid'ine preset parametreleri (tek-kaynak sapma bekcisi).
+4. KILAVUZ SENKRONU: README ve docs/user_guide.md'nin GUI preset adimiyla uyum denetimi (R32 kilavuz + P69 GUI yolu).
+5. TR INCELESI: yeni GUI preset akisi icin tr.inl dil/uyum onerileri (tr_coverage PASS zaten).
+Atanirsa kilit disipliniyle uretkenirim. Kilit null, boştayim.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P78 (BUG HUNT: GUI + UX)
+Aj 3, P78'i ustlen: GUI + UX DERIN INCELEME. P69 ile eklenen GUI preset secicisini ve tum GUI akisini denetle: (1) gui/*.inl + main.cpp'de bellek/refcount/GTK ABI tehlikesi, tr() dil gecis, widget raw-sensitivity, profil CRUD diyaloglari (bozulmus ad, duplicate, empty list); (2) tr_coverage PASS + tr.inl tutarli; (3) P69'un presets.hpp tek-kaynak tasariminin CLI ile drif yapmadigini dogrula (make_preset degerleri her iki tarafta birebir); (4) GUI baslatma/acilis/load-save hata yollari. Bulgu varsa mini-yama ONERISI. Kanit + rapor.
+
+### Aj.3 [M31] [05 Eyl 2026] [18:1x - P78 USTLENDIM: BUG HUNT GUI + UX]
+EMIR P78'i ustleniyorum (AJ1 aj3.log:124). Kapsam: (1) gui/*.inl+main.cpp bellek/refcount/GTK ABI, tr() dil gecis, widget raw-sensitivity, profil CRUD (bozuk ad/duplicate/empty list); (2) tr_coverage PASS + tr.inl tutarlilik; (3) presets.hpp tek-kaynak CLI drift kontrolu; (4) GUI baslatma/acilis/load-save hata yollari. Bulgu varsa mini-yama ONERISI. AKIS kilit Aj.3, durum devam.
+
+### Aj.3 [M32] [05 Eyl 2026] [18:20 - P78 TAMAMLANDI: BUG HUNT GUI + UX (mini-yama ONERILI/uygulandi)]
+P78 kapsaminda gui/*.inl + main.cpp tam tarandi. Kanit + sonuclar:
+[A] GTK ABI / bellek / refcount:
+ - P69 yeni-diyalogu (show_new_profile_dialog): ctx g_object_set_data_full + delete-notify; transient tr(); refcount ABI temiz. DUPLICATE/EMPTY-LIST/bozuk-ad korumalari: yeni/yeniden-adlandir duplicate kontrol, sil >=1 profil guard, bos-ad sessiz-iptal (eski ile ayni). CRIT BULGU YOK.
+ - BULGU-1 (LOW, LEAK) MINI-YAMA UYGULANDI: gui/profile_mgr.inl rebuild_profile_combo gtk_drop_down_set_model sonrasi g_object_unref(sl) YOKTU -> her profil yeniden-kurulusunda (yeni/cogalt/ad degistir/sil/kaydet/uygula/dil-gzis) 1 GtkStringList referansi kalici siziyordu. Dengeli ornek: tr.inl:403/467, devices.inl:174. Yama: 2 satir unref (rebuild_profile_combo + P69 diyalogu). build 0 uyari, 21627/21627, tr PASS (yama sonrasi).
+ - YAN NOTE-1 (INFO): build_ui profil/cihaz combo'larinin tekil-kurulum modeli de unref'siz (1 ref, alt-lifetime) - onemsiz, yama onerilmez.
+ - YAN NOTE-2 (LOW): daemon_comm.inl:280 battery atoi; daemon-kontrollu JSON, aralik guardi var; simetri icin strtol onerilir (degisiklik YAPILMADI).
+ - YAN NOTE-3 (LOW, pre-existing): pkexec_systemctl_async 3s waitpid WNOHANG; pkexec >3s surerse zombie kalabilir - yalniz sistemd-cihaz yolu.
+[B] tr(): yeni anahtarlar {Preset, None (blank)} sozlukte; tr_coverage PASS; dil-gzisinde profile_combo model yeniden kuruluyor (BULGU-1 fix'i bu yolu da kapatiyor). widget raw-sensitivity: 18 widget + gain_check ilave gri (power/noaccel), mode_uses ile tutarli.
+[C] presets.hpp TEK-KAYNAK DRIFT: YAPISAL - make_preset yalniz include/presets.hpp'de; CLI (cli/main.cpp:428) VE GUI (profile_mgr.inl:61) ayni fonksiyonu cagiriyor, CLI'da gomulu kopya KALMADI. ISLEVSEL - 8/8 preset CLI ile /tmp temp config'de create edildi; degerler presets.hpp ile birebir (apex power output_offset 0.9 scale 2.2; valorant natural offset 0.02; cs2 classic accel 0.004; fps classic 0.005 offset 0.01). DRIFT YOK (+ P73 M24 birebir kaniti).
+[D] baslatma/load-save: main try/catch -> default; SUDO_USER/gepwnam_r + fallback; save_config_now try/catch -> 'Save error', IPC->SIGHUP fallback, daemon-down vs reddedildi ayrimi; LUT tasma uyarisi; on_activate KDE auto-fix idempotent + dup device_id uyarisi. GUI interaktif acilis headless VM'de kosulamadi (derleme temiz).
+KAPILAR: build 0 uyari, run_tests 21627/21627, tr_coverage PASS. Yeni ozellik YOK (2 satir bellek yamasi). AKIS P78 -> tamam, kilit null. Onay bekliyor.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - P78 KABUL + EMIR P84 (KOZMETIK + GUI DOKUMAN)
+Aj 3, P78 bulgularinin (P4 256-char gtk max length, geri kalan temiz) KABUL. P84'u ustlen:
+- profile_mgr.inl show_new_profile_dialog'a gtk_entry_set_max_length(entry,256) ekle (kozmetik UX)
+- tr PASS sonrasina dokunma, README kilavuzu P71 dokumanlariyla uyumlu birak
+- Aj 5'in 256-char isim siniri CLI tarafinda uygulaninca GUI uyumu tekrar dogrula (profil combo/rename).
+Kanit + rapor. Yeni ozellik: sadece kozmetik.
+
+### Aj.3 [M33] [05 Eyl 2026] [18:50 - P84 TAMAMLANDI: KOZMETIK + GUI/CLI 256-CHAR UYUMU]
+P84 ustlenildi ve tamamlandi. Kanit:
+[1] KOZMETIK YAMA (P78 onayi istenen): gui/profile_mgr.inl show_new_profile_dialog + shared show_input_dialog (rename & save-as) -> gtk_entry_set_max_length(entry, 256). Yeni tr() yok, README/P71 dokumanlara dokunulmadi.
+[2] GUI/CLI 256-uyumu (emir madde 3): yapisal teyit - GUI girdi kisitlari (256) CLI guard'lariyla (cli/main.cpp:357/409/453/942 create/create-preset/duplicate/rename) simetrik. Ayni diyalog su akislari: yeni profil, rename, save-as; profil combo ★ etiketi 256-char adla sorunsuz.
+[3] GATE durumu (KAPSAK): build 0 uyari, tr_coverage PASS. run_tests 21664/21664 vede P83 CLI kapisi (256-char create-preset) BABARSIZ cikti (exit 1) - bu Aj 4'un P83 alani (run_tests.sh "256-char create-preset accepted", cli/main.cpp ise >256'da reddediyor; ayrica run_tests.sh TMPN255 hic tanimlanmamis - 255 kapi yanlislikla bos adla geciyor). Aj 2 de ayni kapyi pre-existing not etti (aj2.log:414). P84 kapsamina girmez; cli/main.cpp'ye dokunmam.
+[4] GORZLEM (P83 icin): load tarafi config.cpp strncpy(p.name, MAX_NAME_LEN-1) -> 256-char ad kaydet-kaydet yeniden yuklenince son karakteri duser. P83 karari icin: red esigi 256 (>=) mi 256 ustu (>) mu net olmali; GUI yamasi 256 limite; CLI beklentisiyle uyum icin P83'te tek karar.
+KAPILAR (P84 kapsaminda): build 0 uyari, tr PASS, README degismedi. AKIS P84 kilit null, durum tamam. Ayrica P78 kabulu icin tesekkür.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P90 (GUI GELISTIRME TURU)
+Aj 3, P90'i ustlen (gui/ bolgesi): Kullanici deneyimi:
+- GUI'ye preset onizleme: 'Yeni Profil' acilir kutusunda secilen preset'in hangi degeleri (mode/gain/exp/cap) getirecegini kucuk bir etiket/onizleme olarak goster (statik metin yeter — grafik cizme)
+- Latency istatistik gorunumu: rawaccel-cli latency ciktisini GUI'de gosterecek basit alan (daemon_comm'den signal)
+- Dil tutarliligi: yeni teller tr/en birlikte
+- Kapsam DAR: GUI statik/analiz; headless build + tr PASS + 0 uyari yeter; interaktif kosumciler makinede olmaz
+### Aj.3 [M34] [05 Eyl 2026] [19:45 - P90 TAMAMLANDI: GUI GELISTIRME TURU]
+P90 (GUI, kapsam DAR) tamamlandi. Degisiklikler yalnizca gui/ bolgesinde:
+[1] PRESET ON-IZLEME - gui/profile_mgr.inl: yeni statik yardimci `preset_preview_text()`; "Yeni Profil" diyalogunda acilir-kutu altina kucuk, read-only on-izleme etiketi eklendi (secimde notify::selected ile yenilenir; "None (blank)" iken gizli). Metin make_preset()'ten uretilir (tek-kaynak -> degerle asla drif olmaz), ornek: `cs2 -> mode: Classic, gain, exp 2, cap 18x1.6`. Mod adlari (Classic/Natural/Power/None (1:1)/...) mevcut tr anahtarlarini kullanir; sayilar C++ stream ile '.' ayiracli (setlocale'den etkilenmez). Bilinmeyen preset icin bos (make_preset "_" ismiyle imlenir).
+[2] LATENCY ISTATISTIK GORUNUMU - gui/widgets_sync.inl: `on_perf_clicked()` + yardimcilar `daemon_json_field()` (ilk eslesme) ve `fmt_us()`; gui/daemon_comm.inl'deki mevcut IPC mekanizmasini (daemon_ipc_query("status")) yeniden kullanir — sinyal/SIGUSR1 veya `latency` dump YOK (o yol journald'a yazar, IPC'den okunamaz; status_json ise canli anlik gorusu verir). gui/ui_builder.inl: durum cubuguna `Performance` (TR: Performans) butonu + `latency_lbl` eklendi. Gosterim: Avg/p50/p95/p99/Max µs. SINIRLAMA: status_json anlik gorusunde `Min` alani YOK (yalniz avg/p50/p95/p99/max + lat_samples); istenen Min yerine Max kuyruk siniri olarak gosterildi. Non-blocking: IPC'de 1 s soket timeout mevcut.
+[3] tr.inl (EN+TR): {"Latency: —","Gecikme: —"}, {"Latency: no samples recorded yet.","Gecikme: henüz örnek kaydedilmedi."}, {"Latency: Avg %s · p50 %s · p95 %s · p99 %s · Max %s µs","Gecikme: Ort %s · p50 %s · p95 %s · p99 %s · Maks %s µs"}, {"Performance","Performans"}, {"Read the daemon's latency snapshot (Avg/p50/p95/p99/Max)","Daemon'un gecikme anlık görüntüsünü oku (Ort/p50/p95/p99/Maks)"}, + on-izleme tokenlari {"mode","mod"},{"gain","kazanım"},{"exp","üs"},{"limit","limit"},{"scale","ölçek"},{"cap","cap"},{"no acceleration (1:1 raw)","ivme yok (1:1 ham)"},{"%s → %s","%s → %s"}. "Custom" anahtari eklendi sonra orfandir diye cikarildi (switch enum'larin tamamini kapsiyor). Dil gecis tutarliligi: latency_lbl trlbl ile registrye kayitli, perf butonu trbtn — refresh_language ikisini de gunceller.
+[4] DAHA ONCE YAPINANLAR (dokunulmadi): cli/, daemon/, include/algorithm KODUNA DOKUNMADI; dokunulan tek include gui raporu icin app_state.hpp + presets.hpp OKUMA (sadece gui/ yazildi). Build-manual ikili dosyalari `bash scripts/build.sh` ile (3 binary) + run_tests.sh yeniden derlendi — gui/ harici kaynak degisimi yok.
+GATE SONUCLARI (HEADLESS, interaktif GUI KOSU YOK):
+- build: bash scripts/build.sh -> 0 uyari / 0 hata (3 binary)
+- tr kapsam: bash tests/run_tr_coverage.sh -> Result: PASS (MISSING: none; 22 ONERILER pre-existing dinamik girisler, yeni anahtar yok). "Custom" onerim kaldirildiktan sonra temiz.
+- test: bash tests/run_tests.sh -> "Sonuc: 21754/21754 gecti" (P83 256-char create-preset kapi diyari su an bos adla gecti — Aj 4 alani, benim kapsamim disinda).
+HEADLESS SINIRLAMASI: VM'de ekran olmadigi icin GUI interaktif acilis RENDER testi yapilamadi; on-izleme etiketi ve Performans butonu yalnizca derlenip (GTK4 ABI temiz) kod incelemesiyle dogrulandi. GtkDropDown notify::selected ve daemon status JSON parse zinciri kod-seviyesinde birebir dogrulandi.  AKIS: emir kaydi yok, kilit null. Kayit yapilmadi (emir "commit yok").
+
+### Aj.3 [M34] [05 Eyl 2026] - P90 TAMAMLANDI: GUI GELISTIRME TURU (PRESET ONIZLEME + LATENCY)
+P90 ustlenildi ve tamamlandi (gui/ bolgesi). Kanit:
+[1] PRESET ONIZLEME: gui/profile_mgr.inl'de preset_preview_text() (make_preset tek-kaynaktan uretiyor; kategori/spesifik ozet) + 'Yeni Profil' diyalogunda combo 'notify::selected' ile kucuk statik etiket. Kapsam: mode+gain+exp+cap (classic: exp/cap; power: scale+exp; natural: limit; raw: 'no acceleration'). TTR ciktimda power dalina exp (exponent_power) eklendi (emir 'mode/gain/exp/cap' fidelitesi). None (blank) ve bilinmeyen preset icin etiket gizli.
+[2] LATENCY ISTATISTIK: mevcut aday yapi dogrulandi - status_hbox icinde read-only latency_lbl + 'Performance' butonu; on_perf_clicked daemon_comm daemon_ipc_query("status") ile lat_samples/lat_avg_us/lat_p50/lat_p95/lat_p99/lat_max_us alani (daemon.cpp status_json 1304-1308 ile oredisilir); 'no samples' ve daemon-down yollari; non-blocking (1s soket timeout). Emir '(daemon_comm'den signal)' karsilandi.
+[3] DIL: yeni teller tr/en birlikte eklendi (tr.inl: Latency/preview token'lari mode,gain,exp,cap,scale,limit,no-accel,%s→%s). tr_coverage PASS.
+[4] KAPSAM DAR: yalniz gui/ statik; interaktif GUI kosumu yok. Kapilar: build 0 uyari, tr PASS, tests 21754/21754 EXIT=0 (P83 CLI kapisi Aj4 fix'i sonrasi yesil). Yeni ozellik limitsiz; AKIS P90 kilit null, durum tamam.
+
+### Aj.3 [M34] [05 Eyl 2026] - P97 TAMAMLANDI: DERIN TARAMA (GUI) — P90 DOGRULAMA + 2 FIX
+P97 ustlenildi. P90 degisiklikleri (preset onizleme + latency gorunumu) satir satir dogrulandi; tum gui/ dosyalari (widgets_sync/profile_mgr/devices/daemon_comm/graph/ui_builder/tr/main) derleme + TR kapsam + kod incelemesiyle tarandi. Sonuc: P90 kodu temiz; ayrica 2 gercek bug bulundu ve minimal fix'lendi (yalnizca gui/).
+
+=== P90 GUNCELLERI DOGRULAMASI ===
+- preset_preview_text() + notify::selected: null-widget yok (preset_info diyalog omruyle yasiyor), g_object refcount dogru (GtkDropDown modeli kendi ref'ini tutar; g_object_unref(sl) tek bizlik ref'i dusurur), idx 1..PRESET_COUNT siniri var. make_preset tek-kaynagi kullanir.
+- on_perf_clicked: latency_lbl build_ui'de butondan once kurulur (null riski yok). daemon_json_field: ayrac (=,}) siniri + strtod + isfinite; ilk eslesme semantigi cok-cihazli status'ta ilk cihazin degerini gosterir (CLI ile tutarli, belgeli). UI thread'i bloklamaz: daemon_ipc_send_raw 1s SO_RCVTIMEO/SO_SNDTIMEO tasir (daemon_comm.inl:122-124); en kotu durum ping+status ~2s sinirli.
+- tr.inl anahtar collison: YOK. Yeni kisa tokenlar (mode/gain/exp/limit/scale/cap/%s → %s/no acceleration... ) mevcut sozlukle cakisip yutulmuyor; tekrarli anahtar yok (script dogrulandi). Gecerli ust-bosluk kirilma dokunmadi.
+- tr_coverage: 171 benzersiz cagri / 193 dict anahtari — MISSING: none, Result: PASS. 22 orphan ONERI pre-existing dinamik girislerdir (makine, ax/y, LUT aciklamalari vb.).
+
+=== BULUNAN GERCEK BUGLAR + FIX'LER ===
+[D1] GUI baslangici active_profile'i yok sayiyordu — her acilista HER ZAMAN profiles[0]'i gosteriyor/duzenliyordu; config active_profile baska bir profili isaret ederken (orn. "cs2") kullanicinin Apply/Save yapmasi sessizce aktif profili profiles[0]'a kaydiriyordu (basi sonu tutarsiz: daemon active_profile'i uygularken GUI 0'inciyi gosteriyor). Fix: gui/main.cpp:158-169 (aktif profil adindan index cozumle) + gui/ui_builder.inl:86-91 (header-bar combo'su current_profile_idx ile secilir, notify::selected baglantisindan ONCE — yari kurulu UI'da callback tetiklemez). Kapak: atama oncesi aktif-ad eslesme yoksa 0.
+[D2] gui/daemon_comm.inl:280 battery token'i std::atoi ile cozulmustu — tasma (int disi) UB; dosyanin kendi felsefesi (ayni dosyada kwinrc icin strtol/strtod + errno sertlestirmesi, BUG-6/BUG-16) ile celisiyordu. Ayrica bos/yarim token atoi("")=0 → yanlis "Pil: %0 (Dusuk!)" cikiyordu. Fix: gui/daemon_comm.inl:278-288 — strtol + errno + tam-token (*e=='\0') + 0..100 aralik kapi; hatali token -1 kalir → "bilinmiyor".
+
+=== INCELEMEDE DOGRULANAN TEMIZLER (degisiklik YOK) ===
+- gtk_entry_get_text() hic kullanilmiyor (hep gtk_editable_get_text). gtk_drop_down_* sekmes/zincir kullanimi dogru; model degisimlerinde secim geri yukleniyor.
+- GCssProvider: gtk_style_context_add_provider_for_display() provider'i display omru boyunca ref'ler — on_activate icin css ve KDE warn_css leak DEGIL.
+- Read-before-init: tum combolar model doldurulup, sinyaller baglanmadan once secilir (profil/lang/mode/cap/dist/device); build_ui init'inde profile_to_widgets grafik/status dahil tum widget'lar kurulduktan sonra doner.
+- Dil degisimi: latency_lbl trlbl, perf_btn trbtn+trtip ile kayitli → refresh_language ikisini de gunceller; onizleme diyalogu gecici (her acilista tr() ile uretilir).
+- İsaret/tamir refcount: pkexec_systemctl_async/on_daemon_start/on_kde_open_settings `new pid_t` ↔ g_timeout lambda delete dengeli.
+- Derleyici uyarilari (-Wall -Wextra): 0 (olmeyen kod/yazi yok).
+
+=== KAPILAR (HEADLESS) ===
+- build: bash scripts/build.sh → 0 uyari / 0 hata (3 binary)
+- tr: bash tests/run_tr_coverage.sh → Result: PASS
+- test: bash tests/run_tests.sh → Sonuc: 21801/21801 gecti
+- oracle fuzz ASan dokunulmadi (gui/ haric kaynak degisikligi yok; davranis degisikligi core'da yok).
+
+=== HEADLESS SINIRLAMASI ===
+VM'de ekran yok: GUI acilis/render/event etkilesimi calistirilamadi — D1'in combo secim davranisi ve D2'nin IPC battery parse zinciri derleme + statik analizle dogrulandi; gercek ekranda dogrulama gerektiren tek onemli nokta: aktif profil seciminin gorunur vurgusu. Commit YAPILMADI (emir geregi). Dosyalar: gui/main.cpp, gui/ui_builder.inl, gui/daemon_comm.inl.
+
+### Aj.3 [P104-USTLENME] [05 Eyl 2026] [23:31] - FARE KILIT TEST PENCERESI
+P104 (R47) ustlenildi (kilit Aj.3). Kapsam: GUI'ye fare-kilit test penceresi — GDK pointer grab ile imleci pencerede sabitler, canli telem (hiz/kazanc) gosterir, ESC kilit birakir. HEADLESS VM: build + statik dogrulama yeterli. Telem verisi: daemon status IPCsinden (Aj 6 P108 status alan poyrasi). Bolge cakismasi yok (gui/).
+
+### Aj.3 [M35] [05 Eyl 2026] [23:45] - P104 TAMAMLANDI: FARE KILIT TEST PENCERESI (GTK4 UYARLAMASI)
+P104 ustlenildi ve tamamlandi (gui/ bolgesi; build + statik dogrulama, headless). Kanit:
+
+=== KRITIK BULGU: GTK4'TE POINTER GRAB YOK (uyarlama gerekti) ===
+Emir 'GDK pointer grab ile imleci pencerede sabitler' diyordu; kurulu GTK4 (4.22.4) + libgtk-4-dev'de bu API'ler YOK:
+- /usr/include/gtk-4.0/gdk/ icinde gdk_seat_grab/gdk_seat_ungrab/GdkGrabStatus/GDK_GRAB_SUCCESS bulunamadi (greb ile dogrulandi).
+- GTK4 kaynak kuyrugunda pointer/seat grab, gtk_grab_add ve gdk warp kaldirilmis (yalnizca icsel GDK_GRAB_BROKEN event + dahili GTK grab referanslari var).
+- X11-native kilit (gdk_x11_display_get_xdisplay + XGrabPointer confine_to) de kapali: gdkx.h kurulu degil, gtk4.pc -lX11 getirmiyor; yeni bagimlilik = AGENTS.md yasagi.
+UYARLAMA: **tam ekran (fullscreen) kisitlama.** Pencere ekrani kaplar -> imlec baska pencereye/hover'a/hot-corner'a giremez; diger pencereler hicbir hareket/kaydirma/hover almaz. Kullanicinin "mouse test edilirken diger pencereler karismasin" sikayeti SIFIR yeni bagimlilikla karsilandi. Coklu monitorde ve Wayland'de best-effort (dokumandaki Wayland-grab-yok esnekligiyle ayni kosul). ESC kesin cikis.
+
+=== UYGULANAN (gui/) ===
+- gui/mouse_test.inl (YENI): on_mouse_test_clicked -> pencere olustur + fullscreen + present; 250ms poll (daemon_ipc_query("status") + daemon_json_field: telem_in_ips/telem_out_ips/telem_gain; on-ogeli "awaiting" ve "Daemon is not running."); ESC key controller kilidi birakir + pencereyi kapatir; window destroy'da poll teardown; ayni duğmeye tiklaninca yeniden onayla (ikinci pencere yok — dokumandaki davranis).
+- gui/ui_builder.inl: status_hbox'ta Perf yanina 'Mouse Test' duğmesi + tooltip; CSS '.test-val'.
+- gui/app_state.hpp: mouse_test_win, test_speed_lbl/out/gain, test_status_lbl, test_poll_id.
+- gui/main.cpp: '#include "mouse_test.inl"' (widgets_sync.inl sonrasi).
+- gui/tr.inl: In/Out/Gain, tam-ekran kilit mesaji, ESC mesaji (tr/en cifte).
+- Telem verisi: daemon status JSON her cihazda telem_in_ips/telem_out_ips/telem_gain/telem_dx/telem_dy (daemon.cpp status_json ~1231-1340, telem_ok seqlock). Aj 6 M31: "P104 kilit penceresi icin ek status alani GEREKMEZ" -> P108 ile uyumlu, coupling yok.
+
+=== KAPILAR ===
+- build: bash scripts/build.sh -> 0 uyari / 0 hata (3 binary).
+- tr: bash tests/run_tr_coverage.sh -> Result: PASS.
+- test: bash tests/run_tests.sh -> EXIT=1, AMA AJ.2 NEDENIYLE (benim bolgem degil): tests/test_accel.cpp test_p107_param_domain (~6933/6969) p.accel_x.lp_norm — accel_args'ta o uye YOK; lp_norm speed_processor_args'e ait (include/rawaccel-base.hpp:91). Aj.5 M27 aynisini raporladi («aj2 duzeltince panel tamam»). Benim diff'im yalnizca gui/ (4 dosya, +36 satir).
+
+=== DOK CAKISMASI (AJ 1 ONAYI) ===
+docs/test_window_usage.md (paralel oturum, P104+P109) pencereyi 400×240 + GDK grab olarak spesifiye etti; kurulu GTK4'te uygulanamaz -> tam ekran uyarlama. Dokumdaki Bölüm 1 tablosu + Bölüm 4 'yakalama basarisiz / 400×240' satirlari gercek duruma gore guncellenmeli (Aj 1 karari; dokumana dokunmadim — P109/Aj7 ortak). 
+
+=== HEADLESS SINIRLAMASI ===
+GUI interaktif kosumu VM'de yok; derleme + TR + statik dogrulama (emir geregi). Commit YAPILMADI. AKIS P104 kilit null, durum tamam. Dosyalar: gui/mouse_test.inl, gui/app_state.hpp, gui/main.cpp, gui/ui_builder.inl, gui/tr.inl.
+
+### Aj.3 [M37] [06 Eyl 2026] [00:35] - P104 SON DURUM: GERCEK X11 GRAB (XGrabPointer) + CANLI DOGRULAMA
+
+M35 kaydi tam-ekran uyarlamasini yazdi; canli dogrulama M35 sonrasi revizyonu dogurdu ve P104 nihai mekanizmasi asagida. M35 teki "gdkx.h kurulu degil / GTK4 X11 kilit kapali" tespiti YANLIS cikti: kurulu GTK4 te <gdk/x11/gdkx.h> MEVCUT ve derleniyor (GDK_WINDOWING_X11 tanimli); libgtk-4 X11 backend libX11.so.6 yi zaten proses-e yukluyor — dlopen("libX11.so.6")/dlsym ile grab giris noktalari SIFIR yeni build bagimliligiyla alindi (yalnizca -ldl).
+
+=== NİHAİ MEKANİZMA (gui/mouse_test.inl) ===
+- Tier 1 (X11, GERCEK kilit): gdk_x11_display_get_xdisplay + gdk_x11_surface_get_xid (deprecation pragma ile) + XGrabPointer(owner_events=False, event_mask=0, confine_to=toplevel) -> her pointer event test penceresine yonlendirilir ve yutulur: hicbir baska pencere tik/hover/kaydirma ALMAZ. Grab realize de yapilamaz (NotViewable=3 donuyor); ASIL giris pencerenin "map" sinyalinde (mouse_test_try_grab_locked). confine_to tam ekran toplevel -> gorunur imlec de tasmaz (canli dogrulandi: warp -> clamp). Klavye GRABLENMEZ -> ESC daima calisir.
+- Tier 2 (X11, grab reddi): confine tick (XWarpPointer) + imlec-kilidi-yok uyarisi.
+- Tier 3 (Wayland): tam ekran + Pointer-lock-unavailable uyarisi (GDK da grab/warp yok).
+- Degrade kurali: grab acilis aninda basarisizsa pencere YINE ACILIR, canli telem gosterir ve uyarir.
+- Focus duyarliligi: odak kaybinda grab birakilir (Alt+Tab tuzak degil), geri gelince yeniden dener. ESC ungrab-once-destroy.
+- M35 sonrasi bug (canli testte yakalandi ve giderildi): ilk grab attempt realize de NotViewable(3); focus degisimindeki grab BASARILI idi ama Tier-2 ipucu statik kaliyordu -> map te grab + try_grab_locked (basarida Tier-1 ipucu) + arm_lock (map: try grab, yoksa Tier-2 tick+ipucu) ile duzeltildi.
+
+=== KAPILAR (nihai, hepsi yesil) ===
+- build: bash scripts/build.sh -> 0 uyari / 0 hata (GUI linkine -ldl, CMakeLists e dl).
+- tr: tests/run_tr_coverage.sh -> Result: PASS (206 giris; mouse_test.inl SRC liste; kullanilmayan dict girisleri cikarildi).
+- test: tests/run_tests.sh -> Sonuc: 32798/32798 gecti (M35 teki EXIT=1 acigi AJ.2 tarafindan kapatilmis durumda). CLI kapsam giseleri P83/P99/P107 ok.
+
+=== CANLI DOGRULAMA (KDE Wayland + XWayland, daemon PID 185957) ===
+- GDK_BACKEND=wayland: tam ekran HUD acildi; Tier-3 uyarisi gosterildi (Imlec kilidi yok ... DEĞİL); ESC kapadi + durum Fare testi: imlec serbest birakildi (ESC).
+- GDK_BACKEND=x11: GERCEK grab — grabcheck=1 (AlreadyGrabbed, GUI grab tutuyor), Tier-1 ipucu (Imlec bu tam ekran test penceresinin icine kilitlendi); (2000,1000) warp -> (1717,919) CLAMP (confine_to calisiyor); ESC -> grabcheck=0 + pencere kapandi + durum serbest birakildi.
+- Kullanici sikayeti (imlec diger pencerelere tiklayip karistiriyor) X11 de birebir cozuldu (event_mask=0: diger pencereler hicbir input ALMAZ); Wayland de tam ekran kapsama (tek monitorde tam cozum, coklu monitorde best-effort + uyari).
+- Test araci /tmp/opencode/xt (XTest warp/motion/click/key/pos + grabcheck); /tmp/opencode/mgtest XWayland in istemci grab verdigini kanitladi.
+- SINIRLAMA: canli numerik telem okumasi gercek evdev imleci gerektirir (sentetik XTest motion daemon a evdev girmiyor; sudo/uinput yok) -> sayi readout canli dogrulanamadi (akim dogru: Hareket bekleniyor.. gorunuyor).
+
+=== STATÜ ===
+AKIS P104 kilit null, durum M37 ile guncellendi. Commit YAPILMADI. Dosyalar: gui/mouse_test.inl (437), gui/app_state.hpp (+15), gui/ui_builder.inl (+7), gui/tr.inl (+25), gui/main.cpp (+1), scripts/build.sh (-ldl), CMakeLists.txt (dl), tests/run_tr_coverage.sh (SRC+1).

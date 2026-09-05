@@ -13,8 +13,11 @@ The canonical version string lives in `include/rawaccel-base.hpp`
   `apex`, `fps` (plus existing `gaming`/`office`/`precision`/`disable`) map onto
   the acceleration engine with per-game parameter choices; a `.tar`/file import
   arity fix (`import` with a single file) closes a CRIT round-trip gap (P65).
-- **Default profile is 1:1 raw passthrough** (no acceleration by default — user
-  decision, R34); acceleration is opt-in per profile.
+- **Default profile is acceleration-free, not raw passthrough** (`noaccel` mode —
+  no acceleration by default, user decision, R34); acceleration is opt-in per
+  profile. `raw_passthrough` stays `false` and output is normalized to 1000 DPI,
+  so the fresh default is **not** a literal 1:1 bypass — exact raw 1:1 is the
+  `disable` preset (`raw_passthrough=true`; R46/P101 correction).
 - **Apex preset tuning** (`output_offset 0.2 → 0.9`): fixes the sub-1:1 "muddy"
   feel on the power curve while keeping the fast 180° flick ramp (R37, user
   approved).
@@ -23,7 +26,7 @@ The canonical version string lives in `include/rawaccel-base.hpp`
 - **Oracle esport grid** (`tests/oracle/`): the speed sweep now covers the
   tournament band `2000 / 3000 / 4000` ips between the previously sampled
   `1000/5000`; the four game presets are mirrored as dedicated cases. The
-  differential oracle now compares **768 gain rows** (31 documented intentional
+  differential oracle now compares **915 gain rows** (31 documented intentional
   deviations) vs the official reference.
 - **Virtmouse live harness** (`scripts/virtmouse-game.c`, R35/P64): injects
   synthetic game-speed mouse motion (uinput virtual mouse) for live end-to-end
@@ -94,7 +97,7 @@ The canonical version string lives in `include/rawaccel-base.hpp`
 
 ### Tooling / QA / packaging
 - Differential oracle (`tests/oracle/run_oracle.sh`) vs the vendored official
-  RawAccel reference: 768 gain rows — 737 matched at REL 1e-9 + 31 documented
+  RawAccel reference: 915 gain rows — 884 matched at REL 1e-9 + 31 documented
   intentional deviations (expanded with the R35 esport grid); wired into CI
   (`ci.yml`) so accel-math drift fails the build.
 - Translation coverage suite (`tests/run_tr_coverage.sh`): every translatable

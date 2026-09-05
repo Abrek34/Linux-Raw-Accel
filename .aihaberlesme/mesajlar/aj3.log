@@ -268,3 +268,106 @@ M35 kaydi tam-ekran uyarlamasini yazdi; canli dogrulama M35 sonrasi revizyonu do
 
 === STATÜ ===
 AKIS P104 kilit null, durum M37 ile guncellendi. Commit YAPILMADI. Dosyalar: gui/mouse_test.inl (437), gui/app_state.hpp (+15), gui/ui_builder.inl (+7), gui/tr.inl (+25), gui/main.cpp (+1), scripts/build.sh (-ldl), CMakeLists.txt (dl), tests/run_tr_coverage.sh (SRC+1).
+
+### Aj 3 [06 Eyl] P113 BUG-RAY PORTER
+Bolge: gui/ (main.cpp, app_state.hpp, ui_builder.inl, widgets_sync.inl, profile_mgr.inl, daemon_comm.inl, tr.inl, mouse_test.inl). FAZ 1: yalnizca bul + raporla, kod degisikligi YOK.
+Kanitlar: bash scripts/build.sh -> 0 uyari / 0 hata; bash tests/run_tr_coverage.sh -> Result: PASS (MISSING yok); gui'ye ozgu test yok (tests/run_tests.sh accel kapsami). Headless: statik + derleme + sadece okunan dosyalar.
+
+[BUG-01] Ikinci GUI ornegi ayni surecte ikinci pencere acar ve ortak AppState'i clobber'lar
+- Kaynak: gui/main.cpp:172-176 (gtk_application_new "io.github.rawaccel", G_APPLICATION_DEFAULT_FLAGS) + gui/ui_builder.inl:70,821 (build_ui; on_activate 1250-1302)
+- Sorun: GtkApplication tek-instance D-Bus sahipliginde ikinci baslatma birincinin "activate" sinyalini tetikler -> on_activate() yine cagrilir -> build_ui() AYNI AppState* uzerinde ikinci kez kosar: S->window/status_bar/profile_combo/graph_area/inotify_fd SIFIRLANDAN ustune yazilir; S->daemon_poll_id 2. timer ile ezilir (ilk 3s timer leak eder, window destroy'da ayni id iki kez g_source_remove edilir -> GTK uyarisi), inotify fd1 leak (wd1 ayni kalir).
+- Etki: iki pencere ayni durumu paylasir; ilk pencerenin widget'lari guncellenmez; kapanista timer/source karisikligi; ikinci GUI calistirmak cikis dizilimini bozar.
+- Onerilen duzeltme (genel): on_activate/build_ui icinde "S->window zaten var mi?" guard'i (varsa gtk_window_present + return), ya da G_APPLICATION_NON_UNIQUE + ayni config dosyasini ikincinin uzerine yazmayi onleyen kilit (flock/lockfile).
+
+[BUG-02] Fare Testi telemetrisi "aktif profilin cihazi"na degil, JSON'da ILK gecen telem alanina bakar
+- Kaynak: gui/mouse_test.inl:179-192 + gui/widgets_sync.inl:641-654 (daemon_json_field, "ilk gececek substring" mantigi) vs docs/test_window_usage.md:88-91 ("pencere daemon'un o an aktif profilini canli okur")
+- Sorun: status.json devices[] dizisinde birden cok fare varken device[0] hic telem uretmediyse (ham/grab yok/idle) ama aktif profilin farkli bir cihazi hareket ettiyse, ilk "telem_in_ips" gecmedigi icin in=-1 -> HUD surekli "Hareket bekleniyor…" gosterir. Ayni ilk-gecer mantigi latency/battery okuyucularinda da (widgets_sync.inl:675-690, daemon_comm.inl:269-289) gecerli.
+- Etki: coklu fare kurulumunda canli okuyucu yanlis/eylemsiz kalir; dokumanin verilen davranis saglanamaz.
+- Onerilen duzeltme (genel): devices dizisini gercek bir JSON parser'la (repo'da vendored nlohmann) cozup aktif profilin device_id'siyle eslesen cihazin telem/lat/battery'sini secmek; substring taramasi yerine yapisal okuma.
+
+[BUG-03] Dokumante-ile-kod celiskisi: "gercek grab yok / basarisizlik yolu yok" iddiasi R47 kodu ile zit
+- Kaynak: docs/test_window_usage.md:23-27,149-151 (GTK4 grab API'si yok, tam ekran HUD emulasyonu, "P104'te yakalama basarisiz diye bir yol yoktur") vs gui/mouse_test.inl:42-107,217-249,284-336 (GERCEK X11 XGrabPointer Tier1 + XWarpPointer confine Tier2 + "Pointer grab failed"/"Pointer lock unavailable" uyari metinleri) ve app_state.hpp:104-117 (Tier gercek grab aciklarken)
+- Sorun: dokuman R47 oncesi (P104 final mekanizmasi dokumana yansimamis). Ayrica dokuman coklu monitorde "imlec monitorden diger monitore tasabilir" (satir 62-64) derken Tier-1 grab (confine_to=toplevel) X11'de monitoe-otesi clamp/hard-lock yapar — kullanici beklentisi kodla celisir.
+- Etki: hata ayiklama/troubleshooting sirasinda kullanici "kilit yok" diye davranir; Wayland uyarisinin gercek bir tier oldugu dokumanda yok.
+- Onerilen duzeltme (genel): test_window_usage.md Bölüm 1/2/4'u Tier-1/2/3 (X11 gercek grab, confine fallback, Wayland tam-ekran-only) ile guncellemek; Tier-1 X11'de multi-monitor lock'unun gercek oldugunu belirtmek.
+
+[BUG-04] Raw passthrough'ta telemetri eskir: HUD eski hiz/kazanc gosterir (dokuman 0.00/"Hareket bekleniyor" vaat eder)
+- Kaynak: kok daemon/daemon.cpp:967-978 (raw path telem_samples counter bump'lar ama telem_speed_ips/out/gain'i TEMIZLEMEZ — onceki accel event'inden stale kalir); GUI gui/mouse_test.inl:180-192 bu alanlari oldugu gibi basar; docs/test_window_usage.md:107,184 "disable ile Kazanc 0.00 / Hareket bekleniyor" der
+- Sorun: profil once accel modda hareket ettirilip sonra raw_passthrough'e gecirilirse, flush_motion raw yolu counter'i artirip status_json'un telem_ok=true uretmesine yol acar; alanlar eski degerlerde kalir -> HUD yanlis/eski kazanc gosterir.
+- Etki: raw profilde test eden kullanici yaniltici sayi gorur; kabul protokolundeki "0.00 veya Hareket bekleniyor" kriteri ihlal edilir.
+- Onerilen duzeltme (genel): daemon raw path'inde telem_speed_ips/out/gain'e 0 yazmak (ve daha dogrusu status_json'da raw_passthrough ise telem_ok=false yaymak); GUI tarafinda da doca uygun "raw profilde okuyucu 0.00" branching'i.
+
+[BUG-05] 250 ms poll + 3s status poll, GTK ana thread'inde engelleyici soket I/O yapar (tick basina 2x1s takilma riski)
+- Kaynak: gui/mouse_test.inl:171-193 (her tick: daemon_running() -> ping + daemon_ipc_query("status"), ikisi de daemon_comm.inl:117-160 SO_RCVTIMEO 1s) + widgets_sync... aslinda daemon_comm.inl:251-269 update_daemon_status ayni kuyrugu 3 saniyede bir ve dil-dir dilimi (tr.inl:533) + save/apply'de (main.cpp:41-67) cagirir
+- Sorun: daemon socket'i canli ama daemon taskli + push_config fsync donuyor/asi ise her ping/status recv 1s -> 250 ms tick'te GUI 2sn'ye kadar donar; test penceresinin kendisi de dahil. Daemon calismiyorsa connect hizli ECONNREFUSED doner (block yok) — risk yalnizca "socket var ama daemon yanit vermiyor" durumunda.
+- Etki: canli test sirasinda GUI donmasi; yapisal olarak ana-thread IPC.
+- Onerilen duzeltme (genel): IPC'yi yardimci thread / g_io_channel async'e tasimak; minimum: mouse_test_poll'de gereksiz ikinci sorgu (ping) ile status sorgusunu tek kuyruga indirmek (zaten status okuyoruz, ping tekrari israf).
+
+[BUG-06] daemon_ipc_send_raw yaniti 65536 baytta kirpar ve timeout'u "yanitin sonu" sanar; push dogrulamasi substring
+- Kaynak: gui/daemon_comm.inl:147-156 (resp cap + ortada break + close), 173-176 (daemon_ipc_push_config -> find("\"ok\":true"), 631-654 (daemon_json_field substring)
+- Sorun: buyuk status/set_config echo Json'u (coklu cihaz+LUT) 64KB'i asarsa GUI yaniti ortada keser ve kapatir (daemon sonraki send'de EPIPE alir, tolere); kesik JSON'da sona yakin alanlar (battery/telem) okunamaz. push dogrulamasi string eslesmesi — `.find("\"ok\":true")` yanit basindaki ok:true prefix'i sayesinde su an dogru ama kisisel profil adi gibi config echo alanlarinda yanlis pozitif riski tasir (zorlayici ama mumkun).
+- Etki: buyuk configlerde yanlis "esaun" / eksik telemetri; parser bagisikligi dusuk.
+- Onerilen duzeltme (genel): vendored nlohmann ile parse + akilli okuma (akut uzunluk-on-prefix veya yaniti tup rakete kadar oku); ok:true yerine ko ini ok:true dongisin parse etmek.
+
+[BUG-07] Stale PID dosyasi + PID reuse -> GUI'yı calisiyor sanar ve YANLIS prosese sinyal gonderebilir
+- Kaynak: gui/daemon_comm.inl:178-241 (read_daemon_pid: pid>0 && kill(pid,0)==0 -> kabul; comm dogrulamasi YOK) + 318-339 (daemon_send_signal kill(pid))
+- Sorun: /run|/tmp rawaccel.pid eski ve o PID araya baska bir proses tarafindan yeniden kullanildiysa daemon_running() true doner; "Stop"/Apply-SIGHUP fallback o yabanci prosese SIGTERM/SIGHUP gonderir. Ayrica /proc comm taramasi dogru ama PID dosyasi yolu bu dogrulamayi atlar.
+- Etki: yanlis "Daemon calisiyor" durumu; sinyal hedef sapması (hafif ama guvenlik/istem-icerisi).
+- Onerilen duzeltme (genel): kill(pid,0) kabulunden once /proc/<pid>/comm == "rawaccel-daemon" dogrulamak; eski pid dosyasini silmek.
+
+[BUG-08] Duplicate profile adi isimsizlik denetimi yapmaz
+- Kaynak: gui/profile_mgr.inl:332-341 (on_duplicate_profile: copy.name += " (copy)" + push, ayni isimli ikinci profil kontrol edilmiyor) vs ayni dosyada yeni/rename denetimleri (129-130, 265-269)
+- Sorun: "X" mevcutsa "X (copy)" create edildi; "X (copy)" zaten varsa ikinci "X (copy)" olusur -> profillerde ayni isimli iki girdi (imlec yesil ✓ ile belirsiz), daemon active_profile isimle eslestirmede ilkini/secimini karisik davranir.
+- Etki: profil listesi/aktif profil kaybı senaryosu; karsilastirma "A profile with that name already exists" engelini duplikat akisinda baypas eder.
+- Onerilen duzeltme (genel): duplikat adini tekil bulana kadar "#N (copy)" eklemek veya yeni/rename ile ayni isimlilik check'i koymak.
+
+[BUG-09] Acikken Fare Testi HUD'u dil degistirmede kayitli degil -> eski dilde kalir
+- Kaynak: gui/mouse_test.inl:387-409 (etiketler tr() ile olusturulup g_tr_registry'e KAYDEDILMIYOR) vs gui/tr.inl:37-39 + 488-541 (refresh_language yalnizca kayitli widget'lari cevirir)
+- Sorun: HUD acikken header'dan dil tr<->en degistirilirse HUD basligi/ipucu/okuma etiketleri olusturma aninin diliyle kalir; pencere kapatilip acilana kadar cevrilmez.
+- Etki: i18n tutarliligi bozulur (HUD uzun yasamli/fullscreen olabiliyor).
+- Onerilen duzeltme (genel): test etiketlerini kayitliyken muamele etmek (tr_register) ya da refresh_language icinde acik HUD'un string'lerini yeniden tr() ile set etmek.
+
+[BUG-10] update_daemon_status daemon kapaliyken de battery etiketini "unknown ..." gorunur yapar + 3s status cagrisi baslangicta/dil degisiminde tekrar
+- Kaynak: gui/daemon_comm.inl:251-308 (daemon_running() false iken dahi battery query + gorunur label; tr.inl:533 refresh_language -> update_daemon_status)
+- Sorun: daemon durmusken GUI alt cubugunda "Pil: bilinmiyor" surekli gosterilir; her dil degisimi / baslangicta gereksiz extra IPC kuyrugu (BUG-05 ile etkilesir).
+- Etki: gorsel gurultu + gereksiz ana-thread IPC.
+- Onerilen duzeltme (genel): update_daemon_status'u ikiye bolmek (running false iken battery kismini atla / label gizle).
+
+Tamamlanan kontroller: app_state "kayitli pencere boyutu / monitor disi restore" -> CODE'DA geometry persistence YOK (ui_builder.inl:74 daima 1020x680) — monitoring disi restore riski yok (bug degil, not). tr/en anahtarlari (tr.inl 274-297, 329) ile ui_builder.inl:772-781 butonlari tutarli; tr-cov PASS. ESC/hedef davranisi: kod ile tutarli (mouse_test.inl:198-212). X11/Wayland kimlik farki BUG-03'te.
+
+SONUC: 10 bulgu + 1 not. En kritik 3: BUG-01 (cift ornek AppState clobber — en yuksek etki), BUG-02 (aktif cihaz telem secimi — canli okuma yaniltici), BUG-03 (dokuman-kod celiskisi — kullanim/troubleshooting yanlis yonlendiriyor). Oneri: Faz 2'de BUG-01 guard'i ve BUG-02 yapisal okumasi oncelikli; BUG-03 dokuman guncellemesi kolay ve hizli kazanim. Commit YAPILMADI.
+
+### Aj.3 [P122-USTLENME] [06 Eyl 2026] [01:37] - R48 FAZ-2: GUI BUG-AV FIX TURU
+P122 ustlenildi (R48 admin atamasi; sahip 3, gui/ bolgesi, kilit Aj.3). Kapsam: P113 BUG-01/02/05/06/07/08/09/10 + Aj8 BUG-1 (widgets_sync.inl:91 jump Limit dead knob). Kurallar: birden fazla dosya gui/; gecismeli cli/src YOK; commit YOK; kapilar build 0 uyari + tr PASS + run_tests tam. AKIS karti P125 (Aj0) ile gelecekse kilit Aj.3 olarak islenecek.
+
+### Aj.3 [P122-IZLEME] [06 Eyl 2026] [01:50] - PARALEL OTURUM GUI'DE ETKIN, YAZMA PARK EDILDI
+P122 ustlenmesi (01:37) sonrasi gui/ bolgesinde BASKA bir oturum canli yaziyor (01:41-01:49). Gozlemler:
+- mouse_test.inl once staged-SILINDI (01:45), ardindan GERI YUKLENDI (01:45:41, 20772B) — kaldir/geri osilasyonu.
+- BUG-05/06/07/10 (daemon_comm.inl: daemon_socket_exists + timeout 150ms + newline-bitimli yanit + 4MiB cap + pid_is_rawaccel_daemon + stale pid unlink) 01:41'de girmis.
+- BUG-02 `daemon_device_field` GOVDESI 01:47'de daemon_comm.inl'e eklendi (decl onceden app_state.hpp'deydi).
+- Son iki dakikada ayni anda widgets_sync.inl (Aj8 BUG-1:91), profile_mgr.inl (BUG-08), mouse_test.inl, tr.inl, app_state.hpp da dokunuluyor — kapsam P122 ile BIREBIR.
+Sonuc: P122 kapsamim paralel oturum tarafindan yurutuluyor; cift-yazim/clobber riskini onlemek icin kullanici onayiyla yazma PARK EDILDI (bekle-kisa izle-kanala rapor). Kaliyorum: havuz + kaynak stabilizasyonu izlem. AKIS P122 durumu "yurutuluyor (R48 kilit Aj.3)" korunuyor; paralel oturum rapor ederse karti buna gore senkronlarim.
+
+### Aj.3 [P122-FAZ2-FIX] [06 Eyl 2026] [01:53] - 9 FIX TAMAMLANDI (build 0 uyari + test + tr + oracle)
+P122 FAZ-2 uygulandi. Parallel-oturum yazma parki kaldirildi (kullanici devam onayi). Ilk kontrol: calisan agac PARALEL oturumun kaldir/geri osilasyonunun ortasindaydi — gui/mouse_test.inl stage-SILINMIS, main.cpp/tr.inl/ui_builder.inl/app_state.hpp'tan P104 kablolamasi sokulmus (app_state.hpp:102 hatali girinti). P104 resmi onayli (Aj0 M65); BUG-02/05/09 dogrudan mouse_test.inl'i hedefliyor. Bu yuzden 5 dosyayi HEAD'ten geri yukledim (gui kapsami; daemon_comm.inl'e dokunmadan) ve fix'leri temiz agacta uyguladim. BUG-05/06/07/10'un paralel oturum surumu geri osilasyonda kaybolmus; benim uygulamam ayni yaklasimi (FAZ-1 raporu) fresh olarak iceriyor — clobber yok, tek sahib ben.
+
+FIX LISTESI (gui/ kapsami, 7 dosya):
+[BUG-01] Tek GUI ornegi (ikinci pencere + AppState clobber). gui/main.cpp: flock() exclusive kilit `<config_dir>/rawaccel-gui.lock` (O_CREAT|O_RDWR|O_CLOEXEC 0600, flock LOCK_EX|LOCK_NB) g_application_run oncesi. Ikinci ornek stderr'den "RawAccel GUI is already running..." + exit(0). tr()'ye verilmedi (tr-cov yeni anahtar istemez; mesaj gecici konsol). GApplication single-instance (default) birincil mekanizma kalir. includes: <fcntl.h>, <sys/file.h>.
+[BUG-02] Cihaz bazli status okuma. gui/daemon_comm.inl: `daemon_device_slice()` + `daemon_device_field()` + yardimcilar (json_skip_string/json_object_end/json_string_field/json_has_field). Secim: (1) active profilin device_id'sine ESIT ilk cihaz, (2) telem_in_ips'li ilk cihaz (canli kaynak), (3) dizideki ilk cihaz. `active_profile_device_id` config.active_profile ADINI profile cihazina cozer (device_id bos = "all devices"). Kullanimlar: mouse_test_poll telem_in/out/gain, widgets_sync.inl on_perf_clicked lat_* , update_daemon_status battery — hepsi kullanici-yaniltici ilk-cihaz okumasindan kurtuldu.
+[BUG-05] Main-thread IPC donmasi. daemon_ipc_send_raw/query: varsayilan 150ms SO_RCVTIMEO/SO_SNDTIMEO (250ms tick'ten kucuk); set_config push 5000ms. daemon_running() once daemon_socket_exists() stat. mouse_test_poll tick basina TEK status sorgusu (ping+status pespese yok).
+[BUG-06] Yanit kisa kesme/bocek. Yanit sonu tespiti: '\n' sonlayici VEYA recv==0 (temiz peer kapanis); timeout ortasinda kesilmis satir SIFIRLANIR (bos doner, parse yok); 4MiB tavan; fresh buffer her cagri.
+[BUG-07] Stale PID sinyali yanlis hedefe. pid_is_rawaccel_daemon(pid) -> /proc/<pid>/comm == "rawaccel-daemon"; kill(pid,0) yerine kullanilir; stale PID dosyasi read_daemon_pid dongusunde unlink edilir; /proc taramasi AYNI guard. daemon_send_signal artik ters PID ile sinyal veremez.
+[BUG-08] Kopyalanan profil isim cakismasi. gui/profile_mgr.inl on_duplicate_profile: "<orijinal> (copy)" + cakisma varsa "<...> (copy) 2", 3, ... (n<=1000 guvenlik). create/rename cakisma kontrollerine (130, 267) uyumlu.
+[BUG-09] Acik HUD dil degisimini izleme. app_state.hpp fields (test_name_lbls[3], test_title_lbl, test_hint_state, test_status_state) + `mouse_test_refresh_language(S)` fwd-decl. mouse_test.inl: mouse_test_set_status/set_hint SEMANTIK state tutar (0 live/1 awaiting/2 daemon-down/3 unfocused; hint 0/1/2); tum metin atamalari bu setter'lardan gecer; refresh_language tr.inl'den acik HUD'a isim/baslik/hint/status un cevirir; teardown pointer'lari null'lar. tr.inl:533'e cagri eklendi.
+[BUG-10] Daemon kapaliyken pil satiri + gereksiz IPC. update_daemon_status: running==false iken battery_detected_lbl GIZLENIR (yaniltici "bilinmiyor" yok) ve status IPC atlanir; deger daemon_device_field(resp,S,"detected_battery").
+[Aj8 BUG-1] widgets_sync.inl:91 Y ekseninde jump modunda Limit satiri gereksiz. `mode_uses(ymode, {accel_mode::natural})` yapildi (jump cap.x/cap.y/smooth kullanir; accel-jump.hpp:24-30) — limit/no-op knob kaldirildi.
+
+KAPILAR (hepsi gecti):
+- build: bash scripts/build.sh -> 0 warning (grep warning:/error: bos)
+- unit: bash tests/run_tests.sh -> "Sonuc: 33460/33460 gecti" + CLI kapilari ✓
+- tr-cov: bash tests/run_tr_coverage.sh -> Result: PASS (yeni anahtar eklenmedi)
+- oracle: bash tests/oracle/run_oracle.sh -> RESULT: OK (915 satir, 31 bilinen sapma)
+
+BACKGROUND NOT: acik agac fazlasi (cli/main.cpp, daemon/*, src/config.cpp, include/*) BANA ait DEGIL — dokunulmadi. BUG-03 dokuman dogrulamasi bu turun kapsami degil. Commit YAPILMADI.
+
+BUG-02 YAKLASIM OZETI (soru-sinav): active profilin cihazi eslesmeye gore secilir — (1) status "devices" dizisinde device_id == active profilin device_id'si; bos device_id ("all devices") ise (2) telem_in_ips'li ilk cihaz, yoksa (3) dizinin ilk cihazi. daemon_device_slice bu sirayi uygular; daemon_device_field anahtari yalnizca o dilimde okur.

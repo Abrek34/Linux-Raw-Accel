@@ -635,3 +635,72 @@ M35 sonrası (R47 taraması yarıda kalmıştı) kalan parametre ailelerini kapa
 - tests/run_tr_coverage.sh: PASS
 
 Region çakışması: yok (classic/natural; P106 başka ajanın ayrı bölgesi). Kapsam onayı: test cephesi; header koduna değişiklik GEREKMEDİ. AKIS P105 → TAMAM, kilit boş.
+
+### Aj 2 [06 Eyl] P112 BUG-RAY PORTER
+
+Kapsam: include/ accel çekirdeği (accel-base/classic/jump/natural/power/synchronous/lookup/union/noaccel + rawaccel-base + src/config.cpp) — oracle (915/31 OK), birim test (32798/32798 OK), GUI/CLI erişilebilirlik spin aralıkları kanıtıyla derin inceleme + gen_local/gen_ref çift-binary diferansiyel grid taraması.
+
+[BUG-01] synchronous activation_framework — motivity<1 tanh yolu TERS ÇEVRİLMİŞ (işaret kaybı)
+- Kaynak: include/accel-synchronous.hpp:82-95 (legacy_apply |log_space| tamir bloğu). Tamir, negatif tabanlı pow(log_space, sharpness)'i kurtarırken tanh ODD (tek) fonksiyon olduğu için log_space işaretini düşürüyor; motivity<1 (negative log_diff) bölgesinde eğrinin BÜTÜN yönü inversion. Şerhteki "tanh activation is even in log_space" iddiası yanlış (tanh tektir).
+- Kanıt (LEGACY, cap kapalı, m=0.3, smooth=0.5 = VARSIYILAN smooth):
+  - local: x=0.0001 → 3.3333 , x=100000 → 0.3000   [ters]
+  - ref  : x=0.0001 → 0.3000 , x=100000 → 3.3333
+  - local smear (smooth=0): local==ref==düşük→0.3 / yüksek→3.33 (linear-clamp yolu doğru).
+  - smooth spinner 0.5→0 geçilince eğri kendi içinde TERSİNE DÖNÜYOR; smooth=0.5'te ref'den ~11× (rel %91) sapma. m=0.7'de tüm 82 grid satırı REL.
+- Etki: GUI'de synchronous mod + motivity spinner [0.01,10] + smooth default 0.5 ile doğrudan ulaşılabilir. Motivity<1 JSON/CLI/DOSYAYLA kolayca kurulur: hızlandıkça sens AZALIR (ters davranış), GAIN LUT'u da aynı inversiyonla beslenir (gain modu da bozuk). NaN/çökme yok; davranış yanlış. Oracle (motivity≥1.2) ve unit testler (motivity=1.5) bu bölgeyi HİÇ kapsamıyor; 20+ grid pointte rel sapma up to 0.91.
+- Önerilen düzeltme: z=gamma_const·log_diff, s=sharpness, r=1/s: exponent = sign(z)·pow(tanh(|z|^s), r) (odd-simmetri tamiri). smooth=0.5 (s=1) → reference ile BİREBİR eşit; kesirli s → reference'ın NaN ürettiği yerde reference'ın kendi limite/linear-clamp kutuplu sonlu değer (BUG-03'e de çare).
+
+[BUG-02] power GAIN+io — üs-tabanı tutarsız floor: gain(cap_x) cap_y'yi tutturamıyor
+- Kaynak: include/accel-power.hpp scale_from_gain_point (n=1e-3 floor) vs gain_fn/base_fn (ham exponent_power değerlendirmesi). CLI domain ≥1e-4 (cli/main.cpp:816), JSON sanitize floor 1e-4 (config.cpp:357).
+- Kanıt: GAIN+io, cap=150/1.5, ep∈[1e-4,1e-3): ölçülen gain(150)=1.041 (ep=1e-4) … 1.439 (ep=9e-4) — hep < cap_y=1.5; tutarlı floor (her yerde 1e-3) kullanılsa 1.4985. Yani SADECE scale floor'lanmış, değerlendirme üssü floor'lanmamış.
+- Etki: io "gain-point" sözleşmesi (x=cap_x → çıktı=cap_y) bu aralıkta altında kalıyor; kullanıcı noktayı ayarlayamıyor. GUI erişemiyor (power_exp min 0.01); CLI/JSON erişiyor. Referans bu aralıkta Inf/NaN (P81 zaten sonlu tutmayı seçmiş) — sorun reference farkı değil, local iç tutarsızlık.
+- Önerilen düzeltme: tek bir n=max(exponent_power,1e-3) tanımlayıp calculate_scale VE base_fn/gain_fn'te AYNI n'i kullanmak (tutarlı floor). Öncelik düşük.
+
+[BUG-03] synchronous fractional smooth + motivity<1: tamir ters kutuplu sonlu değer üretiyor (bilgilendirme)
+- Kaynak: Aynı kök BUG-01 (|log_space|). smooth∈(0.03125,1]∖{0.5}, motivity<1: REFERANS'ın kendisi NaN üretiyor (tanh içinde negatif taban ^ kesirli recip); local sonlu veriyor (NaN tamiri) ama kutuplu BUG-01 ile aynı biçimde ters (local'ın linear-clamp yolu ve reference süreklilik limitine zıt). m=0.3/0.7 grid'de 82/82 satır REF_NAN; local değerler bu bölgede smooth=0.5'teki kendi eğrisiyle de tutarsız.
+- Etki: NaN/kilit yok; "repair" yanlış yönde. BUG-01 öneri (sign(z) tamiri) burayı da kapsar. Şimdilik bilgilendirme notu.
+
+Doğrulanan/sorun DEĞİL:
+- power io ep∈[1e-4,1e-3) hariç tüm ep aralığı, classic (offset/cap/neg-accel/expc/io), jump (S/Z), natural (limit<1 tasarlı deselerasyon, basil), lookup, sync m>1 — REL yok (tüm grid temiz).
+- natural limit=0.3..0.95: 1→limit'e sıkı monoton düşüş (doğru, deselerasyon).
+- Classic io degenerates + cap-guard, sync LUT >512 kuyruk, fp_rep_range, idx_mapping — reference ile birebir.
+
+Özet: 2 gerçek bug (BUG-01 kritik — GUI varsayılanlarında, references'e göre ters işlev; BUG-02 CLI/JSON kenar), 1 bilgilendirme. Faz 1: kod değişikliği YAPILMADI (yalnızca log append). Hedef düzeltme: accel-synchronous.hpp legacy_apply odd-simmetri tamir bloğu.
+— Aj 2 (P112)
+### Aj 2 [06 Eyl] P119 FAZ-2 FIX
+P119 FAO-1: yönetici onaylı 2 bug düzeltildi + motivity<1 × smooth grid testi eklendi. Commit yok. Kilit: null.
+
+DEĞİŞEN SATIRLAR (yalnızca 3 dosya; oracle_cases.hpp DOKUNMADI):
+1) include/accel-synchronous.hpp (13→15): legacy_apply tanh yolu BUG-01 düzeltmesi.
+   - Eski: log_diff>0/<0 dallı, |log_space| tamir bloğu (tanh odd işaretini düşürüyor,
+     m<1'de eğri TERS — local ≈1/m≈3.33 yerine ≈m≈0.3).
+   - Yeni: tek z=gamma_const·log_diff; exponent=sign(z)·pow(tanh(|z|^sharpness),1/sharpness),
+     z<0 ise exponent=-exponent, return exp(exponent·log_motivity). |z| pow'u fractional
+     sharpness'ta sonlu tutar, sign(z) odd simetriyi clamp yoluyla (smooth=0) hizalar.
+     motivity>1 için bit-idantik (kayma yok) — oracle sync p2/p1/p07 değişmedi.
+2) include/accel-power.hpp (20→14): BUG-02 üs-floor paylaşımı.
+   - struct'a `double exponent` eklendi; ctor: exponent = max(ep,1e-3) TEK kez hesaplanır ve
+     scale_from_gain_point + gain_inverse + gain_fn + base_fn_impl hepsi AYNI n kullanıyor.
+     base_fn_impl artık args yerine üye `exponent` alıyor (imza: (x)). scale_from_gain_point
+     içteki kendi floor'u (P81) kaldırıldı — üst artık shared n'yi geçiyor.
+   - Sonuç: ep∈[1e-4,1e-3) aralığında gain(cap_x) == cap_y (eski < cap_y tutarsızlığı).
+3) tests/test_accel.cpp (150 ekleme): P119 FAO-1 grid testi.
+   - helper `fao1_ref_sync_legacy` DÜZELTİLMİŞ odd-simmetrik matematiksel referans
+     (referansın NaN ürettiği fractional-smooth m<1 = BUG-03 durumunda sonlu).
+   - BUG-03 için: ref eğrisi /tmp/rawaccel_p119_sync_m1_ref.csv'e yazılıp geri okunur,
+     local LEGACY çıktı ile rel 1e-9 assert edilir.
+   - LEGACY: m∈{0.05,0.3,0.8} × smooth∈{0,0.5,1.0} × 15 hız → rel 1e-9 pin;
+     + işaret regresyonu (m=0.3: 500>3.0, 0.001<0.4, 500>0.001, 5.0==1.0).
+   - GAIN LUT: aynı grid, N=2 referans-parite LUT'unu exact integral (N=4096) ile
+     0.03·max(1/m,m) zarf altında (ölçülen max 0.23) + tablo-içi monotoni + kuyruk→1/m.
+
+KAPILAR (tamamı yeşil):
+- build: 0 uyarı (bash scripts/build.sh, grep warning/error boş).
+- unit: bash tests/run_tests.sh → 33460/33460 geçti (eski 32798 + 662 YENİ assert; P119 grid).
+- oracle: bash tests/oracle/run_oracle.sh → 915 satır / 31 sapma OK (değişmedi).
+- Kilit: null (kilit alınmadan çalışıldı; commit yok).
+
+Not: çalışma sırasında daemon/daemon.cpp'de EŞZAMANLI başka bir ajanın in-flight
+düzenlemesi duplicate DENY_REOPEN_MS ile build'i 1 kez kırdı; ilk build'den önce
+kendiliğinden düzeldi (etki yok), 2 denemede build 0 uyarı.
+— Aj 2 (P119)

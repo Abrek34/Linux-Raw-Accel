@@ -487,3 +487,131 @@ oracle OK (915 satır, 31 belgelenmiş sapma) ✓ · tr PASS ✓ · P83/P99/P107
 - `lut_data <nokta listesi>` + implicit lut_length — lookup profili CLI'dan kurulabilirsin (şimdilik import yolu).
 - `whole <bool>` — distance_mode'dan doğrudan ayrık anahtar (küçük tutarlılık: stored_value_str de bilmiyor).
 Kilit bırakıldı. (R47 P107 tamam.)
+
+### Aj 5 [06 Eyl] P115 BUG-RAY PORTER  (Faz 1: SADECE bul+rapor — kod değiştirilmedi)
+Bölge: cli/main.cpp + src/config.cpp (+config.hpp). HEAD 79376ae R47.
+Test yöntemi: build-manual/rawaccel-cli, hep `-c /tmp/opencode/ra/settings.json` + `-n`
+(daemon root olarak CANLI çalışıyor — /etc/rawaccel & canlı daemon'a YAZAN/apply-testleri yapılmadı).
+Doğrulanan temiz alanlar: 16 komut arity tablosu (eksik/fazla arg, -c"" reddi rc=1) ✓;
+dpi[1..32000 int]/polling[125..8000 int]/snap[0..45]/ratios[0.01..100]/halflife/cap/offset
+etki alanları ve NaN/Inf/"1.5junk"(trailing-garbage) reddi ✓; --json 3 komutta geçerli JSON ✓;
+devices alan adları daemon ile eşleşiyor (namespace: daemon.cpp:1319-1323 ↔ cli main.cpp:1212-1216);
+.bak rotate ✓ (her kayıtta path.bak yazılıyor); unwritable dizin hata metinleri gerçekçi ✓.
+
+[BUG-A5-01] set-param device_id'de uzunluk kapısı YOK → 256'ya sessiz kesilme + disk/CLI uyuşmazlığı
+- Kaynak: cli/main.cpp:887-893 (device_id ataması, kap yok) vs src/config.cpp:487 (load'da MAX_DP_DEVICE_ID=256 kesme). Kanıt: `set-param test device_id <300x'A'>` rc=0; dosyada len=300; `show test --json` → len=256; ilk mutasyonda kaydedilen değer 256.
+- Sorun: P82-MED-1 prensibi (name'i create/rename/duplicate'te önden reddet) device_id'ye uygulanmamış. >256 giriş kabul edilir, her reload'da sessizce kesilir — kullanıcının atadığı composite-ID ile daemon'un eşleştirdiği ID farklılaşır.
+- Etki: device_id>256 (gerçekçi en uzun ~100 char) nadir, ancak veri bütünlüğü kuralının ihlali; "show/status çıktısı ile disk'teki değer aynı" sözünü bozar.
+- Önerilen düzeltme: cmd_set_param device_id dalında `val.size() > MAX_NAME_LEN` (veya ortak 256 sabiti) → "device_id too long" rc=1; ayrıca src/config.cpp ile rawaccel-base.hpp MAX_DEV_ID_LEN=200 çakışmasını tek sabite indir.
+
+[BUG-A5-02] accel_args 12 numerik alanı tip-guard'sız → tek hatalı alan TÜM config'i çökeltir (P54/P99 kapsam açığı, "double parse")
+- Kaynak: src/config.cpp:102-113 — input_offset/output_offset/acceleration/decay_rate/gamma/motivity/exponent_classic/scale/exponent_power/limit/sync_speed/smooth `.get<double>()` guardsız. Kanıt: accel_x.acceleration="NOT_A_NUMBER" içeren config'te `list/show/validate` hepsi rc=1: `[json.exception.type_error.302] type must be number, but is string`.
+- Sorun: P54-B4/P99 sözleşmesi "yanlış tipler default'a düşer", profil-seviyesi double'lar + cap/lut/mode/gain korundu ama accel_args sıraları unutuldu. Daemon ve IPC push (`set_config`) aynı yoldan çöker.
+- Etki: tek el-edit hatalı alan (string/bool/null) config'i tamamen yüklenemez yapar → daemon default'lara düşer, CLI tüm komutlar rc=1, validate bile çalışmaz. Fuzz'a karşı da zayıf nokta.
+- Önerilen düzeltme: her satırı `&& j["X"].is_number()` ile sarmak (P99 deseni) veya yardımcı `json_get_number_safe(j, key, fallback)`.
+
+[BUG-A5-03] validate kayıp yolda config DOSYASI ÜRETİR + "Validation passed" false-PASS (rc=0)
+- Kaynak: cli/main.cpp:1523-1537 (konfig yoksa default üretilip save edilir — tüm komutların ortak yolu) + 1579 (validate in-memory cfg). Kanıt: mevcut olmayan `/tmp/opencode/ra/nope.json` için `validate` → rc=0 "Validation passed. All checks OK." ve DOSYA oluşturuldu (2679 bayt).
+- Sorun: cmd_validate'in yorumu "report issues without modifying it" — ancak kayıp yolda dosya YARATIR. Kullanıcı var olmayan yolu doğruladığında yanlış yeşil ışık (rc=0) alır.
+- Etki: otomasyonda (setup/senaryo betikleri) geçersiz path "OK" sayılır; ayrıca yan ürün dosya sürpriz yaratır. CLI "without modifying" sözleşmesinin ihlali.
+- Önerilen düzeltme: validate için config_exists kontrolü — kayıp ise stderr + "config not found" rc=2; default-üretme akışını validate dışında tut.
+
+[BUG-A5-04] import LUT truncasyon uyarısı ÖLÜ KOD → 300 nokta sessizce 257'ye kesiliyor
+- Kaynak: cli/main.cpp:994-1008 `check_lut_raw("accel_x")` — TOP-LEVEL "accel_x" arıyor; CLI export/import formatı ise device_profile olduğundan accel_x **"profile."** altında. Kanıt: 600'lük lut_data'lı import → hiç uyarı yok, dosyada lut_length=514 (kap=514) yazıldı.
+- Sorun: BUG-15-fix-followup'ın amacı uyarı vermekti; anahtar yolu yanlış olduğundan uyarı asla tetiklenmez, kesme sessiz.
+- Etki: 257+ noktalı lookup profili CLI'ya sessiz kırpılır; kullanıcı eğrisinin değiştiğini bilmez.
+- Önerilen düzeltme: `raw["profile"][axis_key]["lut_data"]` (ve hem düz hem iç içe formatı kabul et) — düzeltilen dosyaya unit test + import kanıtı ekle.
+
+[BUG-A5-05] Mutasyon komutlarında daemon-push başarısız olunca ÇIKTI YOK + rc=0 (yanlış başarı izlenimi)
+- Kaynak: cli/main.cpp:172-180 `daemon_apply_if_enabled` — false dönüşünde hiçbir şey basmıyor; create/set/delete/set-param... alt komutları rc=0 döndürüyor. reload/stop/latency ise başarısızlığı print_signal_failure ile raporlar (tutarsızlık).
+- Sorun: daemon kapalıyken veya IPC/SIGHUP başarısızken "Created profile: foo" + rc=0 → kullanıcı daemon'un yüklendiğini sanır. "Daemon reloaded." yalnızca başarıda basılıyor; başarısızlıkta sessiz.
+- Etki: live-daemon durumuyla CLI çıktısı çelişir; scriptler rc=0'ı "uygulandı" diye okur. (Canlı kanıt RİSKLİ: canlı root daemon'a throwaway config push edip /etc'yi ezerdi → kod inceleme ile kanıt; öneri: yan branşta "uygulanamadı — journalctl/sudo systemctl reload rawaccel" stderr + rc=1.)
+- Önerilen düzeltme: mutasyon komutlarında push başarısızsa stderr uyarısı (rc yine de kayıt başarısı için 0 kalabilir; en azından mesaj zorunlu). GUI/daemon_comm ile aynı mesajlaşma kullanılsın.
+
+[BUG-A5-06] distance_mode 'lp': stale lp_norm bırakılır + echo YANLIŞ ("Set distance_mode = max")
+- Kaynak: cli/main.cpp:912-915 ('lp' dalı lp_norm'a dokunmuyor) + 647 (stored_value_str: lp_norm>=16 → "max"). Kanıt: önce `distance_mode max` (lp_norm=9999) sonra `distance_mode lp` → echo "Set distance_mode = max"; dosyada whole=true lp_norm=9999 → list "max" görünür, daemon davranışı max olarak kalır.
+- Sorun: kullanıcı "lp" yazdı ama komut (a) çıktıda aksini söylüyor, (b) lp_norm'u default'a (2) döndürmüyor — eski "max" artığıyla lp anlamsız.
+- Etki: max'dan lp'ye geçiş sessizce çalışmaz; betik-parse eden çıktı yanıltıcı.
+- Önerilen düzeltme: 'lp' dalında `lp_norm` değiştirilmeden bırakılıyorsa da echo'da mevcut davranışa değil istenene göre mesaj; ideal: mevcut lp_norm değerini kullanıcıya yaz (ör. "distance_mode=lp (lp_norm=9999 — dikkat: max görevi görür)") veya lp atamasında lp_norm=2'ye sıfırla.
+
+[BUG-A5-07] status bozuk config: mesaj STDOUT'a + rc=0 (daemon çalışıyorken) → hata görünmez
+- Kaynak: cli/main.cpp:1271-1274 ("unreadable or missing" cout) + 1274 `return running?0:1`. Kanıt: "garbage" içeren config + `status` → satır stdout'ta, rc=0.
+- Sorun: config bozukluğu stderr'e değil stdout'a; rc=0 daemon durumuna bağlı olduğundan config hatası script'e sızmaz. (`status --json` config_error=true basar ama rc hâlâ 0 — cli/main.cpp:1161.)
+- Etki: cron/monitoring "daemon OK" sanır; konfig hatası KANLI sessiz kalır.
+- Önerilen düzeltme: bozuk/açılamayan config satırını stderr + ayrı exit kodu (ör. 2); --json'da config_error da rc'ye yansıtılabilsin.
+
+[BUG-A5-08] Son profili delete edince active_profile sallanır ve persist edilir
+- Kaynak: cli/main.cpp:412-413 (fallback yalnız `!cfg.profiles.empty()` ise). Kanıt: `delete p1` (aktif+son) → dosyada {"active_profile":"p1","profiles":[]}; status "Active: p1" gösterir.
+- Sorun: boş profil listesinde active_profile ölü isim tutar; sonraki set-param/daemon apply ölü referansla gider.
+- Etki: kullanıcı "aktif profil yok" durumunu neredeyse hiçbir çıktıda görmez; validate only "No profiles defined" (aktif sallanması geçmiyor — main.cpp:525-527 boş liste dalı susturulmuş).
+- Önerilen düzeltme: delete'te liste boşsa active_profile="" yap + "no active profile" mesajı; validate boş liste+aktif dalında da uyarı üretsin.
+
+[BUG-A5-09] disable=true ve use_raw_input=false hiçbir CLI METİN/JSON çıktısında görünmüyor (çıktı GAP)
+- Kaynak: cli/main.cpp:247-318 (print_profile) + 1164-1275 (status) + 1114-1162 (status_json). Kanıt: disable=true & use_raw_input=false config'te `list/status/show` grep → yalnız speed_min/max "(disabled)" hint'leri; status_json profil nesnesi name/active/device_id/dpi/poll/mode dışını serileştirmiyor.
+- Sorun: "devre dışı" bir profil, normal profil gibi görünür; user_raw global bayrağı hiçbir çıktıda yok. (set-param anahtarının bulunmayışı önceki turda bilinçli GAP olarak kayıtlı — bu bulgu çıktı tarafı.)
+- Etki: kullanıcı/show betikleri daemon'ın disable/raw alacağı profil setini tahmin edemez; "durum doğru" yanılgısı.
+- Önerilen düzeltme: list/show/status metnine "disable: true" ve "use_raw_input: false" satırları (veya status_json profillerine bu iki alan). Rapor-only, devamında setter kararı.
+
+[BUG-A5-10] `--config=PATH` (= formu) tanınmıyor → "Unknown command" + 101 satır help STDOUT'a (daemon = formu destekliyor — parite kırık)
+- Kaynak: cli/main.cpp:1392-1417 (yalnız ayrık `-c|--config` token). Kanıt: `--config=/tmp/... list` → stderr "Unknown command: --config=..." + help stdout, rc=1. AGENTS.md daemon için "`--config=PATH` (= forms) accepted" diyor.
+- Sorun: CLI kendi yardımında = formunu belgelememiş; daemon tutarlılığı için beklenen form komut olarak çöküyor; ayrıca "Unknown command" sonrası TÜM help (101 satır) stdout'a basılıyor (hatalı kullanımda stderr yerine spam).
+- Etki: yeni kullanıcılar (`--json` de = olabilir sanıp) yanlış yönlendirilir; script'ler unknown-command'ı makineca işleyemez.
+- Önerilen düzeltme: `--config=` ve `--no-daemon`(=` gerekmez) ayrıştır; bilinmeyen komut/flaq'te stderr'e tek satır usage bas, helf'i stdout yerine yalnız `-h`'de.
+
+SOYUT GÖZLEMLER (bug değil, kayıt):
+- m1: bilinmeyen komut/flaq → 101 satırlık help STDOUT (yukarıya yedirildi).
+- m2: kayıp+write-yetkisiz config'de `list` → "Warning: could not save default config" (stderr) + hayalet default ile rc=0; mutasyon ise iki katlı (Warning + "Failed to save") — mesajlar doğru ama rc/çift mesaj kafa karıştırıcı.
+- m3: cmd_validate'in kendi catch'i (main.cpp:600-603) main'deki yükle-me başarısızlığından sonra ASLA çalışmaz; "run validate for details" ipucu parse-hatasında yanıltıcı.
+- m4: rawaccel-base.hpp:18 MAX_DEV_ID_LEN=200 atıl; src/config.cpp:487 kendi 256'sını kullanıyor — iki sabit iki hikâye.
+- m5: arity tablosu 16/16 doğrulandı, bu turda yeni arity bulgusu yok (P99 ✓).
+
+SONUÇ: 10 bulgu (A5-01..A5-10) + 5 gözlem. Kritik 3: A5-02 (tek hatalı JSON alanı tüm config'i çökeltir — P54 sözleşme açığı), A5-05 (daemon-push sessiz başarısızlık + rc=0), A5-03 (validate false-PASS + dosya üretir). Oncelik sonrası: A5-01, A5-04 (veri bütünlüğü), A5-06 (çıktı yalanı). Canlı sisteme dokunulmadı (yalnız /tmp kopyaları + -n); /etc/rawaccel değişmedi.
+
+### Aj.5 [M28] [06 Eyl 2026] [01:36 — P115 FAZ 2: A5-01..A5-10 FIXLERI TAMAM]
+
+Kullanıcı emri: "yaptığın işlere derinlemesine bak, bug varsa fixle". Aj1'in P115 Faz 1 raporundaki 10 bulgunun hepsi doğrulandı + 3 ek doğrulama:
+
+== FIXLENENLER (kod, commit yok) ==
+A5-01 [cli/main.cpp set_param] device_id>256 → artık REJECT ("device_id too long: 300 chars (max 256).", rc=1). 255 karakter tam round-trip. P82-MED-1'e simetrik.
+A5-02 [src/config.cpp accel_args_from_json] 12 numerik alan (input_offset..smooth) `contains` ile okunup `get<double>()` yapılıyordu — string tip = type_error = TÜM config yüklenemez. `is_number()` guard eklendi → hatalı tip default'a degrade. (cap/lut zaten guard'lıydı; scalar alanlar eksikti.) Canlı: acceleration:"0.005" geçmişte list/show/validate rc=1 idi, şimdi degrade + list temiz.
+A5-03 [cli/main.cpp main] validate komutu config-oluşturma akışından AYRILDI (erken dispatch). Kayıp yolda artık DOSYA ÜRETMİYOR; "ERROR: Failed to load... rc=1". Sağlam yolda "Validation passed" rc=0. (false-PASS + yan ürün dosya ihlali kapandı.)
+A5-04 [cli/main.cpp cmd_import] LUT truncation uyarısı ölü koddan canlandı: check_lut_raw top-level değil `profile` altında arıyor. Canlı: 300 nokta import → "Warning: LUT (X/Y axis)... truncated to 257." + export'ta lut_len 514 (kapasite).
+A5-05 [cli/main.cpp daemon_apply_if_enabled] void→int. Push fail artık stderr'e "config saved locally but daemon did not reload..." + rc=1 döndürüyor (önceden sessiz rc=0). Canlı sistem daemon'ına dokunmadım (bölge disiplini), kod yolu doğrulandı, 8 çağrı noktası `return daemon_apply_if_enabled(cfg)`.
+A5-06 [cli/main.cpp set_param distance_mode lp] stale lp_norm sentinel (9999 max) high-mode'a dönüşte artık 2.0'a sıfırlanıyor; echo "lp" doğru ("max" değil). Kullanıcının önceden set ettiği lp_norm korunuyor.
+A5-07 [cli/main.cpp cmd_status & cmd_status_json] bozuk config → mesaj stderr'e + rc=1 (daemon çalışıyor olsa bile). JSON'da config_error + rc=1. Canlı doğrulandı.
+A5-08 [cli/main.cpp cmd_delete] son profil silinince active_profile artık temizleniyor ({"active_profile":"","profiles":[]}), dangling referans yok.
+A5-09 [cli/main.cpp print_profile/status/status_json] disable + use_raw_input artık list, show, status metin, status --json'da görünüyor (önceden silinmiş, yanıltıcı çıktı gap).
+A5-10 [cli/main.cpp main parse] `--config=path` (= formu) artık kabul ediliyor; daemon P53 paritesi kapandı. Önceden "Unknown command: --config=..." + 101 satır help digesti.
+
+== PANEL ==
+build 0 uyarı ✓ · tests 32798/32798 ✓ · ASan 32798/32798 ✓ · oracle 915/31 OK ✓ · tr PASS ✓
+(Aj2 P105 test derleme kırığı arada düzelmiş — 32798 assert'i eski 24994'ten büyük, hepsi yeşil.)
+
+== NOT ==
+- A5-02 doğrulaması: src/config.cpp `accel_args` zaten P54-B4 ile string guard'lıydı; bu çalışma numeric scalar tamamlanması.
+- A5-04'te BUG-15-fix-followup yorumu mevcut koddaydı ama "profile" katmanını kaçırıyordu — düzeltildi.
+Kilit Aj.5, P115 tamam. R47 toplu commit emrini bekliyorum.
+
+### Aj.5 [M29] [06 Eyl 2026] [01:52 — P120 FAZ-2 FIX: 12/12 ONAYLANDI]
+
+Görev: P115 raporu + yönetici kararlarındaki 12 maddeyi (A5-01..A5-10 + Aj7 BUG-06 CLI help + Aj8 BUG-3 sanitize üst sınırı) cli/main.cpp + src/config.cpp + config.hpp içinde uygula, commit yok. Canlıya dokunulmadı (yalnız /tmp kopyası + -n).
+
+== İŞLENEN DEĞİŞİKLİKLER (bu tur) ==
+A5-02 [src/config.cpp accel_args_from_json] KARAR gereği DEGRADE→REJECT: 12 numerik alan (input_offset, output_offset, acceleration, decay_rate, gamma, motivity, exponent_classic, scale, exponent_power, limit, sync_speed, smooth) artık `is_number()` degrade DEĞİL — wrong-type (string/obj/array) veya non-finite (NaN/Inf/overflow) → açık std::runtime_error ("config field 'X' must be a number, got <type>"), load throw → CLI "Config is unreadable or invalid" + rc=1, dosya DEĞİŞMEZ. NaN literal/1e999 zaten parser'da red; isfinite guard IPC'den gelen programatik JSON için derinlik. P54-B4/P99-B yalnızca string/enum/profile-scalar alanlarını kapsadığından REJECT güvenli (12 alan testlerde hiç yok). cap/lut/cap_mode/gain degrade-guar'dı KORUNDU (canlı doğrulandı: cap=["a","b"] degrade, motivity:"x" reject).
+A5-03 [cli/main.cpp cmd_validate] kayıp yolda artık açık "ERROR: config yok (not found): <path>" + rc=1 (validate main'de erken dispatch→dosya ÜRETMEZ); bozuk config → stderr + rc=1 + dosya byte-aynen. Canlı ✓.
+A5-04 [cli/main.cpp cmd_import] LUT >514 ham eleman (>257 nokta) artık WARN+kesme DEĞİL → açık "ERROR: LUT (X/Y axis) ... Import rejected" + rc=1 + config dokunulmaz. 514 eleman (256 nokta) hâlâ imports. Canlı ✓ (516 eleman red, 514 kabul).
+Aj7 BUG-06 (11) [cli/main.cpp print_help] parametre-aile düzeltmeleri: motivity "Natural"→"Synchronous motivity", gamma "Classic"→"Synchronous gamma", limit "jump/natural"→"(natural mode)", smooth "Jump"→"Jump/synchronous smoothness" (accel-*.hpp teyidi: limit yalnız natural, motivity/gamma/smooth/sync_speed yalnız synchronous+smooth jump).
+Aj8 BUG-3 (12) [src/config.cpp sanitize_accel_args + cli/main.cpp set-param domain + help + config.hpp] sanitize'artık gain-sürücü 5 alanda ÜST SINIRLI: scale≤100, exponent_power≤5, cap.x≤500, cap.y≤100, output_offset≤100. SABİT SEÇİMİ + GEREKÇE: tam GUI gauge maksimumları (gui/ui_builder.inl: scale max 100, power_exp max 5, cap_x max 500, cap_y max 100, output_offset max 100) — "cli docs ile tutarlı" (help artık aynı değerleri belgeliyor) VE tam R15 boundary round-trip değerleri (tests/test_accel.cpp:6174-6177 scale=100/output_offset=100/cap.x=500/cap.y=100 EXPECT_NEAR ile sabitlenmiş) — daha düşük bir sabit R15'i kırar. CLI set-param aynı cap'ten geçiyor (scale 101→rc=1, exp 10→rc=1, cap_x 600→rc=1, cap_y 200→rc=1, output_offset 500→rc=1; sınır değerleri kabul). Sanitize yüklemede kanıt: JSON scale=1e6/exp=50/output_offset=1e9 → show 100/5/100.
+DÜRÜST NOT (raporda zorunlu gerekçe): 10000x@1 ips (scale=100, n=2, cap_mode=in, cap_x=500) GUAGE-içi bir değerdir ve tam sınır değerlerinde oluşur; scale≤100 sanitize'i yalnızca SINIRSIZ-kaçış sınıfını (scale=1e6, exp=1e9 vb. JSON/CLI enjeksiyonu) kapatır. In-envelope 10000x'i ortadan kaldırmak ya R15'i kıran daha düşük cap ya da GUI canlı-gain tavanı ister — o taraf gui/ = Aj8 bölgesi.
+
+== ÖNCEKİ TURDAN DOĞRULANIP SAĞLAM KALANLAR ==
+A5-01 device_id>256 REJECT (canlı: 256 kabul, 257 rc=1) · A5-05 daemon_apply_if_enabled int + 8 çağrı noktası return + push fail→stderr+rc=1 (kod; canlı daemon'a dokunulmadı) · A5-06 distance_mode lp: stale lp_norm≥16→2.0 sıfırlama + doğru echo (canlı: 9999 sonrası "euclidean" [norm 2 gerçek], 4 korunur → "lp") · A5-07 status/status_json bozuk config rc=1 (canlı ✓) · A5-08 delete son profil active_profile temizler · A5-09 disable + use_raw_input status metin/status_json/show --json/list --json'da (serializer device_profile_to_json"disable" zaten yazıyor; canlı show --json + list --json doğrulandı) · A5-10 --config= (= formu) kabul (canlı ✓).
+
+== KAPILAR ==
+- birim: tests/run_tests.sh → 33460/33460 geçti (P83/P99/P107 CLI kapıları ✓)
+- ASan+UBSan: tests/run_tests_asan.sh → 33460/33460 geçti
+- oracle: tests/oracle/run_oracle.sh → 915 satır ×/31 bilinen sapma OK
+- tr: tests/run_tr_coverage.sh → PASS
+- derleme: cli (src/config.cpp+cli/main.cpp) ve daemon (src/config.cpp+daemon) bağımsız g++ -Wall -Wextra 0 uyarı; build.sh'ın gui ayağı gui/mouse_test.inl:180 "daemon_json_field" hatasıyla kırık — BAŞKA AGENT'İN (Aj8) SÜREN gui/ düzenlemesi, benim dosyalarımdan değil (yalnız cli/main.cpp, src/config.cpp, config.hpp değişti).
+R15 (6121-6137) + fuzz round-trip (2729-2798) + P54-B4 (2102) + P99-B (6907) + test_power_extreme_params (3147-3206) tamamen yeşil; eklenen cap'lere hiçbiri takılmadı (R15 sınır değerleri = cap değerleri).
+Commit yok. Canlı /etc dokunulmadı. Kanala kilit: — kapalı.

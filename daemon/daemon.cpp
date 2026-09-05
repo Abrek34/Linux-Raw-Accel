@@ -42,6 +42,12 @@ static double now_ms() {
 
 // ── sysfs device property helpers ────────────────────────────────────────────
 
+/// P121/BUG-02: how long a device path whose I/O failed (EIO/ENODEV/EBADF
+/// on read, or repeated failed open) stays on the re-open deny list.  A
+/// broken node that remains listed in /dev/input would otherwise be
+/// re-grabbed + uinput-create/destroyed every ~2 s forever.
+static constexpr double DENY_REOPEN_MS = 30000.0; // 30 s
+
 /// Extract the event number from a /dev/input/eventN or /dev/input/by-id/... path.
 /// Returns -1 on failure.
 static int event_num_from_path(const std::string& path) {
@@ -190,18 +196,13 @@ static int detect_battery_level(const std::string& event_path) {
         closedir(dir);
     }
 
-    // 2. /sys/class/power_supply direct paths (some devices expose here)
-    const char* battery_paths[] = {
-        "/sys/class/power_supply/BAT0/capacity",
-        "/sys/class/power_supply/BAT1/capacity",
-        "/sys/class/power_supply/battery/capacity",
-        "/sys/class/power_supply/Cell0/capacity",
-        "/sys/class/power_supply/Cell1/capacity",
-    };
-    for (auto bp : battery_paths) {
-        int val = try_capacity(bp);
-        if (val >= 0) return val;
-    }
+    // 2. GONE (P121/BUG-04 scope): /sys/class/power_supply/BAT0..Cell1 were
+    //    the SYSTEM's own batteries — a wired mouse whose device tree exposes
+    //    no charge data fell into this sniff and reported the LAPTOP's charge
+    //    percentage as if it were the mouse's.  Device battery telemetry must
+    //    come only from the device's own subtree (path 1 above); never the
+    //    host.  (Some mice publish under the *device's* power_supply dir,
+    //    which path 1 already covers.)
 
     // 3. Check /sys/class/input/eventN/device/ power attribute (some mice have energy_now/charge_full_design).
     //    Note: power sysfs typically exposes "enabled" (on/off), not a percentage — skip it.
@@ -632,10 +633,17 @@ const device_profile* AccelDaemon::find_profile(const std::string& dev_id) const
     // 1. Device-specific assignment takes priority
     for (auto& p : config_.profiles)
         if (!p.device_id.empty() && p.device_id == dev_id) return &p;
-    // 2. Active profile
+    // 2. "All devices" catch-all (P121/BUG-03): an empty device_id means the
+    //    profile binds to every mouse without a device-specific match — the
+    //    documented contract (config.hpp:18) and the GUI's "All devices"
+    //    combo entry.  Previously these records were silently skipped unless
+    //    they happened to be the active profile or profiles[0].
+    for (auto& p : config_.profiles)
+        if (p.device_id.empty()) return &p;
+    // 3. Active profile
     for (auto& p : config_.profiles)
         if (p.name == config_.active_profile) return &p;
-    // 3. First profile (last resort fallback)
+    // 4. First profile (last resort fallback)
     if (!config_.profiles.empty()) return &config_.profiles[0];
     return nullptr;
 }
@@ -718,13 +726,39 @@ void AccelDaemon::handle_hotplug() {
 void AccelDaemon::do_hotplug_scan() {
     // Check for newly added mice
     auto mice = find_mice();
+
+    // P121/BUG-02: prune the deny list — a path that is no longer listed in
+    // /dev/input (real unplug) or whose backoff window expired is retryable.
+    const double nowt = now_ms();
+    auto dp = path_deny_until_ms_.begin();
+    while (dp != path_deny_until_ms_.end()) {
+        bool present = false;
+        for (auto& p : mice)
+            if (p == dp->first) { present = true; break; }
+        if (!present || nowt >= dp->second)
+            dp = path_deny_until_ms_.erase(dp);
+        else
+            ++dp;
+    }
+
     for (auto& path : mice) {
         if (opened_paths_.count(path)) continue;
+        // P121/BUG-02: skip paths still in a backoff window (recent I/O error).
+        auto dn = path_deny_until_ms_.find(path);
+        if (dn != path_deny_until_ms_.end()) {
+            if (nowt < dn->second) continue;
+            path_deny_until_ms_.erase(dn); // window expired — allow retry
+        }
         log("Hot-plug: new mouse detected at " + path);
 
         mouse_device dev;
         dev.path = path;
-        if (!open_input_device(dev)) continue;
+        if (!open_input_device(dev)) {
+            // P121/BUG-02: opening keeps failing on a dead-but-listed node
+            // (EIO etc.); back it off so we don't retry every ~2 s forever.
+            path_deny_until_ms_[path] = now_ms() + DENY_REOPEN_MS;
+            continue;
+        }
         if (!create_virtual_device(dev)) {
             ioctl(dev.fd_in, EVIOCGRAB, 0);
             close(dev.fd_in);
@@ -879,6 +913,10 @@ void AccelDaemon::run_loop() {
                     epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, dit->fd_in, nullptr);
                     fd_to_dev_.erase(dit->fd_in);
                     opened_paths_.erase(dit->path);
+                    // P121/BUG-02: an I/O error often means the node is dead but
+                    // still listed in /dev/input.  Deny immediate re-open so the
+                    // ~2 s empty-rescan doesn't re-grab/uinput-churn it forever.
+                    path_deny_until_ms_[dit->path] = now_ms() + DENY_REOPEN_MS;
                     disc_devs.push_back(std::move(*dit));
                     dit = devices_.erase(dit);
                 } else {
@@ -966,13 +1004,18 @@ static bool flush_motion(mouse_device& dev, libevdev_uinput* uidev,
         dev.lat.record(lat_us);
         // Live telemetry: raw-passthrough path (no modifier). Fill counters and
         // deltas only — speeds are undefined without the speed pipeline.
+        // NOTE (P121/BUG-05 doc): in practice this branch is currently
+        // UNREACHABLE — raw REL_X/REL_Y are forwarded one-by-one inline in
+        // process_device() and has_motion is never set, so flush_motion() is
+        // never called in raw mode.  The block is kept as the telemetry
+        // contract for a future batched raw path, and is harmless dead code.
         dev.telem_dx = static_cast<double>(ix);
         dev.telem_dy = static_cast<double>(iy);
         // P100: P93-perf'teki ile aynı optimizasyon — now_ms() yerine zaten
-        // alınan t_start'tan türet (ns→ms). telem_wall_ms serileştirilmiyor
-        // (status_json onu basmıyor, AGENTS.md telemetri notu), bu yüzden ek
-        // clock_gettime okuması yalnızca israf. Önceden 3 syscall, artık 2 — bir
-        // önceki iki-clock okuması korunuyor; değer anlamsal olarak aynı monotonic-RAW.
+        // alınan t_start'tan türet (ns→ms). P121/BUG-06: telem_wall_ms
+        // status dev JSON'unda yayımlanır (istemci bayatlık hesaplayabilsin),
+        // bu yüzden ek clock_gettime okuması israf olur. Önceden 3 syscall,
+        // artık 2 — değer anlamsal olarak aynı monotonic-RAW.
         dev.telem_wall_ms = static_cast<double>(t_start) / 1'000'000.0;
         dev.telem_samples->store(dev.telem_samples->load(std::memory_order_relaxed) + 1,
                                  std::memory_order_release);
@@ -1202,8 +1245,17 @@ void AccelDaemon::dump_latency_stats() {
 /// Helper: escape a string for JSON (only handles ASCII printable + common escapes).
 /// Hard cap for the IPC config-push body.  Real config files are a few KB;
 /// this bounds even pathological ones while staying far below document limits.
+/// P121/BUG-07: 8 MB was far above anything legitimate; 1 MB keeps the
+/// slow-loris surface small while never rejecting a real config.
 static constexpr unsigned long long MAX_CONFIG_PUSH_BYTES =
-    8ULL * 1024ULL * 1024ULL; // 8 MB
+    1ULL * 1024ULL * 1024ULL; // 1 MB
+
+/// P121/BUG-01+07: total per-request deadline for the IPC worker (serial
+/// accept loop).  A client that stays under each per-recv SO_RCVTIMEO (2 s)
+/// by dribbling one byte at a time can no longer hold the worker longer
+/// than this — bounds both a slow command line and a slowloris config body.
+static constexpr uint64_t IPC_REQUEST_DEADLINE_NS =
+    5ULL * 1000000000ULL; // 5 s
 
 static std::string json_str(const std::string& s) {
     std::string out;
@@ -1337,6 +1389,10 @@ struct DevSnap {
             o << ",\"telem_gain\":"    << s.telem_gain;
             o << ",\"telem_dx\":"      << s.telem_dx;
             o << ",\"telem_dy\":"      << s.telem_dy;
+            // P121/BUG-06: publish the sample timestamp (CLOCK_MONOTONIC_RAW,
+            // ms since boot) so consumers can compute staleness.  A sample that
+            // stopped being updated minutes ago is no longer "current speed".
+            o << ",\"telem_wall_ms\":" << s.telem_wall_ms;
         }
         o << "}";
     }
@@ -1436,15 +1492,27 @@ void AccelDaemon::ipc_serve_loop() {
 }
 
 void AccelDaemon::handle_ipc_client(int client_fd) {
-    // Set a short read timeout to prevent slow-client DoS
+    // P121/BUG-01: SO_SNDTIMEO + SO_RCVTIMEO.  A client that sends a request
+    // but never reads the (potentially large status) response would otherwise
+    // let send() block for minutes once the socket buffer fills, stalling the
+    // serial accept loop and locking out every other IPC caller.  With a 2 s
+    // send timeout the worker drops the non-responsive peer and moves on.
     struct timeval tv { .tv_sec = 2, .tv_usec = 0 };
+    struct timeval stv { .tv_sec = 2, .tv_usec = 0 };
     setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &stv, sizeof(stv));
+
+    // P121/BUG-07: total-request deadline.  The per-recv timeout alone lets a
+    // low-and-slow client dribble (1 byte per <2 s) and hold the worker for
+    // arbitrarily long; this caps the whole request (command line + body).
+    const uint64_t deadline_ns = now_ns() + IPC_REQUEST_DEADLINE_NS;
 
     // Read the command line (up to a newline / 256 bytes).  Byte-wise recv is
     // fine here — IPC traffic is one short line per client.
     std::string line;
     char ch;
     while (line.size() < 256) {
+        if (now_ns() >= deadline_ns) return; // slow command line — drop
         ssize_t r = recv(client_fd, &ch, 1, 0);
         if (r <= 0) return;
         if (ch == '\n') break;
@@ -1481,6 +1549,7 @@ void AccelDaemon::handle_ipc_client(int client_fd) {
             std::string body;
             body.reserve((size_t)body_len);
             while (body.size() < (size_t)body_len) {
+                if (now_ns() >= deadline_ns) break; // slow-loris body — drop
                 char tmp[8192];
                 size_t want = std::min<size_t>(sizeof(tmp),
                                                (size_t)body_len - body.size());
@@ -1501,7 +1570,10 @@ void AccelDaemon::handle_ipc_client(int client_fd) {
         response = "{\"error\":\"unknown command\"}\n";
     }
 
-    // Write full response (handle partial writes)
+    // Write full response (handle partial writes).  P121/BUG-01: with
+    // SO_SNDTIMEO set, w<=0 after a timeout means the peer stopped reading —
+    // bail out and let the caller close the socket (the serial accept loop
+    // must not stall on a stuck consumer).
     const char* p = response.c_str();
     size_t left = response.size();
     while (left > 0) {

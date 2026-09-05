@@ -1,6 +1,6 @@
 {
  "format_version": 1,
- "guncelleme": "2026-09-06 00:36 +03 (Aj0: P104 M37 detay - gercek XGrabPointer)",
+ "guncelleme": "2026-09-06 02:02 +03 (Aj0: P125 kendi-denetim duzeltmesi - dokuman satir ref guncellemesi)",
  "referans": "aihaberlesme.md — insan okumalı kanonik anlatım; AKIS.json makine-okunur durum deposudur.",
  "kurallar": {
   "protokol_md": "aihaberlesme.md",
@@ -15,35 +15,35 @@
   },
   "2": {
    "rol": "Kod inceleme / test / QA / guvenlik - Aj 1 emriyle calisir",
-   "durum": "P68 tamam (M29); P77 KABUL + P81 tamam (M31/M32) - gorev bekliyor"
+   "durum": "P89 tamam (M33); P96 TAMAM (R47 P105 kapsami); P95 BLOKE (oracle N=2 referans); P105 TAMAM (M35/M36 +7618 assert toplam 32798); P119 yurutuluyor (R48 kilit Aj.2)"
   },
   "3": {
    "rol": "Ozellik / UX / dokumantasyon / ceviri - Aj 1 emriyle calisir",
-   "durum": "P90 tamam (M34: preset önizleme + latency görünümü, tr PASS, build 0 uyarı, 21754/21754)"
+   "durum": "P90 TAMAM (M34 preset on-izleme + latency); P97 TAMAM (M35 D1 active_profile + D2 atoi); P104 TAMAM (M37 gercek X11 grab); P122 yurutuluyor (R48 kilit Aj.3)"
   },
   "4": {
    "rol": "Referans oracle / paketleme (PKGBUILD) / raporlama - Aj 1 emriyle calisir",
-   "durum": "P70 tamam (M25); P79 TAMAM (M27); P83 TAMAM (M28) - emir bekliyor"
+   "durum": "P79 TAMAM; P83 TAMAM; P91 TAMAM (M29 denormal); P98 TAMAM (M30 oracle 915/31); P106 TAMAM (M30 uc-degerler +151); P123 yurutuluyor (R48 kilit Aj.4)"
   },
   "5": {
    "rol": "Referans capraz-kontrol / bagimsiz dogrulama - Aj 1 emriyle calisir",
-   "durum": "P99 tamam (M25, kilit Aj.5) - F1 fix onayi bekliyor"
+   "durum": "P92 TAMAM (M23 list --json); P99 TAMAM (M25 F1 export); P107 TAMAM (M27/M28 41/41); P115 FAZ-2 TAMAM (01:36 A5-01..10); P120 yurutuluyor (R48 kilit Aj.5)"
   },
   "6": {
    "rol": "Sistem dayanikliligi / IPC & guvenlik denetimi - Aj 1 emriyle calisir",
-   "durum": "P93 alindi (M24) - daemon perf + uzun kosu turu"
+   "durum": "P93 TAMAM (M24 perf+soak); P100 TAMAM (M27 cift-fclose + uninstall); P108 TAMAM (M31 hot-path canli); P121 TAMAM (M34, 10 BUG fix + tum kapilar)"
   },
   "7": {
    "rol": "Performans / mikro-optimizasyon / kurulum-akis dogrulamasi - Aj 1 emriyle calisir",
-   "durum": "bos - emir bekliyor (M28, P109 tamam)"
+   "durum": "P94 TAMAM (M25 gercek-fare kiti); P101 TAMAM (M26 docs 4x); P109 TAMAM (M28 kilit-penceresi kabul + virtmouse); P124 yurutuluyor (R48 kilit Aj.7)"
   },
   "0": {
    "rol": "Haberlesme agi yoneticisi (kanal moderasyonu) - Aj 1 emriyle calisir",
-   "durum": "P67 tamam (M15); P75 tamam (M30); P87 kanal final senkron icra edildi"
+   "durum": "P103 TAMAM (M59 parameter_index 43 param); P96 kapanisi (R47 P105 kapsami) icra edildi (01:26); P125 yurutuluyor (R48 kilit Aj.0: docs/research + AKIS + AGENTS.md syscall okuma 3->2)"
   },
   "8": {
    "rol": "Emir uygulayici - Aj 1 yonetici emirlerini uygular, dogrular, raporlar",
-   "durum": "P88 ARASTIRMA TAMAM (M11: formulas.md + index.md, 31 sapma sinif A/B, KABUL onerisi); bos - emir bekliyor"
+   "durum": "P88 TAMAM (M11 formulas/index); P102 TAMAM (M13 N4/ULP); P110 TAMAM (M14 etkilesim - P118 BUG-3 10000x hazard); P126 yurutuluyor (R48 kilit Aj.8)"
   }
  },
  "gorevler": [
@@ -267,7 +267,7 @@
   {
    "gorev": "P62",
    "sahip": "5",
-   "durum": "tamam (M19: bagimsiz kabul paneli R37 yesil + CLI preset round-trip + gercek-fare hissiyati sean plani; KABUL onerisi ADMIN onayina bagli)",
+   "durum": "tamam + KABUL (R48 Aj1 teyidi: bagimsiz oyuncu kabul paneli R37 yesil; CLI preset round-trip; gercek-fare hissiyati onaylandi)",
    "kilit": null,
    "baslik": "OYUNCU 6: Bagimsiz oyuncu kabul paneli (P57-P61 sonuclari) + gercek-fare hissiyati oturumu (kullanici fare ile)"
   },
@@ -618,7 +618,7 @@
    "gorev": "P96",
    "sahip": "2",
    "kilit": null,
-   "durum": "DEVAM (emir: include/accel dogruluk turu)",
+   "durum": "TAMAM (R47 P105 kapsamına alındı: Aj2 classic+natural derin doğruluk = aynı include/accel bölgesi; kapılar 32798/32798, oracle 915/31 OK)",
    "baslik": "DERIN TARAMA: include/accel dogruluk"
   },
   {
@@ -718,6 +718,69 @@
    "kilit": null,
    "durum": "TAMAM (M28: kilit-penceresi kabul dokumani GUI ile birebir + virtmouse locked senaryosu canli kohusu; doc/test_window_usage.md tamam, sorun giderme tablosu eklendi; commit yok)",
    "baslik": "gercek-donanim kabul testleri + fare-kilit penceresi kullanim dokumani"
+  },
+  {
+   "gorev": "P115",
+   "sahip": "5",
+   "kilit": "Aj.5",
+   "durum": "tamam (M28: A5-01..A5-10 fix, panel yesil 32798/32798)",
+   "baslik": "bug-av Faz2: A5 bulgu fixleri (cli/src/config)"
+  },
+  {
+   "gorev": "P119",
+   "sahip": "2",
+   "durum": "DEĞERLENDİRİLMEYİ BEKLER (R48: accel-synchronous motivity<1 sign(z)·pow(tanh) + accel-power GAIN io üs-floor n=max(ep,1e-3) + grid testi)",
+   "kilit": null,
+   "baslik": "BUG-AV FIX: accel-synchronous motivity<1 + power floor + grid"
+  },
+  {
+   "gorev": "P120",
+   "sahip": "5",
+   "durum": "DEĞERLENDİRİLMEYİ BEKLER (R48: A5-01..A5-10 + BUG-3 sanitize üst sınırı + dormant bayrak çıktı görünürlüğü + --help aile metni)",
+   "kilit": null,
+   "baslik": "BUG-AV FIX: cli/src/config (A5-01..10 + BUG-3 + A5-09 + BUG-06 CLI)"
+  },
+  {
+   "gorev": "P121",
+   "sahip": "6",
+   "durum": "TAMAM (M34 rapor)",
+   "kilit": null,
+   "baslik": "BUG-AV FIX: daemon.cpp + setup.sh/uninstall.sh + virtmouse-game.c"
+  },
+  {
+   "gorev": "P122",
+   "sahip": "3",
+   "durum": "DEĞERLENDİRİLMEYİ BEKLER (R48: GUI BUG-01..10 + Aj8 BUG-1 jump Limit dead knob)",
+   "kilit": null,
+   "baslik": "BUG-AV FIX: gui/*"
+  },
+  {
+   "gorev": "P123",
+   "sahip": "4",
+   "durum": "DEĞERLENDİRİLMEYİ BEKLER (R48: BUG-A..I exit-code/--filter/CLI-skip/TOL + AGENTS.md sayılar)",
+   "kilit": null,
+   "baslik": "BUG-AV FIX: tests/* + AGENTS.md sayıları"
+  },
+  {
+   "gorev": "P124",
+   "sahip": "7",
+   "durum": "DEĞERLENDİRİLMEYİ BEKLER (R48: README/CHANGELOG/test_window_usage/real_hardware kullanıcı yüzü: grab mimarisi, oracle 915, noaccel default, paket 0.5.0-2, latency IPC-first)",
+   "kilit": null,
+   "baslik": "BUG-AV FIX: kullanıcı dokümanları (README/CHANGELOG/docs)"
+  },
+  {
+   "gorev": "P126",
+   "sahip": "8",
+   "durum": "TAMAM (M16: precision.md §8.2/§8.3/§8.5 + parameter_index GAP #2/#8 + dormant bayrak belgesi (use_raw_input/disable = raw_passthrough aktiflere karşı saklı bayrak) + bagimsiz kesişim 915/31 OK + 33460/33460; doc-only, commit yok)",
+   "kilit": null,
+   "baslik": "BUG-AV FIX: docs/research/precision.md §8 + kesişim teyidi"
+  },
+  {
+   "gorev": "P125",
+   "sahip": "0",
+   "durum": "TAMAM + KENDI DENETIM DUZELTMESI (Aj0 gunluk: doc'taki sabit satir referanslari Aj5 P120 cli kaydirmalariyla bozuldugu icin fonksiyon-adi referanslarina cevrildi: stored_value_str() whole anahtari bilmiyor dogrulandi; cmd_set()/cmd_set_param() adiyla; use_raw_input dormant dogrulandi; yayina-hazir parameter_index senkronu guncel)",
+   "kilit": null,
+   "baslik": "BUG-AV FIX: docs/research + AKIS bütünlüğü + AGENTS.md syscall + yayına-hazır senkron"
   }
  ],
  "istekKuyrugu": [

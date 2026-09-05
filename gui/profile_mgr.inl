@@ -332,8 +332,22 @@ void on_delete_profile(GtkButton*, gpointer user_data) {
 void on_duplicate_profile(GtkButton*, gpointer user_data) {
     auto* S = static_cast<AppState*>(user_data);
     if (S->config.profiles.empty()) return;
+    // BUG-08: naive "… (copy)" collided with an existing profile name, silently
+    // leaving two profiles with the same name (ambiguous combo + daemon lookup).
+    // Auto-uniquify: "<orig> (copy)", then "<orig> (copy) 2", 3, … — same rule
+    // as the create/rename dialog's duplicate check, applied to the whole list.
+    std::string base = cur_prof(S).name + tr(" (copy)");
+    std::string name = base;
+    for (int n = 1; n <= 1000; n++) {
+        bool taken = false;
+        for (const auto& p : S->config.profiles)
+            if (p.name == name) { taken = true; break; }
+        if (!taken) break;
+        if (n == 1) name = base + " 2";
+        else        name = base + " " + std::to_string(n + 1);
+    }
     device_profile copy = cur_prof(S);
-    copy.name += tr(" (copy)");
+    copy.name = name;
     S->config.profiles.push_back(copy);
     S->current_profile_idx = (int)S->config.profiles.size() - 1;
     rebuild_profile_combo(S);

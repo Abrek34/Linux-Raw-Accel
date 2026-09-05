@@ -16,6 +16,9 @@ struct power {
     bool   gain_mode    = false;
     vec2d  offset       = {};
     double scale        = 1;
+    // BUG-02: the single shared exponent floor — scale derivation (io gain
+    // point) and curve evaluation must use the SAME n = max(ep, 1e-3).
+    double exponent     = 1;
     double constant     = 0;
     double cap_x        = DBL_MAX;
     double cap_y        = DBL_MAX;
@@ -25,7 +28,13 @@ struct power {
     power() = default;
 
     power(const accel_args& args) : gain_mode(args.gain) {
-        auto n = args.exponent_power > 0 ? args.exponent_power : 1e-4;
+        // BUG-02: previously scale_from_gain_point floored the exponent at
+        // 1e-3 while base_fn_impl evaluated the raw exponent_power, so for
+        // ep ∈ [1e-4, 1e-3) gain(cap_x) < cap_y. Floor once here and share the
+        // same n everywhere (offset, constant, cap, evaluation).
+        double in_n = args.exponent_power > 0 ? args.exponent_power : 1e-4;
+        exponent = in_n < 1e-3 ? 1e-3 : in_n;
+        auto n = exponent;
 
         if (args.cap_mode_val != cap_mode::io) {
             scale = args.scale;
@@ -51,7 +60,7 @@ struct power {
                 legacy_cap = args.cap.y;
                 break;
             case cap_mode::in:
-                if (args.cap.x > 0) legacy_cap = base_fn_impl(args.cap.x, args);
+                if (args.cap.x > 0) legacy_cap = base_fn_impl(args.cap.x);
                 break;
             case cap_mode::out:
             default:
@@ -82,28 +91,28 @@ struct power {
             break;
         }
 
-        constant_b = integration_constant(cap_x, cap_y, base_fn_impl(cap_x, args));
+        constant_b = integration_constant(cap_x, cap_y, base_fn_impl(cap_x));
     }
 
     double operator()(double speed, const accel_args& args) const {
         if (speed <= 0) return 1.0;
         if (!gain_mode) {
-            double out = base_fn_impl(speed, args);
+            double out = base_fn_impl(speed);
             return minsd(out, legacy_cap);
         }
         // D8: reference base_fn returns offset.y below offset.x.
         if (speed <= offset.x) return (offset.x > 0 ? offset.y : 1.0);
         if (speed < cap_x) {
-            return base_fn_impl(speed, args);
+            return base_fn_impl(speed);
         } else {
             return cap_y + constant_b / speed;
         }
     }
 
 private:
-    double base_fn_impl(double x, const accel_args& args) const {
+    double base_fn_impl(double x) const {
         if (x <= offset.x) return offset.y;
-        return std::pow(scale * x, args.exponent_power) + constant / x;
+        return std::pow(scale * x, exponent) + constant / x;
     }
 
     static double gain_fn(double input, double power, double sc) {
@@ -117,13 +126,10 @@ private:
 
     static double scale_from_gain_point(double input, double gain, double power) {
         if (input <= 0) return 1.0; // guard: degenerate io cap → identity scale (no dead curve)
-        // P81: for a tiny exponent (sanitized floor 1e-4) the exponent
-        // 1/power is ~1e4, so pow(gain/(power+1), 1/power) overflows to Inf,
-        // which propagates to gain = Inf and silently zeroes the output.
-        // Floor the exponent so the io gain point stays finite, and fall back
-        // to identity scale (1) if a pathologically large gain still overflows.
-        double n  = power < 1e-3 ? 1e-3 : power;
-        double sc = std::pow(gain / (n + 1), 1.0 / n) / input;
+        // The caller already passes the shared floored exponent n = max(ep,1e-3)
+        // (BUG-02), so 1.0/power ≤ 1000 cannot overflow to Inf; the isfinite
+        // fallback below still protects a pathologically large requested gain.
+        double sc = std::pow(gain / (power + 1), 1.0 / power) / input;
         return std::isfinite(sc) ? sc : 1.0;
     }
 

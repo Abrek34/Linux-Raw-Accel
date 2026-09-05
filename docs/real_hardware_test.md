@@ -5,16 +5,6 @@ This document is the step-by-step protocol for validating RawAccel Linux's
 virtual mice, so real feel must be assessed on your physical machine. Run this
 session on the machine and mouse you actually game with.
 
-> **Quick companion:** if you want a *single-window* A/B pass instead of the
-> full feel session — one that locks the pointer so desktop windows/pages are
-> NOT disturbed while you test — use the GUI's **mouse lock test window**
-> (status bar → "Fare Testi / Mouse Test" button). It confines the cursor,
-> stream-tests telemetry, accepts ESC release, and includes a per-family
-> acceptance table with the exact expected gains. See
-> **`docs/test_window_usage.md`** for that protocol; the numbers and curve
-> table below (Section 3.3) are the same single source the window's acceptance
-> table is built from.
-
 > Play/test each profile long enough to judge it. Per README: "spend
 > 30–60 min per config before judging" — for this fast A/B pass we use the
 > compact 5–10 min window below, but lengthen it if you are unsure.
@@ -344,7 +334,7 @@ daemon resets counters on every dump, so each run is independent).
 | P57 / P64 / P73 live daemon, pan~4000 cnt/s (VM) | 1.75–2.25 | 2.75–3.75 | 3.75–5.25 | uinput virtual mouse, consistent across runs |
 | P94 precision ramp (VM, n=19487) | 1.75 | 3.25–3.75 | 4.75 | new `precision` scenario, reproducible |
 | P101 precision ramp, deadline-driven harness (VM, n=27043) | 1.75 | 3.75 | 4.75 | fixed timing; ~2× P94 sample count (high end now truly exercised) |
-| P109 per-mod acceptance, live daemon + uinput (VM) | 2.75–3.75 | 4.75–5.75 | 7–15 | one run per preset family (n≈850–5300); see §4.3 |
+| Per-mod acceptance, live daemon + uinput (VM) | 2.75–3.75 | 4.75–5.75 | 7–15 | one run per preset family (n≈850–5300); see §4.3 |
 
 Your real-hardware numbers should be **in the low single digits at p50/p95**,
 matching the P57/P64/P94 ballpark (VM jitter disappears on real hardware). A
@@ -359,16 +349,16 @@ VM):
 
 ```bash
 gcc -O2 -o build-manual/virtmouse-game scripts/virtmouse-game.c
-sudo build-manual/virtmouse-game precision 60     # 120→4000 cnt/s sawtooth ramp
-rawaccel-cli latency
+sudo build-manual/virtmouse-game precision 60 &   # keep it GRABBED while snapshotting
+sleep 3 && rawaccel-cli latency                   # snapshot while the device is alive
 ```
+If you run the harness in the foreground instead, it destroys the uinput device on
+exit and the daemon resets that device's counters on removal — the dump then reads
+empty ("No motion events recorded yet"). Snapshot **while the run is still going**.
 
 Scenarios: `flick` (fast bursts), `pan` (sustained 4000 cnt/s), `mix`
 (flick + micro-moves), `precision` (P94: 1 s sawtooth 120→4000 cnt/s,
-≈150→5000 ips at 800 DPI, crossing the esport grid 2000/3000/4000 ips),
-`locked` (P109: coordinate stream confined to a 90×60 px box with fast
-re-wraparound at 1000 Hz — the signature a pointer grab-locked in the test
-window produces; see `docs/test_window_usage.md` §6). The
+≈150→5000 ips at 800 DPI, crossing the esport grid 2000/3000/4000 ips). The
 harness writes to `/dev/uinput`; `sudo` always works, and any `input`-group
 member can run it without (only one daemon may hold the grab). Then
 do the real-mouse version (Section 4.1) while gaming — the two together give
@@ -376,22 +366,22 @@ you the full split: *daemon processing* vs *HID + game*. Compare the Max/tail
 between them: on real hardware the harness Max should largely vanish, which
 confirms the VM tail was host jitter.
 
-### 4.4 P109 per-parameter acceptance runs (each preset family, live daemon)
+### 4.4 Per-parameter acceptance runs (each preset family, live daemon)
 
-P109 (R47) acceptance: create each preset family as its own profile, activate
+Per-mod acceptance: create each preset family as its own profile, activate
 it, inject motion with the harness while **still grabbed** (start the harness,
 wait ~3 s, then snapshot — a dump taken after the harness exits reads an empty
 histogram, since removal resets the counters), and check both the **latency
 histogram** and the **live telemetry gain**:
 
 ```bash
-rawaccel-cli create-preset cs2 p109_cs2 && rawaccel-cli set p109_cs2
+rawaccel-cli create-preset cs2 p_cs2 && rawaccel-cli set p_cs2
 sudo build-manual/virtmouse-game precision 10 &   # still running when you snapshot
 sleep 3 && rawaccel-cli latency                    # IPC snapshot, live device
 rawaccel-cli status --json | grep -A20 '"name": "P57'   # telem_in/out_ips, telem_gain
 ```
 
-VM reference (23:42, live daemon `186k`/PID 185957, uinput "P57" id
+VM reference (23:42, live daemon PID 185957, uinput "P57" id
 `usb:0e0f:1337:`, n from 10 s precision/pan runs):
 
 | Family (profile) | mode | telem gain @ snapshot | p50 | p95 | p99 | Max | verdict |

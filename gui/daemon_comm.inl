@@ -110,16 +110,37 @@ static std::vector<std::string> daemon_sock_candidates() {
     return v;
 }
 
+/// True if any candidate IPC socket file exists on disk.  Cheap (stat-only):
+/// lets tick-driven callers skip the IPC entirely — and its socket timeouts —
+/// when the daemon is down (BUG-05 / BUG-10).
+static bool daemon_socket_exists() {
+    for (const auto& s : daemon_sock_candidates())
+        if (access(s.c_str(), F_OK) == 0) return true;
+    return false;
+}
+
 /// Raw IPC send: connect, write the full request bytes, read the response.
-/// The 1 s timeout covers the daemon persisting (with fsync) a rooot-owned
-/// config file before replying — 100 ms was too tight for that path.
+/// `timeout_ms` bounds BOTH the send and receive timeouts (default 150 ms —
+/// deliberately smaller than the GUI's 250 ms telemetry tick, so a dead-but-
+/// listening daemon can never wedge the main thread for 2×1 s, BUG-05).
+/// The config-push RPC uses a much longer timeout because the daemon serves
+/// set_config only after fsync'ing a root-owned file.
+///
+/// Response-end detection (BUG-06): the daemon terminates every reply with a
+/// single '\n' (one JSON line per response), so the reader stops at the
+/// newline or at a clean peer close — NOT when the socket timeout fires.  A
+/// positive read that times out mid-line is treated as "incomplete" and
+/// discarded, so a truncated JSON is never parsed (each call also builds a
+/// fresh local buffer, so nothing carries over to the next tick).
 /// Returns an empty string on failure.
-static std::string daemon_ipc_send_raw(const std::string& req) {
+static std::string daemon_ipc_send_raw(const std::string& req, int timeout_ms = 150) {
     for (const auto& sock : daemon_sock_candidates()) {
         int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
         if (fd < 0) continue;
 
-        struct timeval tv { .tv_sec = 1, .tv_usec = 0 }; // 1 s
+        struct timeval tv;
+        tv.tv_sec  = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
@@ -144,35 +165,61 @@ static std::string daemon_ipc_send_raw(const std::string& req) {
         }
         if (left > 0) { close(fd); continue; } // could not send fully — next candidate
 
-        // Read response (up to 64KB)
+        // Read until the newline-terminated response.  The 4 MiB cap is far
+        // beyond any real payload (status + many devices + LUT) but keeps
+        // memory bounded on a misbehaving peer.
+        constexpr size_t MAX_IPC_RESPONSE_BYTES = 4 * 1024 * 1024;
         std::string resp;
+        resp.reserve(8192);
         char buf[4096];
-        while (true) {
+        bool complete = false;
+        while (resp.size() < MAX_IPC_RESPONSE_BYTES) {
             ssize_t n = recv(fd, buf, sizeof(buf), 0);
-            if (n <= 0) break;
+            if (n == 0) { complete = true; break; } // peer closed — clean EOF
+            if (n < 0)  break;                      // timeout / error — incomplete
             resp.append(buf, (size_t)n);
-            if (resp.size() > 65536) break; // safety cap
+            if (resp.find('\n') != std::string::npos) { complete = true; break; }
         }
         close(fd);
-        return resp;
+        return complete ? resp : std::string();
     }
     return {};
 }
 
 /// Send a one-line command to the daemon socket and return the response.
 /// Returns an empty string on failure.
-static std::string daemon_ipc_query(const std::string& cmd) {
-    return daemon_ipc_send_raw(cmd + "\n");
+static std::string daemon_ipc_query(const std::string& cmd, int timeout_ms = 150) {
+    return daemon_ipc_send_raw(cmd + "\n", timeout_ms);
 }
 
 /// Push the full config to the daemon over IPC (the daemon's "set_config" RPC).
 /// The daemon persists it to ITS OWN config path — a root systemd daemon writes
 /// /etc/rawaccel/settings.json even though the GUI's working copy lives in the
-/// user's ~/.config — and live-applies it.  Works for any input-group user.
+/// user's ~/.config — and live-applies it.  Uses a 5 s timeout: the daemon
+/// blocks only until it has fsync'd its root-owned config file (that path was
+/// tighter than 100 ms in the original design).  Works for any input-group user.
 /// Returns true only if the daemon acknowledged the config.
 bool daemon_ipc_push_config(const std::string& json) {
     std::string req = "set_config " + std::to_string(json.size()) + "\n" + json;
-    return daemon_ipc_send_raw(req).find("\"ok\":true") != std::string::npos;
+    return daemon_ipc_send_raw(req, 5000)
+        .find("\"ok\":true") != std::string::npos;
+}
+
+/// True when /proc/<pid>/comm names a rawaccel-daemon process.  Guards against
+/// stale PID files whose PID was recycled by an unrelated process (BUG-07):
+/// kill(pid,0) alone cannot tell us *which* process the PID now belongs to.
+static bool pid_is_rawaccel_daemon(pid_t pid) {
+    char comm_path[64];
+    snprintf(comm_path, sizeof(comm_path), "/proc/%d/comm", (int)pid);
+    FILE* cf = fopen(comm_path, "r");
+    if (!cf) return false; // no such process (or no permission)
+    char comm[64] = {};
+    // Zero-init guarantees a NUL terminator even if fgets yields nothing.
+    (void)!fgets(comm, sizeof(comm), cf);
+    fclose(cf);
+    size_t len = strlen(comm);
+    if (len > 0 && comm[len-1] == '\n') comm[len-1] = '\0';
+    return strcmp(comm, "rawaccel-daemon") == 0;
 }
 
 pid_t read_daemon_pid() {
@@ -193,7 +240,11 @@ pid_t read_daemon_pid() {
         // the unused result silent for -Wunused-result + _FORTIFY_SOURCE.
         (void)!fscanf(fp, "%d", &pid);
         fclose(fp);
-        if (pid > 0 && kill(pid, 0) == 0) return pid;
+        if (pid > 0 && pid_is_rawaccel_daemon(pid)) return pid;
+        // BUG-07: stale PID file (PID recycled, or a dead daemon left it
+        // behind) — remove it so future lookups never signal the wrong
+        // process and the /proc fallback below gets a clean slate.
+        if (pid > 0) unlink(path.c_str());
     }
 
     // 2. Fallback: scan /proc for rawaccel-daemon process name
@@ -241,11 +292,137 @@ pid_t read_daemon_pid() {
 }
 
 bool daemon_running() {
-    // Fast path: try IPC ping first (socket exists only while daemon is running)
-    std::string pong = daemon_ipc_query("ping");
-    if (!pong.empty() && pong.find("pong") != std::string::npos) return true;
+    // Fast path: try IPC ping first (socket exists only while daemon is running).
+    // Skip the ping entirely when no socket file is present (BUG-10 — no query).
+    if (daemon_socket_exists()) {
+        std::string pong = daemon_ipc_query("ping");
+        if (!pong.empty() && pong.find("pong") != std::string::npos) return true;
+    }
     // Fallback: check PID file / /proc scan
     return read_daemon_pid() > 0;
+}
+
+// ── Per-device status JSON selection (BUG-02) ────────────────────────────────
+// The daemon's status_json() emits one object per opened mouse under
+// "devices":[...].  The GUI previously read the FIRST occurrence of a given
+// key in the whole response, which silently bound every readout to the first
+// (arbitrarily opened) device — wrong DPI/battery/telemetry whenever the active
+// profile targets a different mouse.  These helpers slice out the device whose
+// "device_id" matches the active profile, falling back to the first device in
+// the array, so all per-device readouts agree with what the active profile
+// actually drives.
+
+/// Skip one JSON string literal at text[pos] == '"' (handles \" and passes
+/// back pos past the closing quote). Returns std::string::npos on malformed.
+static size_t json_skip_string(const std::string& text, size_t pos) {
+    if (pos >= text.size() || text[pos] != '"') return std::string::npos;
+    for (size_t i = pos + 1; i < text.size(); i++) {
+        if (text[i] == '\\') { i++; continue; }
+        if (text[i] == '"')  return i + 1;
+    }
+    return std::string::npos;
+}
+
+/// Given an opening '{' at text[start], return the offset one past the matching
+/// '}' — tolerating nested objects and quoted strings. std::string::npos on
+/// unbalanced input.
+static size_t json_object_end(const std::string& text, size_t start) {
+    if (start >= text.size() || text[start] != '{') return std::string::npos;
+    int depth = 0;
+    for (size_t i = start; i < text.size(); i++) {
+        char c = text[i];
+        if (c == '"') { i = json_skip_string(text, i); if (i == std::string::npos) return std::string::npos; i--; continue; }
+        if (c == '{') depth++;
+        else if (c == '}') {
+            depth--;
+            if (depth == 0) return i + 1;
+            if (depth < 0)  return std::string::npos;
+        }
+    }
+    return std::string::npos;
+}
+
+/// String value of the "key" field inside a single JSON object {…} fragment.
+/// Returns empty string if absent/malformed.
+static std::string json_string_field(const std::string& obj, const char* key) {
+    std::string needle = "\"" + std::string(key) + "\"";
+    size_t pos = obj.find(needle);
+    if (pos == std::string::npos) return {};
+    pos = obj.find(':', pos + needle.size());
+    if (pos == std::string::npos) return {};
+    pos = obj.find_first_not_of(" \t\r\n", pos + 1);
+    if (pos == std::string::npos || obj[pos] != '"') return {};
+    size_t e = json_skip_string(obj, pos);
+    if (e == std::string::npos) return {};
+    return obj.substr(pos + 1, e - pos - 2);
+}
+
+/// True if the object fragment contains a "key" member.
+static bool json_has_field(const std::string& obj, const char* key) {
+    return obj.find("\"" + std::string(key) + "\"") != std::string::npos;
+}
+
+/// device_id of the profile the GUI currently edits / the daemon applies.
+/// config.active_profile is a profile NAME; we resolve it to the profile's
+/// device_id (empty string = "all devices" catch-all).
+static std::string active_profile_device_id(AppState* S) {
+    for (const auto& p : S->config.profiles)
+        if (p.name == S->config.active_profile) return p.device_id;
+    return {};
+}
+
+/// Slice of the status response JSON for the device the active profile targets.
+/// Selection order (all within "devices":[…]):
+///   1. the first object whose device_id equals the active profile's;
+///   2. the first object exposing telem_in_ips (a live telemetry source);
+///   3. the first object in the array.
+/// Returns the raw "{…}" fragment, or an empty string when there is no device
+/// data.
+static std::string daemon_device_slice(const std::string& resp, AppState* S) {
+    std::string needle = "\"devices\"";
+    size_t arr = resp.find(needle);
+    if (arr == std::string::npos) return {};
+    arr = resp.find('[', arr + needle.size());
+    if (arr == std::string::npos) return {};
+
+    std::string want = active_profile_device_id(S);
+    std::string first, live, match;
+    size_t i = arr + 1;
+    while (i < resp.size()) {
+        size_t obj_start = resp.find('{', i);
+        if (obj_start == std::string::npos) break;
+        size_t obj_end = json_object_end(resp, obj_start);
+        if (obj_end == std::string::npos) break;
+        std::string obj = resp.substr(obj_start, obj_end - obj_start);
+        if (first.empty()) first = obj;
+        if (!want.empty() && json_string_field(obj, "device_id") == want && match.empty())
+            match = obj;
+        if (live.empty() && json_has_field(obj, "telem_in_ips"))
+            live = obj;
+        if (!match.empty()) break;
+        i = obj_end;
+    }
+    return !match.empty() ? match : !live.empty() ? live : first;
+}
+
+/// Numeric value of `key` inside the device slice the active profile targets.
+/// Returns -1 when the device slice is absent, the key is missing, or the value
+/// is not a finite number.
+double daemon_device_field(const std::string& resp, AppState* S, const char* key) {
+    std::string slice = daemon_device_slice(resp, S);
+    if (slice.empty()) return -1;
+    std::string needle = "\"" + std::string(key) + "\":";
+    size_t pos = slice.find(needle);
+    if (pos == std::string::npos) return -1;
+    size_t start = slice.find_first_not_of(" \t", pos + needle.size());
+    size_t end = slice.find_first_of(",}", start);
+    if (end == std::string::npos || end <= start) return -1;
+    std::string val = slice.substr(start, end - start);
+    errno = 0;
+    char* e = nullptr;
+    double v = std::strtod(val.c_str(), &e);
+    if (e == val.c_str() || errno != 0 || !std::isfinite(v)) return -1;
+    return v;
 }
 
 void update_daemon_status(AppState* S) {
@@ -263,46 +440,34 @@ void update_daemon_status(AppState* S) {
     if (S->daemon_stop_btn)  gtk_widget_set_sensitive(S->daemon_stop_btn,  running);
     if (S->daemon_reload_btn)gtk_widget_set_sensitive(S->daemon_reload_btn,running);
 
-    // Query and display battery level from daemon
+    // Query and display battery level from daemon — but ONLY when the daemon is
+    // actually reachable (BUG-10): with the daemon down this previously fired a
+    // pointless status IPC every refresh and showed "Battery: unknown" as if a
+    // battery were attached.  The value comes from the CURRENT PROFILE's device
+    // slice, not the first device in the array (BUG-02).
     if (S->battery_detected_lbl) {
-        // Query daemon status via IPC to get detected_battery
-        std::string resp = daemon_ipc_query("status");
-        int battery = -1;
-        size_t pos = resp.find("\"detected_battery\"");
-        if (pos != std::string::npos) {
-            // Find the value after "detected_battery":
-            size_t start = resp.find(':', pos);
-            if (start != std::string::npos) {
-                start = resp.find_first_not_of(" \t", start + 1);
-                size_t end = resp.find_first_of(",}", start);
-                if (end != std::string::npos && end > start) {
-                    std::string val_str = resp.substr(start, end - start);
-                    // Same hardening as the kwinrc parsing above — atoi() is UB
-                    // on out-of-range input. strtol + errno + full-token check;
-                    // a partial/garbage token keeps battery at -1 ("unknown").
-                    errno = 0;
-                    char* e = nullptr;
-                    long v = strtol(val_str.c_str(), &e, 10);
-                    if (e != val_str.c_str() && errno == 0 && *e == '\0' &&
-                        v >= 0 && v <= 100)
-                        battery = (int)v;
+        if (running) {
+            std::string resp = daemon_ipc_query("status");
+            int battery = (int)daemon_device_field(resp, S, "detected_battery");
+            if (battery >= 0 && battery <= 100) {
+                gtk_widget_set_visible(GTK_WIDGET(S->battery_detected_lbl), TRUE);
+                if (battery <= 20) {
+                    // Low battery warning
+                    gtk_label_set_markup(GTK_LABEL(S->battery_detected_lbl),
+                        trf("<b><span foreground='red'>Battery: %d%% (Low!)</span></b>", battery).c_str());
+                } else {
+                    gtk_label_set_markup(GTK_LABEL(S->battery_detected_lbl),
+                        trf("<b>Battery: %d%%</b>", battery).c_str());
                 }
-            }
-        }
-        if (battery >= 0 && battery <= 100) {
-            gtk_widget_set_visible(GTK_WIDGET(S->battery_detected_lbl), TRUE);
-            if (battery <= 20) {
-                // Low battery warning
-                gtk_label_set_markup(GTK_LABEL(S->battery_detected_lbl),
-                    trf("<b><span foreground='red'>Battery: %d%% (Low!)</span></b>", battery).c_str());
             } else {
+                gtk_widget_set_visible(GTK_WIDGET(S->battery_detected_lbl), TRUE);
                 gtk_label_set_markup(GTK_LABEL(S->battery_detected_lbl),
-                    trf("<b>Battery: %d%%</b>", battery).c_str());
+                    tr("<b>Battery: unknown</b>"));
             }
         } else {
-            gtk_widget_set_visible(GTK_WIDGET(S->battery_detected_lbl), TRUE);
-            gtk_label_set_markup(GTK_LABEL(S->battery_detected_lbl),
-                tr("<b>Battery: unknown</b>"));
+            // Daemon down: no status to show — hide the battery row (BUG-10)
+            // instead of leaving a stale/misleading "unknown" (and skip the IPC).
+            gtk_widget_set_visible(GTK_WIDGET(S->battery_detected_lbl), FALSE);
         }
     }
 }

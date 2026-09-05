@@ -531,6 +531,7 @@ static void refresh_language(AppState* S) {
     // Restore combo selections from the profile + re-apply per-mode visibility.
     rebuild_profile_combo(S);   // -> profile_to_widgets, update_mode_sensitivity
     update_daemon_status(S);    // daemon status + battery markup are dynamic
+    mouse_test_refresh_language(S); // open test window stays in sync (BUG-09)
 
     // Translate the idle status if it still shows the untranslated default.
     if (S->status_bar) {

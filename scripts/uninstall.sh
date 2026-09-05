@@ -26,6 +26,11 @@ sleep 0.3
 pkill -KILL -x rawaccel-daemon 2>/dev/null || true
 # Clean up PID/socket artefacts
 rm -f /run/rawaccel.pid /run/rawaccel.sock /tmp/rawaccel.pid /tmp/rawaccel.sock 2>/dev/null || true
+# P121/BUG-09: the R49 daemon writes the pid+sock under $XDG_RUNTIME_DIR
+# (=/run/user/$UID) — the /run /tmp paths alone left these behind.
+for d in /run/user/*; do
+    rm -f "$d/rawaccel.pid" "$d/rawaccel.sock" 2>/dev/null || true
+done
 
 # Remove service file (R44: setup.sh installs to /usr/lib; /etc + /etc/user
 # are legacy shadow locations cleaned for completeness)
@@ -67,3 +72,22 @@ echo "NOTE: /etc/rawaccel/settings.json was kept (your config)."
 echo "      To remove it too: sudo rm -rf /etc/rawaccel"
 echo ""
 echo "NOTE: User config ~/.config/rawaccel/ was not touched."
+
+# P121/BUG-09: remove KDE kwinrc traces for every user (per-device
+# "(RawAccel)" libinput overrides + restore adaptive global), matching
+# setup.sh --uninstall which runs kde-fix-accel.sh --remove for $REAL_USER.
+KDE_FIX="$(cd "$(dirname "$0")" && pwd)/kde-fix-accel.sh"
+if [[ -x "$KDE_FIX" ]]; then
+    shopt -s nullglob
+    homes=(/home/*/.config/kwinrc)
+    shopt -u nullglob
+    if [[ ${#homes[@]} -gt 0 ]]; then
+        for home in /home/*; do
+            [[ -f "$home/.config/kwinrc" ]] || continue
+            user="$(basename "$home")"
+            echo "      Removing kwinrc traces for user '$user'..."
+            sudo -u "$user" bash "$KDE_FIX" --remove >/dev/null 2>&1 || \
+                echo "      (kwinrc trace cleanup skipped for '$user')"
+        done
+    fi
+fi

@@ -96,6 +96,15 @@ install_deps() {
     say "[1/7] Bağımlılıklar kuruluyor..."
     if is_arch_like; then
         ok "Arch/CachyOS tespit edildi → pacman"
+        # P121/BUG-08: salt "-Sy" kısmi yükseltmeye (partial upgrade) yol açar —
+        # sistem geri kalanı eski kütüphanelerde kalır, ABI uyumsuzluğu riski.
+        # "-Sy" sırf paket veritabanını senkronlamak için kullanılıyor; tam
+        # sistem güncellemesi ayrıca önerilir. Sessiz kısmi yükseltme yapmayız:
+        if [[ ${SKIP_SYSUPGRADE_WARN:-0} -ne 1 ]]; then
+            warn "pacman -Sy: yalnızca gerekli paketler kurulur (veritabanı senkronu)."
+            warn "Kısmi yükseltme riskini önlemek için önce bir kez:  sudo pacman -Syu"
+            warn "Bu uyarıyı atlamak için: SKIP_SYSUPGRADE_WARN=1 bash setup.sh"
+        fi
         # qt6-tools: qdbus6 → KDE Plasma 6 canlı reconfigure
         # -Sy: paket veritabanı ilk kez yoksa/eskidiyse "bağımlılık hatası"
         # alınmaması için önce senkronla.
@@ -413,8 +422,22 @@ print_summary() {
 do_uninstall() {
     say "Kaldırılıyor..."
     clean_old_install
-    rm -rf /etc/rawaccel
-    ok "Kaldırma tamamlandı. Kullanıcı configi (~/.config/rawaccel) korundu."
+    # P121/BUG-09: setup.sh --uninstall ve scripts/uninstall.sh artık aynı
+    # davranıyor — /etc/rawaccel (kullanıcı configi) KORUNUR, silinmez.
+    # "Tamamen silmek için: rm -rf /etc/rawaccel" notu yazılır.
+    # XDG_RUNTIME_DIR socket/pid izleri (PID önceliği: $XDG_RUNTIME_DIR →
+    # /run → /tmp; /run/user/$UID altında kalıyordu).
+    for d in /run/user/*; do
+        rm -f "$d/rawaccel.pid" "$d/rawaccel.sock" 2>/dev/null || true
+    done
+    # KDE kwinrc izleri: per-device (RawAccel) override bölümlerini kaldır ve
+    # global [Libinput]'i adaptive'e döndür (kde-fix-accel.sh --remove).
+    if [[ -n "$REAL_USER" ]] && [[ -x "$ROOT/scripts/kde-fix-accel.sh" ]]; then
+        sudo -u "$REAL_USER" bash "$ROOT/scripts/kde-fix-accel.sh" --remove \
+            || warn "kwinrc iz temizliği hata verdi (önemsiz)."
+    fi
+    ok "Kaldırma tamamlandı. Kullanıcı configi (~/.config/rawaccel + /etc/rawaccel) korundu."
+    echo "  /etc/rawaccel'i da silmek için: sudo rm -rf /etc/rawaccel"
     echo "  Tamamen silmek için: rm -rf $REAL_HOME/.config/rawaccel"
 }
 

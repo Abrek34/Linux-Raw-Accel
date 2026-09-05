@@ -111,6 +111,10 @@ struct AppState {
     GtkWidget* test_gain_lbl     = nullptr; // live "Gain (×)" value
     GtkWidget* test_status_lbl   = nullptr; // daemon-down / awaiting-motion note
     GtkWidget* test_hint_lbl     = nullptr; // lock-tier explanation (persistent)
+    GtkWidget* test_name_lbls[3] = {};      // "In/Out/Gain (×):" name labels (Bug-09)
+    GtkWidget* test_title_lbl    = nullptr; // "Mouse Lock Test" heading (Bug-09)
+    int        test_hint_state   = 0;       // hint: 0=Tier-1 locked, 1=Tier-2 confine, 2=Tier-3 n/a
+    int        test_status_state = -1;      // status: -1=unset, 0=live, 1=awaiting, 2=daemon down, 3=unfocused
     guint      test_poll_id      = 0;       // 250 ms telemetry poll source
     guint      test_confine_id   = 0;       // warp-confine tick (Tier-2 grab fallback)
     bool       test_grabbed      = false;   // Tier-1 X11 pointer grab active?
@@ -220,6 +224,8 @@ bool  daemon_running();
 bool  daemon_send_signal(int sig, std::string* err_out = nullptr);
 bool  daemon_ipc_push_config(const std::string& json);
 void  update_daemon_status(AppState* S);
+/// Best-match device JSON slice of a daemon status response (Bug-02).
+double daemon_device_field(const std::string& resp, AppState* S, const char* key);
 
 // profile
 void rebuild_profile_combo(AppState* S);
@@ -241,6 +247,9 @@ void update_lut_visibility(AppState* S);
 
 // UI entry point
 void build_ui(AppState* S, GtkApplication* gapp);
+
+// mouse lock test window (implemented in mouse_test.inl, Bug-09 language refresh)
+void mouse_test_refresh_language(AppState* S);
 
 // GTK callbacks — forward declarations (implementations in .inl files)
 void on_activate(GtkApplication* gapp, gpointer user_data); // user_data = AppState*

@@ -99,18 +99,37 @@ static accel_args accel_args_from_json(const json& j) {
         a.mode = str_to_mode(j["mode"].get<std::string>());
     if (j.contains("gain") && j["gain"].is_boolean())
         a.gain = j["gain"].get<bool>();
-    if (j.contains("input_offset"))     a.input_offset     = j["input_offset"].get<double>();
-    if (j.contains("output_offset"))    a.output_offset    = j["output_offset"].get<double>();
-    if (j.contains("acceleration"))     a.acceleration     = j["acceleration"].get<double>();
-    if (j.contains("decay_rate"))       a.decay_rate       = j["decay_rate"].get<double>();
-    if (j.contains("gamma"))            a.gamma            = j["gamma"].get<double>();
-    if (j.contains("motivity"))         a.motivity         = j["motivity"].get<double>();
-    if (j.contains("exponent_classic")) a.exponent_classic = j["exponent_classic"].get<double>();
-    if (j.contains("scale"))            a.scale            = j["scale"].get<double>();
-    if (j.contains("exponent_power"))   a.exponent_power   = j["exponent_power"].get<double>();
-    if (j.contains("limit"))            a.limit            = j["limit"].get<double>();
-    if (j.contains("sync_speed"))       a.sync_speed       = j["sync_speed"].get<double>();
-    if (j.contains("smooth"))           a.smooth           = j["smooth"].get<double>();
+    // P120-FAZ2 (A5-02): the 12 numeric accel_args fields are strictly
+    // validated.  Administrative decision: a wrong-typed (string/object/array)
+    // or non-finite (NaN/Inf, incl. overflow like 1e999) value for ANY of them
+    // REJECTS the whole config (load throws → CLI exits 1, file untouched)
+    // instead of silently degrading to defaults — a hand-edited or
+    // schema-mismatched config must not load half-correct acceleration math.
+    // Absence still means "use default" (skip silently).
+    auto require_number = [&](const char* key, double& out) {
+        if (!j.contains(key)) return;
+        const auto& v = j[key];
+        if (!v.is_number())
+            throw std::runtime_error(std::string("config field '") + key +
+                                     "' must be a number, got " + v.type_name());
+        double dv = v.get<double>();
+        if (!std::isfinite(dv))
+            throw std::runtime_error(std::string("config field '") + key +
+                                     "' must be finite");
+        out = dv;
+    };
+    require_number("input_offset",     a.input_offset);
+    require_number("output_offset",    a.output_offset);
+    require_number("acceleration",     a.acceleration);
+    require_number("decay_rate",       a.decay_rate);
+    require_number("gamma",            a.gamma);
+    require_number("motivity",         a.motivity);
+    require_number("exponent_classic", a.exponent_classic);
+    require_number("scale",            a.scale);
+    require_number("exponent_power",   a.exponent_power);
+    require_number("limit",            a.limit);
+    require_number("sync_speed",       a.sync_speed);
+    require_number("smooth",           a.smooth);
     if (j.contains("cap")) {
         auto& cap = j["cap"];
         // O3: silently use default on missing element or wrong type instead of throwing.
@@ -373,6 +392,20 @@ static void sanitize_accel_args(accel_args& a) {
     // cap values: negative caps are meaningless.
     if (a.cap.x < 0) a.cap.x = 0;
     if (a.cap.y < 0) a.cap.y = 0;
+
+    // P120-FAZ2 (Aj8 BUG-3): cap the gain-driving fields at the GUI gauge
+    // maxima (SCALE_MAX / EXP_POWER_MAX / CAP_X_MAX / CAP_Y_MAX /
+    // OUTPUT_OFFSET_MAX in config.hpp).  Previously sanitize had NO upper
+    // bound, so a hand-edited JSON or CLI value (scale=1e6, exponent_power=1e9)
+    // could push pow(scale·x, n) gains astronomically beyond anything the GUI
+    // gauge can produce.  The maxima are exactly the R15 boundary round-trip
+    // values, so in-envelope configs are unchanged and boundary values survive
+    // the load->save round-trip.
+    if (a.scale           > SCALE_MAX)         a.scale          = SCALE_MAX;
+    if (a.exponent_power  > EXP_POWER_MAX)     a.exponent_power = EXP_POWER_MAX;
+    if (a.cap.x           > CAP_X_MAX)         a.cap.x          = CAP_X_MAX;
+    if (a.cap.y           > CAP_Y_MAX)         a.cap.y          = CAP_Y_MAX;
+    if (a.output_offset   > OUTPUT_OFFSET_MAX) a.output_offset  = OUTPUT_OFFSET_MAX;
 }
 
 /// Clamp profile fields to safe ranges.

@@ -567,3 +567,64 @@ eklendi → 4 bölümde **151 kilitli sınır regresyonu**; accel header'larına
 **Kapılar:** run_tests **32798/32798**, ASan **32798/32798**, CLI kapıları PASS, oracle **915 satır /
 31 belgeli sapma / RESULT OK (değişmedi)** — ek stress case'i oracle grid'ine GİRMEDİ (unit-seviye).
 Kod değişikliğim yalnızca tests/test_accel.cpp (test, +~150 satır). **COMMIT YAPILMADI** (görev şartı). Kilit kaldırıldı.
+
+### Aj 4 [06 Eyl] P114 BUG-RAY PORTER
+Görev: tests/ + oracle/ + tr-coverage kusur avı (FAZ 1 — bul + raporla, KOD DEĞİŞTİRME).
+Kanıt (run): run_tests.sh → "=== Sonuç: 32798/32798 geçti ===" + 3 CLI kapısı ✓ (EXIT 0; ~30s). run_oracle.sh → "total rows compared: 915 / documented deviations: 31 / known deviations seen: 31 / RESULT: OK" (EXIT 0). run_tr_coverage.sh → "Result: PASS" (EXIT 0).
+Doğrulamalar: 31/31 listelenen sapma gerçekten sapıyor; ghost-row (docs∉grid) ve stale (no-longer-deviating) kontrolleri bağlı; oracle 39 case, isim çakışması yok (grep uniq -d temiz), 915 = 36×24 + 3×17 satır; tr_coverage gerçek kayıp literal anahtarı yakalar (sentetik dosya → "Result: FAIL" EXIT 1).
+
+[BUG-A] --filter eşleşmesiz çalışmada 0/0 geçti + exit 0 (yanlış yeşil)
+- Kaynak: ./build-manual/test_accel --filter zzz_no_such_section → "=== Sonuç: 0/0 geçti (168 section atlandı, --filter) ===" + EXIT=0; kod tests/test_accel.cpp:7817 "return g_failed ? 1 : 0" + run_tests.sh:24 textin forwarded "$@".
+- Sorun: Filtre hiçbir SECTION'ı eşleştirmezse g_passed=g_tests=g_failed=0 → 0/0 P geçti, exit 0. Filtre yazım hatası tüm testleri gizler, "sıfır test çalıştı" yeşil kapı olur.
+- Etki: CI'yı boş koşu ile yeşil gösterir; regresyon sessizce pas geçilir. run_tests.sh ile aynı davranış (argüman ikiletiliyor).
+- Önerilen düzeltme (genel): g_tests==0 ve g_have_filter ise hata (exit 2 veya 1) döndür; 0/0'ı FAIL say; ayrıca --filter sonrası ≥1 SECTION eşleştiğini özetle.
+
+[BUG-B] rawaccel-cli yoksa P83/P99/P107 CLI kapıları sessizce atlanır, exit 0 kalır
+- Kaynak: tests/run_tests.sh:28 "if [ -x "$CLI" ]" ; kanıt: build-manual/rawaccel-cli geçici taşınınca run_tests.sh → sadece "Sonuç: 32798/32798 geçti", hiçbir "SKIP"/uyarı yok, EXIT=0 (CLI geri getirildi).
+- Sorun: CLI binaire eksik/deriğimemişse 3 kapı (9 alt-kontrol) çalışmaz; ne uyarı ne sayaç etkisi, PASS izlenimi ıskalanmış kapsamı gizler.
+- Etki: CLI kapı regresyonu (P83/P99/P107) CI'da fark edilmeden sıfır kapsamla yeşil kalır.
+- Önerilen düzeltme (genel): CLI yoksa belirgin "SKIP: rawaccel-cli bulunamadı" yazıp exit !=0 yap (veya devre dışı bırakmayı belgele); test sayacına atlanan kapı sayısını ekle.
+
+[BUG-C] Oracle TOL gevşetme yeşil koşuyu HARD FAIL'e çevirir (stale-kontrol toleransla savaşıyor)
+- Kaynak: tests/oracle/run_oracle.sh:93-105 (stale = known - deviating → ERROR) + :18 TOL; kanıt: TOL=2 bash run_oracle.sh → "ERROR: 31 documented deviation(s) are NO LONGER deviations" + EXIT 1.
+- Sorun: TOL, sapma büyüklüğünü (≈0.33–0.998) aşacak kadar gevşetilince belgeli sapmalar "artık sapmıyor" sayılır ve koşu dokümantasyon yalanı gibi HATA verir. AGENTS.md "TOL=... tune tolerance" diyerek gevşetmeyi vaat ediyor; ama temiz/gevşek koşu asla yeşil olamaz — sıfır sapmalı mükemmel port bile exit 1'dir.
+- Etki: TOL ayarı pratikte sadece sıkılaştırma için çalışıyor; "0 sapmasız satır" senaryosunda run hata üretir (görev A-şartının ihlali). Stale-kontrol, "belge artık yalan" ile "koşu toleransı gevşek" ayrımını yapamıyor.
+- Önerilen düzeltme (genel): stale-ceza sadece TOL varsayılan (1e-9) altında uygulanır VEYA stale sayımı ayrı bir --strict flag'ine bağlanır; TOL gevşetmede "N sapma geçer içinde, M doküman satırı kapsam dışı (uyarı)" bilgiye düşer, hata olmaz.
+
+[BUG-D] Oracle $CXX ortam değişkenini yok sayar, g++ sabit çağrılıyor
+- Kaynak: tests/oracle/run_oracle.sh:15 "$CXX" set edilir ama :27 ve :32 "g++ $STD ..." ile doğrudan g++ çağrılıyor.
+- Sorun: CXX=clang++ override'ının hiçbir etkisi yok; g++ yüklü olmayan (clang-only) sistemlerde oracle kırılır. run_tests.sh:9/:16 ve run_tests_asan.sh:10/:22 $CXX'yi doğru kullanıyor — tutarsız.
+- Etki: derleyici portabilitesi başarısız; kullanıcı CXX ile düzeltmeye çalışınca "düzeltme yok" gibi durum oluşur.
+- Önerilen düzeltme (genel): :27 ve :32'de g++ yerine "$CXX" kullan.
+
+[BUG-E] run_oracle.sh başlığı "--tolerance REL" belgeliyor ama parse edilmiyor
+- Kaynak: tests/oracle/run_oracle.sh:9 (usage) vs :18 (sadece TOL env) ve :20 (yalnızca "--verbose" 1. argüman tanınır).
+- Sorun: `--tolerance 1e-6` geçersiz aksiyon — sessizce yok sayılır; TOL değişkeni tanımsız kalır. Ek pozisyonel argümanlar da yutulur.
+- Etki: kullanıcı dokümante edilen flag'e güvenip toleransı değiştiremez, yanıltıcı sonuç üretebilir.
+- Önerilen düzeltme (genel): --tolerance/--verbose argümanlarını gerçekten parse et (getopt veya döngü) ve TOL env ile birleştir.
+
+[BUG-F] tr_coverage yalnızca literal anahtarı doğrular; değişken/boş-string anahtarlar asla BAŞARISIZ sayılmaz
+- Kaynak: tests/tr_coverage.cpp:155-157 (dynamic_calls++ ) + :273 "fatal = !missing.empty()" (dynamic hiç geçmez); kanıt: sentetik `tr(w, "VarAnahtar")` + `tr(w,"")` → exit 0, MISSING none; mevcut koşuda "dynamic (skipped) calls: 33".
+- Sorun: Anahtar bir değişken/formatlanmış ifade ise (örn. tr(err.c_str()), tr(buf), boş literal) tarama atlar ve sayar ama asla fail filtresi yapmaz. Eksik bir çeviri bu kanaldan sonsuza dek yeşil kapının arkasında kalabilir.
+- Etki: "catch eder mi" sorusuna cevap: literal evet (kanıtlandı), dinamik kanal hayır — eksik dil anahtarı taraması %100 değil.
+- Önerilen düzeltme (genel): dynamic_calls>0 için bir bilgi/uyarı (exit 1 değilse bile) ekle; değişken anahtarlı çağrı sitelerini listele (insan doğrulaması); boş-string anahtarı ayrı budayıcıda yakala.
+
+[BUG-G] tr_coverage combo-array taraması yalnızca `NAME[ ... ] = {` biçimini bulur
+- Kaynak: tests/tr_coverage.cpp:201-207 (br<eq şartı: '[' eşittirden önce olmalı; açık parantez '=' sonrası).
+- Sorun: std::array<...> NAME = {...} veya braced-init (Nes{...}, '=' yok) / NAME = {...} (köşeli parantez yok) biçimindeki combo dizileri sessizce atlanır → anahtarları hiç taranmaz.
+- Etki: gui kodunun bu biçime evrilmesi durumunda tr-coverage yanlış PASSC üretir; gelecekteki bir refactor kapsamı sıfırlar.
+- Önerilen düzeltme (genel): '{' hedefini, '[' şartına bağımlı olmadan '=' veya braced-init sonrası ara; tanım bulunamayan combo dizilerini uyar.
+
+[BUG-H] run_tests.sh fail-erken çıkışlarında TMP sızıntısı (trap yok)
+- Kaynak: tests/run_tests.sh:29-136 — TMPCFG/TMPN256/TMPN257/TMPA/TMPP/TMPP.bak oluşturulur; rm yalnızca 66/103/136'da (normal akış); erken exit'ler: 45/54/63/79/84/92/100/127/132.
+- Sorun: CLI kapısından herhangi biri FAIL olursa script exit 1 ile çıkar ama geçici dosyalar /tmp'de kalır; önceki FAIL koşusu aynı adlara dokunmaz (mktemp benzersiz) ama yine de birikim olur.
+- Etki: düşük şiddet — tekrarlı CI koşularında /tmp dolumu/çöp; çapraz-kapı rastgele seed çakışması riski yok (mktemp).
+- Önerilen düzeltme (genel): script başına `trap 'rm -f ...' EXIT` ekle ve TMP değişkenlerini tek yerde listele.
+
+[BUG-I] AGENTS.md test sayıları eski (132 grup/21627 vs gerçek 168 section/32798 assert)
+- Kaynak: AGENTS.md:112 "132 test groups, 21627 runtime assertions", AGENTS.md:205 "21627 assertions, 132 groups"; gerçek: rg SECTION=168, run "32798/32798 geçti" (ölçüm seti 24 hız × 39 case).
+- Sorun: dokümante edilen test büyüklüğü gerçekle uyuşmuyor; sayılar eski turda güncellenmemiş.
+- Etki: tarama/audit kalibre sayıları yanıltıcı (ör. görev tanımındaki "32798 assert" ile AGENTS.md 21627 çelişiyor).
+- Önerilen düzeltme (genel): AGENTS.md Test bölümünü güncel (168 section / 32798 runtime assert) — kod değişikliği değil, dokümantasyon.
+
+SONUÇ: 9 bulgu (BUG-A..I). KRİTİK 3: BUG-A (0/0 yanlış yeşil — filtre hatası tüm testleri gizler), BUG-B (CLI kapıları sessiz SKIP — CI sıfır kapsamla yeşil), BUG-C (TOL gevşetme karşı-sezgisel hard FAIL — "0 sapmasız temiz koşu" hata üretir). ÖNERİ: Faz 2'de önce A+B (kapı bütünlüğü/exit-code), ardından C (stale-TOL ayrımı) ve D (CXX); F/G tr-coverage derinleştirmesi iş yükü düşük. Oracle'ın 31/31 sapma eşleşmesi + ghost/stale kontrolleri güçlü; kod tarafında sapma/şablon uyumu temiz.

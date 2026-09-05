@@ -25,11 +25,26 @@ echo ""
 
 # ── CLI davranış kapıları (P83: create-preset 256-char senkronu) ──────────────
 CLI="$ROOT/build-manual/rawaccel-cli"
+TMP_FILES=()
+cleanup_tmp() {
+    rm -f "${TMP_FILES[@]}"
+}
+trap cleanup_tmp EXIT   # P114 BUG-H: hiçbir fail-erken çıkışta /tmp kalmasın
+
+if [ ! -x "$CLI" ]; then
+    echo "Hata: CLI kapısı çalıştırılamadı: $CLI" >&2
+    echo "      rawaccel-cli derlenmemiş — P83/P99/P107 kapıları SESSİZCE ATLANAMAZ." >&2
+    echo "      Önce 'bash scripts/build.sh' çalıştırıp yeniden deneyin." >&2
+    exit 1   # P114 BUG-B: eksik CLI artık sessiz SKIP + exit 0 veremez
+fi
 if [ -x "$CLI" ]; then
     TMPCFG=$(mktemp)
-    rm -f "$TMPCFG"   # P42: var olan bos config uzerine yazilmaz; dosya yokken seed olusur
+    TMP_FILES+=( "$TMPCFG" )
+    rm -f "$TMPCFG"   # P42: var olan bos config uzerine yazilmaz; dosya yokken seed olusur   # P42: var olan bos config uzerine yazilmaz; dosya yokken seed olusur
     TMPN256=$(mktemp)
+    TMP_FILES+=( "$TMPN256" )
     TMPN257=$(mktemp)
+    TMP_FILES+=( "$TMPN257" )
     python3 - "$TMPN256" "$TMPN257" <<'PY'
 import sys
 open(sys.argv[1], 'w').write('a' * (256))
@@ -69,6 +84,7 @@ PY
     # Ekstra argümanlar sessizce yutulmuyor; hepsi rc=1 + usage. "-c ''" reel
     # config'e düşüp onu değiştirmemeli (P74 BULGU-2 sınıfı).
     TMPA=$(mktemp)
+    TMP_FILES+=( "$TMPA" )
     rm -f "$TMPA"
     set +e
     OUT=$("$CLI" -c "$TMPA" --no-daemon create pro >/dev/null 2>&1; "$CLI" -c "$TMPA" --no-daemon set pro BONUS 2>&1)
@@ -106,6 +122,7 @@ PY
     # Out-of-domain set-param values must exit 1 AND leave the config file
     # byte-identical (previously snap 90 silently stored 45 and exited 0).
     TMPP=$(mktemp)
+    TMP_FILES+=( "$TMPP" "$TMPP.bak" )
     rm -f "$TMPP" "$TMPP.bak"
     "$CLI" -c "$TMPP" --no-daemon create-preset gaming g >/dev/null 2>&1
     set +e

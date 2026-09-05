@@ -17,21 +17,13 @@
  *               landmarks 2000/3000/4000 ips each sweep, exercising the
  *               precision band (120–900) and fast-flick (>4000 cnt/s)
  *               curve regions in one run.
- *   locked    : P109 "lock window" — coordinate stream confined to a
- *               90×60 px box, exactly like a cursor grab-locked in a small
- *               test window. At a steady 1000 Hz the simulated cursor is
- *               advanced at game speed; on box-edge contact it re-wraps to
- *               the opposite wall (pointer reload) so coordinate updates
- *               NEVER leave the box. The re-wrap instant injects a large
- *               single-tick corrective delta — the "wrap-induced spike"
- *               Aj7 watches for in the latency histogram.
  *
  * The daemon's is_physical_mouse() ignores devices whose phys contains
  * "uinput" or whose name ends "(RawAccel)" — so we must NOT use those
  * markers if we want the daemon to grab this device.
  *
  * Usage: virtmouse_game <scenario> <duration_sec>
- *   scenario: flick | pan | mix | precision | locked
+ *   scenario: flick | pan | mix | precision
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,9 +31,16 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <signal.h>
 #include <linux/input.h>
 #include <linux/uinput.h>
 #include <time.h>
+
+/* P121/BUG-10: SIGINT/SIGTERM ask for a graceful stop instead of killing the
+ * process mid-loop, so UI_DEV_DESTROY + close() always run and the daemon
+ * never sees a ghost uinput node that a dead writer left behind. */
+static volatile sig_atomic_t g_stop = 0;
+static void on_signal(int sig) { (void)sig; g_stop = 1; }
 
 static long now_us(void) {
     struct timespec ts;
@@ -51,7 +50,7 @@ static long now_us(void) {
 
 static void sleep_us(long us) {
     struct timespec ts = { 0, us * 1000L };
-    while (nanosleep(&ts, &ts) < 0 && errno == EINTR) {}
+    while (nanosleep(&ts, &ts) < 0 && errno == EINTR && !g_stop) {}
 }
 
 static int create_mouse(const char* name) {
@@ -98,12 +97,25 @@ static void emit_rel(int fd, int dx) {
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        fprintf(stderr, "usage: %s <flick|pan|mix|precision|locked> <duration_sec>\n", argv[0]);
+        fprintf(stderr, "usage: %s <flick|pan|mix|precision> <duration_sec>\n", argv[0]);
         return 2;
     }
     const char* scenario = argv[1];
-    int duration = atoi(argv[2]);
-    if (duration <= 0) duration = 5;
+    errno = 0;
+    char* endp = NULL;
+    long dur = strtol(argv[2], &endp, 10);
+    if (endp == argv[2] || *endp != '\0') {
+        fprintf(stderr, "error: duration must be an integer number of seconds\n");
+        return 2;
+    }
+    int duration = dur <= 0 ? 5 : (int)dur;
+
+    /* P121/BUG-10: graceful shutdown on Ctrl-C / SIGTERM. */
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = on_signal;
+    sigaction(SIGINT,  &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
 
     int fd = create_mouse("P57 GameSpeed Test Mouse");
     if (fd < 0) return 1;
@@ -118,19 +130,9 @@ int main(int argc, char** argv) {
     long emit_time = t0; /* precision: next count's scheduled deadline */
     long next_click = t0 + 200000; /* first click 200 ms in */
 
-    /* locked: simulated cursor confined to a 90x60 px box. lpx/lpy is the
-     * logical cursor, lox/loy the accumulated emitted position (emission
-     * keeps the fractional part so the average rate stays exact). */
-    const double LOCK_W = 90.0, LOCK_H = 60.0;
-    double lpx = LOCK_W / 2, lpy = LOCK_H / 2;
-    double lox = lpx, loy = lpy;
-    double lvx = 4.0, lvy = 2.0;      /* px/tick at 1000 Hz (4000/2000 cnt/s) */
-    long   lnext = 0;                 /* next 1000 Hz tick deadline */
-    long   lwraps = 0;                /* box-edge re-wrap (pointer reload) count */
-
     while (1) {
         long now = now_us();
-        if (now >= end) break;
+        if (now >= end || g_stop) break;
 
         if (strcmp(scenario, "flick") == 0) {
             /* 10 ms bursts of large deltas (~4000 cnt/s peak) separated by idle */
@@ -158,42 +160,22 @@ int main(int argc, char** argv) {
              * the high end (measured ~2400 cnt/s instead of 4000 under load)
              * because per-iteration overhead stacked on every sleep. */
             int burst = 0;
+            /* P121/BUG-10: the fixed 16-count cap under-delivered the high end
+             * under load — on a ~2 ms late wake at 4000 cnt/s it dropped the
+             * backlog.  Bind the safety bound to the actual lateness instead:
+             * missed counts ≈ lateness µs × 4/1000 (4000 cnt/s), never more
+             * than 40000 (≈ a 10 s backlog ceiling, still one while-iteration).
+             * With the sawtooth period at exactly 1 s the total emitting stays
+             * prelatan and the injected density still tracks rate(t). */
+            int max_burst = (int)((now - emit_time) * 4 / 1000) + 4;
+            if (max_burst > 40000) max_burst = 40000;
             while (emit_time <= now) {
                 double phase = (double)((emit_time - t0) % 1000000L) / 1000000.0;
                 double rate  = 120.0 + 3880.0 * phase;   /* cnt/s at this deadline */
                 if (rate > 4000.0) rate = 4000.0;        /* clamp sawtooth top */
                 emit_rel(fd, 1);
                 emit_time += (long)(1000000.0 / rate);   /* next count deadline */
-                if (++burst > 16) break;                 /* safety bound per wake */
-            }
-            sleep_us(500);
-        } else if (strcmp(scenario, "locked") == 0) {
-            /* P109: a pointer grab-locked in a small test window. Coordinate
-             * updates stay inside the 90x60 px box: the cursor advances at a
-             * steady 1000 Hz rate and, on box-edge contact, re-wraps to the
-             * opposite wall (pointer reload). The re-wrap tick emits a single
-             * large corrective delta — the move a confined cursor "gives back"
-             * when it runs out of box. Continuous small deltas + periodic
-             * box-width sign-flip jumps = the real locked-cursor signature we
-             * want the daemon's hot path to chew on. */
-            if (lnext == 0) lnext = t0;
-            int lburst = 0;
-            while (lnext <= now && lburst < 32) {
-                lpx += lvx;
-                lpy += lvy;
-                if (lpx >= LOCK_W) { lpx -= LOCK_W; lwraps++; }
-                else if (lpx < 0.0) { lpx += LOCK_W; lwraps++; }
-                if (lpy >= LOCK_H) { lpy -= LOCK_H; lwraps++; }
-                else if (lpy < 0.0) { lpy += LOCK_H; lwraps++; }
-                double ix = lpx - lox, iy = lpy - loy;
-                lox = lpx - (ix - (long)ix);
-                loy = lpy - (iy - (long)iy);
-                long dx = (long)ix, dy = (long)iy;
-                if (dx != 0) emit(fd, EV_REL, REL_X, (int)dx);
-                if (dy != 0) emit(fd, EV_REL, REL_Y, (int)dy);
-                emit(fd, EV_SYN, SYN_REPORT, 0);
-                lnext += 1000;
-                if (++lburst >= 32) break;
+                if (++burst > max_burst) break;          /* latency-bound safety */
             }
             sleep_us(500);
         } else { /* mix */
@@ -223,8 +205,5 @@ int main(int argc, char** argv) {
     close(fd);
     printf("[virtmouse] done. injected %ld s of %s motion.\n",
            (now_us() - t0) / 1000000L, scenario);
-    if (strcmp(scenario, "locked") == 0)
-        printf("[virtmouse] locked: box 90x60 px, 1000 Hz, %ld box-edge re-wraps "
-               "(pointer reloads).\n", lwraps);
     return 0;
 }

@@ -48,6 +48,7 @@ static int  g_tests  = 0;
 static int  g_passed = 0;
 static int  g_failed = 0;
 static int  g_skipped_sections = 0;
+static int  g_sections_matched = 0;
 static const char* g_section = "";
 
 static bool        g_section_active = true;   // current section runs assertions
@@ -66,6 +67,7 @@ static std::regex  g_filter_regex;
         g_skipped_sections++; \
     } else { \
         g_section_active = true; \
+        g_sections_matched++; \
         std::printf("\n[%s]\n", name); \
     } \
 } while(0)
@@ -7613,6 +7615,153 @@ static void test_p106_extremes_table() {
     }
 }
 
+// ── P119 FAO-1: synchronous motivity<1 × smooth grid ──────────────────────────
+//
+// BUG-01 (KRİTİK, onaylı düzeltme): legacy tanh yolu motivity<1'de TERS'ti —
+// |log_space| tamiri tanh'ın odd işaretini düşürüyordu (m=0.3/smooth=0.5:
+// local m≈0.3 vs ref 1/m≈3.33, smooth slider 0.5→0'da eğri kendini tersliyordu).
+// Düzeltme odd-simetrik form:
+//   exponent = sign(z)·pow(tanh(|z|^sharpness), 1/sharpness),  z = gamma_const·log(x/sync_speed)
+// BUG-03: fractional sharpness (smooth=1 → s=0.5) ile OFFICIAL referans
+// pow(neg, frac) yüzünden NaN üretir; yerel sonlu odd formu korunur ve burada
+// aşağıdaki matematiksel referansa rel 1e-9 ile çivilenir (ref eğrisi /tmp
+// altında hesaplanıp geri okunur). motivity>1 davranışı bit-idantiktir,
+// dokunulmaz (oracle sync_gain/legacy p2/p1/p07 satırları değişmemelidir).
+
+// Corrected odd-symmetric reference legacy curve. NaN-free; equal to the local
+// port wherever the port is finite, and equal to the official reference
+// wherever the official reference itself is finite (sharpness integral).
+static double fao1_ref_sync_legacy(double m, double gamma, double syncspeed,
+                                   double smooth, double x) {
+    if (x <= 0) return 1.0;
+    double lm = std::log(m);
+    double gc = gamma / lm;
+    double ss = (smooth == 0) ? 16.0 : 0.5 / smooth;
+    if (ss >= 16) {
+        double log_space = gc * (std::log(x) - std::log(syncspeed));
+        if (log_space < -1) return 1.0 / m;
+        if (log_space > 1)  return m;
+        return std::exp(log_space * lm);
+    }
+    if (x == syncspeed) return 1.0;
+    double z = gc * (std::log(x) - std::log(syncspeed));
+    double e = std::pow(std::tanh(std::pow(std::abs(z), ss)), 1.0 / ss);
+    if (z < 0) e = -e;
+    return std::exp(e * lm);
+}
+
+static void test_fao1_sync_motivity_grid() {
+    const double ms[]  = { 0.05, 0.3, 0.8 };
+    const double sms[] = { 0.0, 0.5, 1.0 };
+    const double gamma = 1.0, sync = 5.0;
+    const double speeds[] = { 0.001, 0.01, 0.125, 0.5, 1, 2, 3, 5, 7, 10,
+                              30, 100, 512, 5000, 100000 };
+
+    SECTION("P119 FAO1 — synchronous motivity<1 × smooth grid (LEGACY vs math ref)");
+    {
+        const char* refpath = "/tmp/rawaccel_p119_sync_m1_ref.csv";
+        bool written = false;
+        {
+            FILE* f = std::fopen(refpath, "w");
+            if (f) {
+                written = true;
+                for (double m : ms) for (double sm : sms)
+                    for (double x : speeds) {
+                        double r = fao1_ref_sync_legacy(m, gamma, sync, sm, x);
+                        std::fprintf(f, "%.4g %.4g %.8g %.17g\n", m, sm, x, r);
+                    }
+                std::fclose(f);
+            }
+        }
+        EXPECT(written);
+
+        std::ifstream in(refpath);
+        EXPECT(in.good());
+        double m, sm, x, r;
+        while (in >> m >> sm >> x >> r) {
+            EXPECT(std::isfinite(r));          // referans eğrisi her zaman sonlu (BUG-03)
+            accel_args args = make_args(accel_mode::synchronous);
+            args.gain = false;
+            args.gamma = gamma; args.motivity = m;
+            args.sync_speed = sync; args.smooth = sm;
+            synchronous s(args);
+            double loc = s(x, args);
+            EXPECT(std::isfinite(loc));
+            double denom = std::fabs(r);
+            EXPECT(std::fabs(loc - r) <= 1e-9 * denom);  // rel 1e-9 pin
+        }
+        std::remove(refpath);
+
+        // BUG-01 işaret (regression) testi — headline m=0.3: hiçbir smooth'ta
+        // eğri ters dönmüyor: yüksek hız 1/m≈3.33'a, düşük hız m≈0.3'a gider.
+        for (double sm : sms) {
+            accel_args hi = make_args(accel_mode::synchronous);
+            hi.gain = false;
+            hi.gamma = gamma; hi.motivity = 0.3;
+            hi.sync_speed = sync; hi.smooth = sm;
+            synchronous sh(hi);
+            EXPECT(sh(500.0, hi) > 3.0);             // buggy: ≈0.3 (ters)
+            EXPECT(sh(0.001, hi) < 0.4);             // buggy: ≈3.3 (ters)
+            EXPECT(sh(500.0, hi) > sh(0.001, hi));   // monotonic direction
+            EXPECT(sh(5.0, hi) == 1.0);              // sync point identity
+        }
+    }
+
+    SECTION("P119 FAO1 — synchronous motivity<1 × smooth grid (GAIN LUT vs exact integral)");
+    {
+        // GAIN LUT = N=2 piecewise-trapezoid (referans-parite) integral of the
+        // corrected legacy over the log grid { -3, 9, 8 }; O(1/N^2) ayrıklaştırma
+        // hatası nedeniyle exact integral ile MUTLAK, büyüklük-ölçekli bir zarf
+        // altında karşılaştırılır (ölçülen max ≈ 0.23, m=0.05/smooth=0; 0.03·max(1/m,m)
+        // her hücreyi ≥2.6× marjla kapsar). Yalnız tablo içi [0.125, 512].
+        auto exact_gain = [&](int N, double x, double m, double sm) {
+            double sum = 0, a = 0;
+            int k = 0;
+            while (a < x) {
+                double b = (k <= 96) ? std::ldexp(1.0 + (k % 8) / 8.0, -3 + k / 8)
+                                     : std::scalbn(1, 9);
+                if (b > x) b = x;
+                if (b <= a) b = x;
+                double h = (b - a) / N;
+                for (int i = 1; i <= N; i++)
+                    sum += fao1_ref_sync_legacy(m, gamma, sync, sm, a + i * h) * h;
+                a = b; ++k;
+            }
+            return sum / x;
+        };
+        const int NEXACT = 4096;
+        const double probes[] = { 0.5, 1, 2, 3, 5, 7, 10, 30, 100, 300, 500 };
+        for (double m : ms) for (double sm : sms) {
+            accel_args args = make_args(accel_mode::synchronous);
+            args.gain = true;
+            args.gamma = gamma; args.motivity = m;
+            args.sync_speed = sync; args.smooth = sm;
+            synchronous sg(args);
+            double env = 0.03 * std::max(1.0 / m, m);
+            double prev = -1;
+            bool mono = true;
+            for (double x : probes) {
+                double lut = sg(x, args);
+                double ex  = exact_gain(NEXACT, x, m, sm);
+                EXPECT(std::isfinite(lut));
+                EXPECT_NEAR(lut, ex, env);
+                if (prev > 0 && lut + 1e-6 < prev) mono = false;
+                prev = lut;
+            }
+            EXPECT(mono);
+            // Yüksek hız kuyruğu (2^9 ötesi lineer ekstrapolasyon) 1/m'e gider —
+            // buggy (ters) LUT'ta m'e giderdi.
+            double t = sg(1e5, args);
+            EXPECT(std::isfinite(t));
+            EXPECT(t > 1.0);
+            EXPECT(t <= 1.0 / m + env);
+            // Düşük hız tabanı (2^-3 altı sabit) sonlu.
+            double b0 = sg(1e-4, args);
+            EXPECT(std::isfinite(b0));
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -7807,12 +7956,26 @@ int main(int argc, char** argv) {
     // P106 — per-parameter-family sınır (uç değer) regresyon tablosu
     test_p106_extremes_table();
 
+    // P119 FAO-1 — sync motivity<1 × smooth grid (LEGACY math-ref pin + GAIN LUT envelope)
+    test_fao1_sync_motivity_grid();
+
     if (g_list_only) return 0;
 
     std::printf("\n=== Sonuç: %d/%d geçti", g_passed, g_tests);
     if (g_failed) std::printf(", %d BAŞARISIZ", g_failed);
-    if (g_skipped_sections) std::printf(" (%d section atlandı, --filter)", g_skipped_sections);
+    if (g_have_filter)
+        std::printf(" (%d section eşleşti, %d atlandı)",
+                    g_sections_matched, g_skipped_sections);
     std::printf(" ===\n");
+
+    // P114 BUG-A: a --filter that matched nothing silently reported "0/0 geçti"
+    // + exit 0 (a typo hid the whole suite behind a green gate). No match is a
+    // hard error on stderr with exit 1.
+    if (g_have_filter && g_sections_matched == 0) {
+        std::fprintf(stderr,
+                     "Hata: hiçbir test eşleşmedi ('--filter') — regex/yazım hatası mı?\n");
+        return 1;
+    }
 
     return g_failed ? 1 : 0;
 }

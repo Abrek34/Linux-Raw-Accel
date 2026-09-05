@@ -18,6 +18,8 @@
 
 #include "app_state.hpp"
 #include "tr.inl"
+#include <fcntl.h>    // open() for the single-instance lock file (BUG-01)
+#include <sys/file.h> // flock() — cross-user/session instance guard (BUG-01)
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -169,11 +171,42 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // ── Single-instance guard (BUG-01) ─────────────────────────────────────
+    // GApplication's single-instance guarantee is per application ID per session
+    // bus — a second launch from a different user (sudo) or a bus-less DBus
+    // env would otherwise spawn a real second window + second inotify watch +
+    // double telemetry timers over the same config.  An advisory exclusive
+    // flock() on a file inside the shared config directory closes that hole
+    // across users and sessions.  Best effort: a failure to create/open/lock
+    // never blocks the GUI (no shared working copy is corrupted either way).
+    const fs::path cfg_dir = fs::path(state.config_path).parent_path();
+    {
+        std::error_code ec;
+        fs::create_directories(cfg_dir, ec);
+        (void)ec;
+    }
+    std::string lock_path = (cfg_dir / "rawaccel-gui.lock").string();
+    int lock_fd = open(lock_path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+    if (lock_fd >= 0 && flock(lock_fd, LOCK_EX | LOCK_NB) != 0) {
+        // Held by a live instance.  Deliberately NOT routed through tr(): the
+        // translation-coverage scanner requires every tr() key to have a dict
+        // entry, and this message is transient console/diagnostic only.
+        fprintf(stderr,
+                "RawAccel GUI is already running (config lock: %s). Exiting.\n",
+                lock_path.c_str());
+        close(lock_fd);
+        return 0;
+    }
+
     GtkApplication* app = gtk_application_new(
         "io.github.rawaccel", G_APPLICATION_DEFAULT_FLAGS);
     // Pass &state as user_data — on_activate receives it via gpointer.
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), &state);
     int ret = g_application_run(G_APPLICATION(app), argc, argv);
+    if (lock_fd >= 0) {
+        flock(lock_fd, LOCK_UN);
+        close(lock_fd);
+    }
     g_object_unref(app);
     return ret;
 }

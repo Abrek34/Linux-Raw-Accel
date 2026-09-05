@@ -91,6 +91,86 @@ static bool is_c_ident(char c) {
            (c >= '0' && c <= '9');
 }
 
+static std::string line_of(const std::string& src, size_t off) {
+    size_t ln = 1;
+    for (size_t i = 0; i < off && i < src.size(); i++)
+        if (src[i] == '\n') ln++;
+    return std::to_string(ln);
+}
+
+// true iff src[off] lies inside a `//` line comment or `/* */` block comment.
+// Prevents comment prose like "// tr(some_var)" from entering the dynamic list.
+static bool in_comment(const std::string& src, size_t off) {
+    size_t i = 0;
+    while (i < src.size() && i < off) {
+        char c = src[i];
+        if (c == '/' && i + 1 < src.size() && src[i + 1] == '/') {
+            while (i < src.size() && src[i] != '\n') {
+                if (i >= off) return true;
+                i++;
+            }
+            continue;
+        }
+        if (c == '/' && i + 1 < src.size() && src[i + 1] == '*') {
+            i += 2;
+            bool closed = false;
+            while (i + 1 < src.size()) {
+                if (src[i] == '*' && src[i + 1] == '/') { i += 2; closed = true; break; }
+                if (i >= off) return true;   // off still inside the block
+                i++;
+            }
+            if (!closed) return true;
+            continue;
+        }
+        i++;
+    }
+    return false;
+}
+
+// P114 BUG-G: braced combo-array definitions are recognized in every spelling.
+// Accepted forms (after the array name):
+//   NAME[] = { / NAME[5] = { / NAME = { / NAME{...} / Type NAME[] = { ...
+//   std::array<...> NAME = { ...
+// A ';' or '(' ')' before '{' means call/declaration — not a definition.
+static bool combo_array_open(const std::string& src, size_t q, size_t* openOut) {
+    size_t i = q;
+    size_t lim = std::min(src.size(), q + 160);
+    while (i < lim) {
+        char c = src[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') { i++; continue; }
+        if (c == '[') {
+            i++;
+            while (i < lim && src[i] != ']') {
+                if (src[i] == ';' || src[i] == '(' || src[i] == ')') return false;
+                i++;
+            }
+            if (i >= lim) return false;
+            i++;
+            continue;
+        }
+        if (c == '<') {   // std::array<...>
+            int d = 0;
+            while (i < lim) {
+                if (src[i] == '<') d++;
+                else if (src[i] == '>') { d--; if (d == 0) { i++; break; } }
+                else if (src[i] == ';' || src[i] == '(' || src[i] == ')') return false;
+                i++;
+            }
+            continue;
+        }
+        if (c == '=') {
+            i++;
+            while (i < lim && (src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r')) i++;
+            if (i < lim && src[i] == '{') { *openOut = i; return true; }
+            return false;   // '=' gevolgd door geen '{' → geen array-init
+        }
+        if (c == '{') { *openOut = i; return true; }  // NAME{...} / NAME[]{...}
+        if (c == ';' || c == '(' || c == ')') return false;
+        return false;
+    }
+    return false;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "usage: tr_coverage gui_source...  (gui/tr.inl always scanned)\n";
@@ -110,7 +190,11 @@ int main(int argc, char** argv) {
 
     std::set<std::string> used;   // EN strings passed to translation helpers
     std::set<std::string> orphans;
-    size_t dynamic_calls = 0;
+    size_t dynamic_calls = 0;       // P114 BUG-F: değişken anahtarlı çağrılar
+    size_t empty_str_calls = 0;     // P114 BUG-F: boş-string anahtarlı çağrılar
+    std::vector<std::pair<std::string, size_t>> dyn_sites; // (file, offset)
+    std::vector<std::string> combo_def_missing;            // BUG-G: tanımı bulunamayan
+    bool dict_has_empty = false;
 
     const std::set<std::string> call_names = {
         "tr", "trf", "trlbl", "trmlbl", "trbtn", "trchk", "trtip",
@@ -153,7 +237,20 @@ int main(int argc, char** argv) {
                                 std::fprintf(stderr, "DBG call %s @%zu in %s: %s\n", ident.c_str(), start, path.c_str(), key.c_str());
                             used.insert(key);
                         } else {
-                            dynamic_calls++; // e.g. tr(err.c_str())
+                            // P114 BUG-F: boş-string literal ("") ayrı kanal; geri
+                            // kalan değişken/ifade anahtarlar site'lenip uyarılır.
+                            // Yorumlardaki tr(...) söz öbeği sayılmaz.
+                            if (!in_comment(src, start)) {
+                                size_t sp = arg;
+                                while (sp < src.size() && (src[sp] == ' ' || src[sp] == '\t' ||
+                                                           src[sp] == '\n' || src[sp] == '\r')) sp++;
+                                if (sp + 1 < src.size() && src[sp] == '"' && src[sp + 1] == '"') {
+                                    empty_str_calls++;
+                                } else {
+                                    dynamic_calls++; // e.g. tr(err.c_str())
+                                    dyn_sites.push_back({path, start});
+                                }
+                            }
                         }
                     }
                 } else if (ident == "tr_combo_fill") {
@@ -182,9 +279,10 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Extract literals from tr_combo_fill arrays (e.g. MODE_KEYS).  Only match
-// the array *definition* (`NAME[...] = { ... }`) so that unrelated '{' in a
-// file (function bodies, dict entries) is never picked up.
+    // Extract literals from tr_combo_fill arrays (e.g. MODE_KEYS).  Match the
+// array *definition* so unrelated '{' in a file (function bodies, dict
+// entries) is never picked up. P114 BUG-G: NAME[...]={} yanında NAME={},
+// NAME{...} ve std::array<...> NAME={} biçimleri de taranır.
 const std::set<std::string> cpp_keywords = {
     "const", "static", "nullptr", "true", "false", "int", "char", "auto",
     "void", "bool", "double", "float", "return", "if", "else", "for",
@@ -197,34 +295,32 @@ for (const auto& an : combo_arrays) {
         const std::string& src = fp.second;
         size_t p = 0;
         while ((p = src.find(an, p)) != std::string::npos) {
-            size_t q = p + an.size();
-            size_t end = std::min(src.size(), q + 64);
-            size_t eq  = src.find('=', q);
-            size_t br  = src.find('[', q);
-            if (br != std::string::npos && br < end && eq != std::string::npos &&
-                eq < end && br < eq) {
-                size_t open = src.find('{', eq + 1);
-                if (open != std::string::npos && open < end + 4096) {
-                    found_any = true;
-                    if (std::getenv("TRC_DEBUG"))
-                        std::fprintf(stderr, "DBG combo %s @%zu in %s\n", an.c_str(), open, fp.first.c_str());
-                    size_t cur = open + 1;
-                    while (cur < src.size() && src[cur] != '}') {
-                        std::string lit;
-                        if (parse_string_seq(src, &cur, &lit)) {
-                            if (std::getenv("TRC_DEBUG"))
-                                std::fprintf(stderr, "DBG combo-item %s in %s: %s\n", an.c_str(), fp.first.c_str(), lit.c_str());
-                            used.insert(lit);
-                        }
-                        else cur++;
+            size_t open = 0;
+            if (combo_array_open(src, p + an.size(), &open)) {
+                found_any = true;
+                if (std::getenv("TRC_DEBUG"))
+                    std::fprintf(stderr, "DBG combo %s @%zu in %s\n", an.c_str(), open, fp.first.c_str());
+                size_t cur = open + 1;
+                while (cur < src.size() && src[cur] != '}') {
+                    std::string lit;
+                    if (parse_string_seq(src, &cur, &lit)) {
+                        if (std::getenv("TRC_DEBUG"))
+                            std::fprintf(stderr, "DBG combo-item %s in %s: %s\n", an.c_str(), fp.first.c_str(), lit.c_str());
+                        used.insert(lit);
                     }
+                    else cur++;
                 }
             }
             p += an.size();
         }
     }
-    if (!found_any && std::getenv("TRC_DEBUG"))
-        std::fprintf(stderr, "DBG combo array %s: no definition found\n", an.c_str());
+    if (!found_any) {
+        // P114 BUG-G: sessiz atlama olmaz — tanımı bulunamayan combo dizisinin
+        // anahtarları doğrulanamaz; insan müdahalesi gerekir (FAIL).
+        combo_def_missing.push_back(an);
+        std::fprintf(stderr, "UYARI: '%s' combo dizisinin tanımı bulunamadı — "
+                             "anahtarları taranamadı\n", an.c_str());
+    }
 }
 
     // ── Parse the dictionary from tr.inl ─────────────────────────────────────
@@ -245,6 +341,12 @@ for (const auto& an : combo_arrays) {
             cur++; // '{'
             std::string key;
             if (!parse_string_seq(trsrc, &cur, &key)) {
+                // P114 BUG-F: boş-string sözlük girdisi {"", ...} ayrı yakalanır.
+                size_t e = cur;
+                while (e < trsrc.size() && (trsrc[e] == ' ' || trsrc[e] == '\t' ||
+                                            trsrc[e] == '\n' || trsrc[e] == '\r')) e++;
+                if (e + 1 < trsrc.size() && trsrc[e] == '"' && trsrc[e + 1] == '"')
+                    dict_has_empty = true;
                 cur++; // non-literal first element — skip to next '{'
                 continue;
             }
@@ -268,9 +370,29 @@ for (const auto& an : combo_arrays) {
 
     std::cout << "tr.inl dictionary:      " << dict_keys.size() << " entries\n";
     std::cout << "translated call sites:  " << used.size() << " unique strings\n";
-    std::cout << "dynamic (skipped) calls:" << dynamic_calls << "\n\n";
+    std::cout << "dynamic (skipped) calls:" << dynamic_calls << "\n";
+    std::cout << "empty-string calls:     " << empty_str_calls << "\n\n";
 
-    bool fatal = !missing.empty();
+    // P114 BUG-F: değişken anahtarlı çağrılar statik doğrulanamaz — kanal artık
+    // sessiz SAYI değil, site-site listelenen bir UYARI (insan doğrulaması).
+    if (!dyn_sites.empty()) {
+        std::cout << "DİNAMİK ANAHTAR UYARISI: " << dyn_sites.size()
+                  << " çağrı site'si statik doğrulanamadı — translate edilebilirlik "
+                     "insan gözüyle teyit edilmeli:\n";
+        for (const auto& ds : dyn_sites) {
+            const auto it = file_of.find(ds.first);
+            std::string ln = (it != file_of.end()) ? line_of(it->second, ds.second)
+                                                    : std::to_string(ds.second);
+            std::cout << "  " << ds.first << ":" << ln << "\n";
+        }
+    }
+    if (empty_str_calls > 0 && !dict_has_empty) {
+        std::cout << "UYARI: " << empty_str_calls
+                  << " çağrı boş-string (\"\") anahtarı kullanıyor ve sözlükte \"\" "
+                     "yok (boş→boş render edilir, çeviri gerekmez)\n";
+    }
+
+    bool fatal = !missing.empty() || !combo_def_missing.empty();
     if (!missing.empty()) {
         std::cout << "MISSING TRANSLATIONS (" << missing.size() << ") — shown in English:\n";
         for (auto& m : missing) std::cout << "  \"" << m << "\"\n";
@@ -279,12 +401,23 @@ for (const auto& an : combo_arrays) {
         std::cout << "MISSING: none — every UI string has a Turkish entry\n";
     }
 
+    if (!combo_def_missing.empty()) {
+        std::cout << "FAIL: " << combo_def_missing.size()
+                  << " combo dizisinin tanımı bulunamadı (ait anahtarlar taranamadı):\n";
+        for (auto& c : combo_def_missing) std::cout << "  \"" << c << "\"\n";
+    }
+
     if (!orphan_list.empty()) {
         std::cout << "\nORPHANS (unreferenced entries, " << orphan_list.size() << "):\n";
         for (auto& o : orphan_list) std::cout << "  \"" << o << "\"\n";
     }
 
-    std::cout << (fatal ? "\nResult: FAIL (missing translations)\n"
-                        : "\nResult: PASS\n");
+    std::cout << (fatal ? "\nResult: FAIL (missing translations)"
+                        : "\nResult: PASS");
+    if (!combo_def_missing.empty())
+        std::cout << " — combo dizisi taraması eksik (BUG-G)";
+    if (!missing.empty())
+        std::cout << " — eksik çeviri(ler) mevcut";
+    std::cout << "\n";
     return fatal ? 1 : 0;
 }

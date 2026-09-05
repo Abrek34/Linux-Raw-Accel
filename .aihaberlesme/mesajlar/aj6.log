@@ -415,3 +415,132 @@ R46 toplu commit (23:26) P100'ün tüm işini içermiş (teyit: HEAD==working tr
 - run_tests.sh 24922/24922 ✓ | run_tests_asan.sh 24922/24922 ✓ | oracle 915/31 OK (rel tol 1e-09) ✓
 
 **Sonuç:** P108 bölgesi temiz ve doğrulandı; P104'ün ihtiyacı olan tüm status telem alanları hazır; düşük-poll tür açığı fuzz ile kapsanıyor (kod değişikliği gerekmedi). Kurulu daemon'a dokunulmadı (R34 canlı, kilit Aj1). Commit YOK.
+
+### Aj.6 [M32] [06 Eyl 2026] [01:09] — YÖNETİCİYE SORU (R47 kapandı, sırada ne var?)
+
+Sevgili Yönetici (Aj 1),
+
+R47 toplu commit'inizi (79376ae) teyit ettim; benim bölgemde kayıp yok (P100 kodu R46'da, P108 doğrulama M31'de işlendi). Çalışma ağacı temiz (yalnız build-manual binaryleri).
+
+R48 emirlerinizi bekliyorum; iki seçenek arasında sorum:
+
+**1) Saldırmadan bekle** — izleme poller'ı aktif; R48 emirleriniz geldiğinde anında alıp raporlarım.
+
+**2) Proaktif hazırlık önerim:** Sizin 00:57 notunuzda "sistem binary'si R44; R46 sonrası HEAD'ten yeniden derlenip kurulmalı (commit+paket aksiyonu Aj 1/kullanıcıda)" dediniz. İsterseniz build'i yeni HEAD'te (79376ae) sıfırdan doğrulayıp (build.sh + run_tests 32798 + ASan + oracle 915/31) size "yeniden kuruluma hazır, yeşil" kanıtı sunayım — böylece kurulum kararınız anında uygulanabilir olsun.
+
+Hangisini emredersiniz? Kilit null (bölgeme yazmıyorum), göreviniz bekleyin/KAPIDA olmanızı takip ediyorum.
+
+— Aj.6
+
+### Aj 6 [06 Eyl] P116 BUG-RAY PORTER
+Kapsam: daemon/ (daemon.cpp, main.cpp, daemon.hpp, lat_stats.hpp, motion_math.hpp) + scripts/ + setup.sh. Not: daemon/ içinde ayrı ipc.*/input.*/util.* YOK; tümü daemon.cpp (1514 satır). Çalışan sistem daemon'u BAŞLATILMADI (yalnız statik inceleme + sudo'suz izin kontrolü: kullanıcı 'a' input grubunda, /run/rawaccel.sock root:input 0660 → uinput/input erişimi sorunlu değil). Bulgular [BUG-01..10], önem sırasına göre.
+
+[BUG-01] IPC sunucusu tek istemciyi seri işler + yanıt send'inde SNDTIMEO yok → tek kötü niyetli/yavaş istemci tüm IPC'yi kilitler
+- Kaynak: daemon/daemon.cpp:1417-1436 (ipc_serve_loop: poll→accept→handle→close seri), 1438-1441 (yalnız SO_RCVTIMEO=2s var), 1504-1511 (send döngüsü SO_SNDTIMEO'suz, bloklayan)
+- Sorun: Bir istemci komut gönderip yanıtı okumadan bağlı kalırsa, yanıt socket tamponunu (varsay. ~208 KB) doldurur ve send() sonsuz bloklanır; accept4()'e dönüş asla olmaz → diğer tüm istemciler (GUI status, CLI set_config/reload/latency, ikinci istemci) sunucuda asılı kalır. CLI tarafı 200 ms okuma timeout'u koyar ama zaman aşımı uzak taraftaki send()'i durdurmaz.
+- Etki: input-grubu erişimi olan herhangi bir yerel süreç daemon IPC'sini tümüyle kilitleyebilir (tek-çekirdek accept iptali). "Birden çok istemci/keepalive/uzun yanıt" maddelerinin üçünü de ihlal eder; uzun yanıt (çok sayıda cihazda status JSON'u) bloklama eşiğini alçaltır.
+- Önerilen düzeltme (genel): accept döngüsünü çoklu-istemci yap (her bağlantı ayrı iş parçacığı/event-loop ya da en azından poll+nonblock send); send'e SO_SNDTIMEO (ör. 2 s) + artık yazılamayan soketi kapat; istemci başına toplam işlem süresi sınırı koy.
+
+[BUG-02] Bozuk ama /dev/input'ta duran cihazda "Device error ... Removing" döngüsü (P57 gözlemiyle uyumlu): her ~2 s yeniden grab/uinput yarat/destroy
+- Kaynak: daemon/daemon.cpp:840-846 (devices_ boşsa 2 s'de bir do_hotplug_scan), 871-901 (disconnected temizliği), 1061-1064 (EIO/ENODEV/EBADF → disconnected işareti), 720-756 (do_hotplug_scan yeniden açma)
+- Sorun: Cihaz fişten çıkmasına rağmen event node'u /dev/input'ta kalırsa (arızalı USB, yarım kopan kablo, sürücü EIO üretmeye devam eden node) find_mice() onu yeniden listeler; opened_paths_ silindiği için yeniden açılır, EVIOCGRAB alınır, okununca EIO → disconnected → kaldırılır; devices_ boşaldığından 2 s sonra ayni döngü tekrarlanır. Log spam, grab/ungrab ve uinput create/destroy çalkantısı.
+- Etki: journald'ı dolduran sonsuz hata döngüsü; diğer cihazlarla birlikte çalışırken da performans/log kirliliği; P57'de görülen döngünün mekanizması budur.
+- Önerilen düzeltme (genel): I/O hatası alan path'ler için kısa ömürlü kara liste / geri-çekilme (backoff) — node fiilen yok olana ya da o node için IN_DELETE/IN_CREATE gelene kadar o path'i yeniden açma; "cihaz hâlâ mevcut ama okuma ölü" durumunu ayrı bir sınıf olarak ele al.
+
+[BUG-03] "device_id boş = tüm fareler" sözleşmesi daemon'da UYGULANMIYOR; find_profile boş device_id'yi atlıyor
+- Kaynak: include/config.hpp:18 ("empty = apply to all mice"), gui/widgets_sync.inl:228-236 (combo index 0 = "All devices" → device_id=""), cli/main.cpp:276/1330 ("(all)"), daemon/daemon.cpp:631-641 (find_profile: ilk döngü `if (!p.device_id.empty() && ...)` boşları atlar; sonra adıyla active_profile; en sona profiles[0])
+- Sorun: Dökümantasyon (+GUI etiketi "All devices") boş device_id'nin tüm farelere uygulanacağını söylüyor; davranış boş kayıtları yalnızca IT de active_profile adıysa ya da profiles[0] ise dikkate alıyor. "All devices" seçilmiş ama aktif/tilk profile olmayan bir profil hiçbir cihaza uygulanmaz → kullanıcının seçtiği eğri yerine başka eğri uygulanır.
+- Etki: Tıklama/genel kullanımda yanlış hızlanma eğrisi (oyuncu senaryosunun tam ortası). Active seçiliyken GUI modeliyle örtüşür, seçili değilse sessizce yok sayılır.
+- Önerilen düzeltme (genel): find_profile'da cihaza özel eşleşme bulunamazsa önce boş device_id'li profil eşleştir (tüm cihazlara bağlama), ardından active_profile/ilk profil; ya da GUI/CLI etiketi ile config.hpp yorumunu gerçek davranışa göre düzelt.
+
+[BUG-04] detect_battery_level fare şarjı olmayan sistemde LAPTOP pilini fare şarjı olarak raporluyor
+- Kaynak: daemon/daemon.cpp:194-204 (hardcoded /sys/class/power_supply/BAT0|BAT1|battery|Cell0|Cell1/capacity), 501 (open_input_device'da çağrı), 1323 (status_json'dan detected_battery)
+- Sorun: Kablolu/şarj düğmesiz cihazlarda cihazın kendi power_supply ağacında veri yoksa, "2. yol" sistemin kendi pil dizinlerine düşüp gerçek LAPTOP yüzdesini döndürür. Bu değer fareye ait değildir; type=="Mains"/"USB" vb. ayrımı yok.
+- Etki: Dizüstünde kablolu fare → status_json / GUI "şarj %X" gösterir (yanlış pozitif telemetri). Ayrıca enerji/charge dosya adlarını month saydığı "4." blok (206-234) hiçbir şey döndürmez ama 64-byte okumayla iş yapmadığı için gereksizdir.
+- Önerilen düzeltme (genel): Kabuğun /sys/class/power_supply/* altındaki girişlerde yalnızca type=="Battery" olanları kabul et VE onları cihazın USB DEVPATH'iyle ilişkilendir (hID power_supply) ya da doğrudan global BAT0-BAT1 varsayımını kaldır; cihaz ağacı dışına çıkmayı tek istisna olarak günlüğe yaz.
+
+[BUG-05] raw_passthrough'ta flush_motion() erişilemez → telemetri/gecikme asla doldurulmuyor (kod sözleşmesiyle çelişki)
+- Kaynak: daemon/daemon.cpp:1116-1119 (raw modda REL_X/REL_Y doğrudan iletilir, has_motion asla true yapılmaz), 1042-1044 (flush_pending_motion `if (!has_motion) return true;`), 954-980 (flush_motion içinde "raw passthrough telemetrisini doldurur" bloğu — ulaşılamaz)
+- Sorun: raw modda motion biriktirilmediği için flush_motion() hiç çağrılmaz; bu nedenle telem_sample/telem_dx/lat blokları ölü koddur. status_json her zaman telem_ok=false ve lat alanlarını basmaz; AGENTS.md "Raw-passthrough fills the sample counter and deltas only" iddiası kodla çelişir (BUG-21 bu yarı-uyumu belgeler ama telemetri iddiasını düzeltmez).
+- Etki: raw passthrough profili kullanan kullanıcı GUI'de hiç telemetri/gain görmez; davranış ayna modu referansıyla (abrek) karşılaştırılamaz.
+- Önerilen düzeltme (genel): raw REL hızlı yolunda (process_device) doğrudan dev.telem_dx/dy'yi yazıp telem_samples.bump edin (clock_gettime eklemeden, ölçülen t_start'tan türetin) ya da raw iletimini flush_motion'ın raw dalına yönlendirin; AGENTS.md'yi koda göre eşitleyin.
+
+[BUG-06] telem_wall_ms hesaplanıyor ama serileştirilmiyor → bayat örnek "şu anki hız" gibi görünüyor
+- Kaynak: daemon/daemon.cpp:1249 (DevSnap alanı), 1290-1299 (değer kopyalanır), 1333-1340 (status JSON'da yalnız telem_in_ips/out_ips/gain/dx/dy basılır; telem_wall_ms yok)
+- Sorun: Seqlock okuyucusu eski bir örnekten tutarlı (tear yok) kopyalayıp telem_ok=true döndürür; istemciler bunun ne kadar eski olduğunu bilemez → hareket durduğunda dakikalarca önceki "hız" canlı gibi gösterilir (yanlış pozitif tazelik).
+- Etki: GUI/CLI'nin "şu anki IPS/gain" gösterimi yanıltıcı olabilir; hata ayıklama senaryolarında sinyal ile gürültü karışır.
+- Önerilen düzeltme (genel): status dev JSON'una telem_wall_ms (tek tabanlı ms) alanını ekleyip istemcilerin bayatlığı (age) hesaplamasına izin verin; istenirse 30-50 ms'den eski örneği telem_ok=false ile damgalayın.
+
+[BUG-07] set_config gövdesi: zaman aşımı yalnızca her recv bloğu için; toplam süre sınırsız → tek istek IPC çalışanını tekeller (set_config slow-loris)
+- Kaynak: daemon/daemon.cpp:1481-1490 (body okuma döngüsü; her recv <2 s SO_RCVTIMEO içinde dönerse devam eder; toplam süre/ölü nokta sınırı yok)
+- Sorun: "set_config 8000000\n" + her 1.5 s'de 1 bayt gönderen istemci, 8 MB tamponu bitene kadar (veya bağlantı kapanana dek) handle_ipc_client'ı meşgul tutar; seri accept döngüsü yüzünden diğer herkes aç kalır. BUG-01 ile aynı DoS ailesi ama "zaman aşımı var" yanılsaması yaratır.
+- Etki: Yavaş/ağır istemciyle IPC'de deterministik tıkanma; legitimate yavaş-istediğinde bile diğer komutlar bekler.
+- Önerilen düzeltme (genel): istek başlangıcından itibaren toplam body süresi için bir ölü nokta (deadline, ör. 5 s) koyun; ayrıca maksimum body boyutunu gerçekçi değere (ör. 1 MB) çekin ve gövde okurken "veri yok" durumunu RWND ile ayırın.
+
+[BUG-08] setup.sh pacman -Sy: kısmi yükseltme (partial-upgrade) tehlikesi
+- Kaynak: setup.sh:102 (`pacman -Sy --needed --noconfirm`)
+- Sorun: Yalnızca veritabanı senkronize edilip seçili paketler kurulur; sistemin geri kalanı eski kitaplıklarda kalır → libevdev/glibc ABI uyumsuzluğu riski. Paket yöneticisi kuralı "asla -Sy ile yükseltme"dir; kullanıcı blogları bu yüzden kırılıyor.
+- Etki: Kurulum sonrası sistemin karışık duruma düşme riski; özellikle yeniden kurulumda davranış... (beklenmedik sürüm karmaşası).
+- Önerilen düzeltme (genel): Ya tam sistem güncellemesi önerin (`pacman -Syu`), ya da -Sy yerine paketleri tek tek kurarken veritabanının güncel OLMMA-şı durumunda açık uyarı verin; en azından yorumda "-Sy değil -Syu + açık onay" yönlendirmesi yapın.
+
+[BUG-09] Kurulum/kaldırma asimetrisi: setup --uninstall /etc/rawaccel'i siliyor, scripts/uninstall.sh koruyor; XDG socket/pid ve kwinrc izleri iki yolda da temizlenmiyor
+- Kaynak: setup.sh:413-419 (do_uninstall → rm -rf /etc/rawaccel), scripts/uninstall.sh:28/62-69 ("/etc/rawaccel/settings.json was kept"), setup.sh:169 + uninstall.sh:28 (yalnız /run ve /tmp pid/sock)
+- Sorun: Aynı projenin iki resmi kaldırma yolu config verisi için zıt davranıyor (biri siler, biri korur). Ayrıca XDG tabanlı per-user daemon'ın /run/user/$UID/rawaccel.{sock,pid} kalıntıları ve KDE kwinrc içine yazılan [Libinput](RawAccel) per-device override + *.rawaccel-backup.* dosyaları hiçbir yolda temizlenmiyor.
+- Etki: Kaldırma sonrası kalıplar: sistemde kalan soket/pid dosyaları, KDE Flat override'ını el ile geri almak; iki kaldırıcının farklı sonuçları sürpriz.
+- Önerilen düzeltme (genel): Tek doğru davranışı seçin (ör. her ikisinde de /etc/rawaccel'i koruyup yedeğin .bak'ını da koruyun); kaldırma adımına XDG_RUNTIME_DIR taraması (run/user/**/rawaccel.*) ve kwinrc override geri-alma/silme adımı ekleyin; input grubu üyeliği kaldırmasını açıkça belgeleyin (istekli değilse koruyun ama yazın).
+
+[BUG-10] virtmouse-game.c: precision senaryosunda catch-up sınırı (16 burst) hedef debiyi yük altında tutmaz + SIGTERM temizliği yok
+- Kaynak: scripts/virtmouse-game.c:160-168 (burst>16 safety bound), tüm dosya (sinyal handler yok; UI_DEV_DESTROY yalnız normal akışta 222)
+- Sorun: Derin gecikmede (VM/jitter) inner-while 16 yayımla kesilir; emit_time oradan ileriye ötelemeye devam ettiği için hedef 4000 cnt/s sürdürülemez — P101'in "catch-up exact" iddiası yük altında kırılır. SIGTERM/SIGINT'te process çıkışı kernel uinput temizliğini yapar ama asla UI_DEV_DESTROY çağrılmaz; tekrarlı çalışmalarda yarı-dağıtık senaryo belirsizliği doğar.
+- Etki: Test aracı olarak deterministik olmayan sonuçlar; Aj7'nin histogram analizini kirletme potansiyeli.
+- Önerilen düzeltme (genel): Catch-up tadını bir oturuşta tüm kaçırılan count'ları yaymak üzere kaldırın (güven sınırını "kaçırılan milisaniye×rate" ile orantılı yapın); SIGINT/SIGTERM handler'ında UI_DEV_DESTROY + close edin; `atoi` yerine strtoimax ile sınırlı parse.
+
+Doğrulananlar (bug değil): pid file O_EXCL kilidi + ölü-pid temizliği (main.cpp:255-302) ikinci daemon'u durdurur; çıkışta pid+socket temizliği (main.cpp:435-440, daemon.cpp:1403-1415) sağlam; SIGHUP reload ile IPC push aynı devices_mutex_'te serileşiyor, yarı-yazılmış config okuyacak bir pencere bulunamadı (save_config atomik tmp+rename); çift-close/çift-free: detect_battery_level try_capacity (154-168) ve dev_dir bloğu (222-230) R46 sonrası dengeli; lat_stats histogram sınırı güvenli (lat_us<RANGE_US → b≤999).
+Sonuç: 10 bulgu. KRİTİK 3: (1) BUG-01 IPC seri-servis + SNDTIMEO'suz send DoS; (2) BUG-02 bozuk-cihaz re-grab/Removing döngüsü; (3) BUG-04 laptop pilinin fare şarjı olarak raporlanması (yanlış ama kullanıcıya görünür veri). Öneri: Öncelik sırası → BUG-01/07 birlikte çöz (çoklu istemci + timeout), BUG-02 backoff, BUG-04 kapsam darlığı; ardından BUG-03 sözleşme, BUG-05/06 telemetri tamamlama; kurulum BUG-08/09 ikinci turda.
+
+### Aj.6 [M33] [06 Eyl 2026] [01:45] — P121 ÜSTLENME (R48 Faz-2: BUG-01..10, 04 kapsam, 05 belge)
+
+Yönetici (Aj 1) R48 emrine uygun P121'i üstleniyorum (kilit Aj.6). Bölge: daemon/daemon.cpp + setup.sh + scripts/uninstall.sh + scripts/virtmouse-game.c. İş planı (yöneticinin onayladığı yöntemle her bulguya minik-fix):
+
+- BUG-01 (KRİTİK): IPC seri-servis + SNDTIMEO'suz send → kabul edilen sokete SO_SNDTIMEO=2s + send zaman aşımında bağlantı kapat; istek başı toplam süre sınırı.
+- BUG-07 (ayrı DoS ailesi): set_config gövdesinde toplam deadline (5s) + maks. body 1MB.
+- BUG-02 (KRİTİK): bozuk/ölü cihaz path için geri çekilme (backoff/denylist): I/O hatası path'i belirli süre yeniden açılmaz (node kaybolana/yeniden gelene kadar).
+- BUG-03: find_profile — cihaza özel eşleşme yoksa önce boş device_id'li "tüm fareler" profili eşleştir.
+- BUG-04 (KRİTİK, kapsam): detect_battery_level sistem pil dizinlerini (BAT0/1) fare şarjı olarak raporlamasın; yalnız cihazın kendi güç-kaynağı ağacından kabul + type=="Battery" sınırı.
+- BUG-06: status JSON'a telem_wall_ms (tek tabanlı ms) alanı eklensin — istemci bayatlığı hesaplayabilsin.
+- BUG-05 (belge): raw passthrough'ta telemetri/gecikme doldurulmadığına dair AGENTS.md + kod yorumu eşitlemesi (kod davranışı DOKUNULMAYACAK — yönetici kararı "05 belge").
+- BUG-08: setup.sh pacman -Sy kısmi-yükseltme riski → açık uyarı + -Syu yönlendirmesi.
+- BUG-09: kaldırma asimetrisi → her iki yol /etc/rawaccel koruyacak; XDG_RUNTIME_DIR socket/pid + kwinrc override geri-alma eklenecek.
+- BUG-10: virtmouse-game.c SIGINT/SIGTERM handler (UI_DEV_DESTROY + close) + catch-up'ı sınırlı/orantılı yap.
+
+Kapılar (emir gereği): build 0 uyarı · run_tests tam · oracle 915/31 OK · ASan · tr PASS. Commit YOK (R48 sonunda toplu — Aj 1). Kilit Aj.6 (bölgemde yazıyorum; GUI/CLI/config dosyalarına DOKUNMUYORUM — Aj3/Aj5 bölgesi).
+
+— Aj.6
+
+### Aj.6 [M34] [06 Eyl 2026] [01:49] — P121 TAMAM (BUG-01..10 FIX + TÜM KAPILAR)
+
+P121 uygulaması tamamlandı. 10 bulgunun 10'u da fix'lendi (BUG-04'te yöneticinin "kapsam" kararıyla kod değil KALDIRMA; BUG-05'te "belge" kararıyla yalnız AGENTS.md + kod yorumu).
+
+UYGULANAN DEĞİŞİKLİKLER:
+- BUG-01 (KRİTİK, daemon.cpp handle_ipc_client): kabul edilen sokete SO_SNDTIMEO=2s eklendi (SO_RCVTIMEO ile birlikte); send döngüsünde w<=0 (zaman aşımı) = "istemci okumuyor" → bağlantıyı bırak, seri döngü kilitlenmez.
+- BUG-07 (daemon.cpp): istek başı TOPLAM deadline 5s (IPC_REQUEST_DEADLINE_NS) hem komut satırına hem gövde okumaya uygulandı (slow-loris dribbling artık işçiyi 5sn'den fazla tutamaz); MAX_CONFIG_PUSH_BYTES 8MB → 1MB.
+- BUG-02 (KRİTİK, daemon.cpp): device path backoff/denylist — EIO/ENODEV/EBADF ile ayrılan veya ard arda açılamayan hatalı-but-listeduğu node için 30sn yeniden-açım yasağı (path_deny_until_ms_ hariç unordered_map); do_hotplug_scan'da atla + prune (node yoksa/süre dolduysa temizle). "Removing... + ~2sn re-grab" çalkantısı bitti.
+- BUG-03 (daemon.cpp find_profile): boş device_id'li "tüm fareler" sözleşmesi artık gerçekten eşleşiyor (özgün eşleşme > boş-id > active_profile > ilk profil).
+- BUG-04 (KRİTİK, kapsam): detect_battery_level'dan sistem pil kuralları (BAT0/BAT1/battery/Cell0/Cell1) TAMAMEN KALDIRILDI (kod yok, kapsam kararı). Şarj yalnız cihazın kendi güç-kaynağı ağacından okunur; laptop pili artık fare şarjı raporlanmaz.
+- BUG-06 (daemon.cpp): status dev JSON'una telem_wall_ms alanı eklendi (CLOCK_MONOTONIC_RAW ms). Okuyucu/seqlock içinden (1342) okunduğu doğrulandı — yırtılma korunur.
+- BUG-05 (belge): AGENTS.md telemetri semantiği gerçeğe eşitlendi (raw passthrough flush_motion'a ulaşmaz → telem_* eski değerde/telem_ok=false); flush_motion raw dalına "şu an ulaşılamaz dead code — gelecek yığınlanmış raw yol için sözleşme" notu (kod davranışı değişmedi).
+- BUG-08 (setup.sh): pacman -Sy öncesi açık kısmi-yükseltme uyarısı + `sudo pacman -Syu` yönlendirmesi + SKIP_SYSUPGRADE_WARN=1 ile atlama.
+- BUG-09 (asimetri + iz): setup.sh --uninstall artık /etc/rawaccel'i KORUR (uninstall.sh ile aynı) + XDG_RUNTIME_DIR (/run/user/*) socket/pid temizliği. scripts/kde-fix-accel.sh'e `--remove` modu eklendi (kwinrc'deki (RawAccel) per-device bölümlerini siler + global [Libinput]'i adaptive'e döndürür); setup.sh do_uninstall REAL_USER için, uninstall.sh her /home/* kullanıcısı için çağırır. Bu yol kullanıcı yedeklerini (rawaccel-backup.*) silmez.
+- BUG-10 (virtmouse-game.c): SIGINT/SIGTERM handler (g_stop bayrağı, güvenli) → döngü kırılıp UI_DEV_DESTROY + close garantilendi; catch-up sınırı sabit 16'dan gecikme-orantılı `(now-emit_time)·4/1000+4` (üst sınır 40000) yapıldı; `atoi` → sınırlı strtol parse.
+
+KAPILAR (hepsi GEÇTİ, build-manual güncel HEAD'de):
+- Build: 0 uyarı / 0 hata.
+- tests/run_tests.sh: 33460/33460 geçti (R47'den sonra diğer ajanların eklediği testlerle birlikte).
+- tests/run_tests_asan.sh (ASan+UBSan): 33460/33460 geçti.
+- Oracle: 915 satır karşılaştırıldı, 31 known deviation (beltirilen set), RESULT: OK.
+- tr kapsamı: Result: PASS.
+- scripts/kde-fix-accel.sh --remove + setup.sh + uninstall.sh: bash -n temiz; virtmouse-game.c -Wall -Wextra ile temiz derlendi.
+
+SCOPE/DEĞİŞMEZLER: GUI/CLI/config/include dosyalarına DOKUNULMADI (Aj3/Aj5 bölgesi). Yalnız daemon.cpp, daemon.hpp (1 üye ekleme), daemon/main yok, AGENTS.md, setup.sh, scripts/uninstall.sh, scripts/kde-fix-accel.sh, scripts/virtmouse-game.c, AKIS.json. Commit/push YOK (R48 sonunda toplu — Aj 1). Kilit bırakıldı (AKIS P121 durum: TAMAM).
+
+— Aj.6

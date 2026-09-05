@@ -17,7 +17,7 @@
 Good news: the official RawAccel reference itself also computes in `double` and
 stores the synchronous LUT as `float` (`ref/accel-synchronous.hpp:143-145`), so
 the port is **bit-for-bit faithful** in type choice. The oracle builds both
-sides at `-O1` and still sees rel 1e-9 agreement on 737/768 rows.
+sides at `-O1` and still sees rel 1e-9 agreement on 884/915 rows.
 
 ## 2. Where precision is actually lost (hot path: `au.apply(v, args)` per event)
 
@@ -82,7 +82,7 @@ expressed in float32 ULPs of the exact gain (float32 ULP at gain g = 2^(ilogb(g)
 
 | ips | N=2 err% | N=4 err% | N=2 flt-ULP | N=4 flt-ULP | N2/N4 |
 |-----|----------|----------|-------------|-------------|-------|
-| 0.5 | 4.5e-05  | 4.5e-05  | 5           | 5           | 1.0   |
+| 0.5 | 4.8e-05  | 5.5e-05  | 5           | 6           | 0.86  |
 | 1   | 3.9e-04  | 1.7e-04  | 44          | 18          | 2.4   |
 | 3   | 1.2e-01  | 6.0e-02  | 1.4e4       | 6.8e3       | 2.0   |
 | 5   | 8.8e-01  | 4.4e-01  | 1.1e5       | 5.4e4       | 2.0   |
@@ -105,9 +105,11 @@ Readings:
   contributes ≤1 ULP (≤5.96e-8) per cell — invisible next to the trapezoid term.
 - **Worst N=2 error is ~1.15% and only in the 5–15 ips knee** (sigmoid steepest,
   straddles `sync_speed`). Above ~250 ips (typical flick/track) it is <0.03%.
-- **N=4 halves the error everywhere** (N2/N4 ≈ 2.0), i.e. one less halving of the
-  `O(interval²)` trapezoid term. At 0.5 ips both are ~equal (5 ULP) because the
-  cell is already flat there.
+- **N=4 halves the error almost everywhere** (N2/N4 ≈ 2.0), i.e. one less halving
+  of the `O(interval²)` trapezoid term. Single exception: the floor of the
+  operating range (0.5 ips) where the cell is already flat (5–6 ULP) and N=4 is
+  marginally *worse* (4.8e-05 vs 5.5e-05 %, ratio 0.86) — a measurement-level
+  rounding artefact, far below perceptibility.
 - Second-order nuance (measured, smooth=4/sync=0.05 test): when the operating
   speed is *far* from `sync_speed`, N=2 and N=4 converge (the curve is flat and
   the trapezoid is exact there); the halving is concentrated in the ips band near
@@ -145,7 +147,8 @@ ABI verdict:
   mechanical ~7-file change, not a one-line edit.
 - **It would break the oracle even at N=2.** Local double-storage vs ref
   float-storage makes LUT cells differ by up to 1 float ULP → applied gain
-  drifts up to 5.0e-8 relative (measured, 21/23 grid speeds > TOL 1e-9). Same
+  drifts up to 5.0e-8 relative (measured, 21/23 grid speeds per sync_gain case
+  > TOL 1e-9 → **63 rows across the 3 synchronous GAIN cases**). Same
   "drift-by-divergence" problem as N=4, at 50× smaller magnitude and ~zero
   perceptible benefit (≤1 ULP is rounding noise, already invisible).
 - Config JSON: only lookup mode serializes `data`; a double array would dump
@@ -225,8 +228,8 @@ No `sin/cos` in the hot path except GUI graph/rotation setup
 
 ## 5. Measured baseline (proof the port is not numerically worse)
 
-- Oracle: 768 rows; 737 within rel 1e-9 of the official reference; 31 documented
-  (see deviations.md). At `TOL=1e-11` the same 737 would still pass — the port
+- Oracle: 915 rows; 884 within rel 1e-9 of the official reference; 31 documented
+  (see deviations.md). At `TOL=1e-11` the same 884 would still pass — the port
   does not add noise beyond libm ULP.
 - All NaN/Inf guards are `isfinite`-based (no `x != x`), consistent with
   "-ffast-math would break" reasoning. `rawaccel-base.hpp:63-66` uses epsilon
@@ -247,8 +250,9 @@ No `sin/cos` in the hot path except GUI graph/rotation setup
    **P102 update:** (a) halves the error from 1.15% → 0.58% worst-case (knee) —
    below the ~1% perceptual threshold even before the change; (b) removes only
    ≤1 ULP of float noise. But neither is oracle-free: measured drift-vs-ref is
-   69 rows/23 speeds (N=4, up to 5.7e-3 rel) and 21 rows/23 speeds (double
-   storage, up to 5.0e-8 rel). Execute only with a coordinated plan (Options
+   69 rows/23 speeds (N=4, up to 5.7e-3 rel) and 21 rows/23 speeds *per case*
+   (double storage, up to 5.0e-8 rel → 63 rows across the 3 synchronous GAIN
+   cases). Execute only with a coordinated plan (Options
    A/C/D below; see deviations.md §P102).
 3. Keep `-ffast-math` off; document it in CMake for future contributors.
 4. If maximizer-level accuracy is ever needed for classic/power tails, the
@@ -260,7 +264,7 @@ No `sin/cos` in the hot path except GUI graph/rotation setup
 
 Problem restated: the LUT uses 2-partition trapezoids (matches the vendored
 official reference exactly); going local-only to N=4 feeds 69 drift rows to the
-oracle; float→double is not oracle-free either (21 rows). This ranks the escape
+oracle; float→double is not oracle-free either (63 rows = 3 cases × 21). This ranks the escape
 routes by risk ÷ benefit.
 
 | Option | Change | Oracle impact | UX gain | Risk | Verdict |
@@ -269,7 +273,7 @@ routes by risk ÷ benefit.
 | **C. N=4 + documented deviation class** | local only, 2→4 | +69 known rows → ~100 total | knee err 1.15→0.58% | new deviation class to maintain; ref divergence grows over time; "what is the oracle verifying?" | viable, deferred |
 | **A. N=4 on BOTH local + ref** | 2→4 in both | green; but **ref is no longer verbatim** | knee err 1.15→0.58% | loses the "matches the official reference" property; next `git clone` refresh silently reverts ref→N=2 and re-drifts 69 rows | viable only with a stamped "forked reference" marker + refresh guard |
 | **B. keep N=2 + deviation rows** | none (list grows 31→~100) | green | none | deviation list balloons to ~100 rows with zero product benefit | worst option for zero gain |
-| float→double | (independent of N) | +21 rows (5e-8 each, ≈0 UX benefit) | ≤1 ULP, imperceptible | touches ~7 files + tests for nothing | **not worth it**; see §2.3.2 |
+| float→double | (independent of N) | +63 rows (3×21, 5e-8 each, ≈0 UX benefit) | ≤1 ULP, imperceptible | touches ~7 files + tests for nothing | **not worth it**; see §2.3.2 |
 
 Decision logic:
 1. **The error is sub-perceptual in every config.** Worst N=2 knee error 1.15%
@@ -289,8 +293,8 @@ Decision logic:
    refresh caveat + CI guard that a `git clone` refresh fails loudly rather than
    silently re-drifting). N=4 was measured to halve the knee error to 0.58% —
    a genuine but imperceptible win.
-4. **float→double is a dead end** until Option A lands: it carries 21 rows of
-   drift for ≤1 ULP of benefit, and the moment local stores double, the oracle
+4. **float→double is a dead end** until Option A lands: it carries 63 rows of
+   drift (3 synchronous GAIN cases × 21) for ≤1 ULP of benefit, and the moment local stores double, the oracle
    cannot compare against a float-storing reference at all.
 5. **B is never worth it**: growing the known-deviations list by 69 rows to
    document a change that produces zero perceivable difference.
@@ -365,12 +369,28 @@ when switched to power — the power curve is active from its `offset.x`
 
 ¹ example uses `scale=1, exponent_power=1`, far `cap_mode=in` cap.
 
+The shipped **Apex preset still carries a dead `input_offset = 0.02`** (power
+GAIN; `include/presets.hpp:125-126`) — a classic-preset leftover with zero
+effect in power. Keep for parity or drop it, but never read it as a slow 1:1
+floor: in power the floor is `output_offset`, not `input_offset`.
+
 **Finding 2 — a >50× pre-cap gain is reachable, and by the GUI alone.**
 The pre-cap gain curve is `gain(x) = (scale·x)^n + C/x`, i.e. ~`scale^n·x^n`.
-The sanitizer (`src/config.cpp:324-360`) has **no upper bound** on `scale`,
-`exponent_power`, `cap.x`, `cap.y`, or `output_offset` (only negative→0 and
-floors); the GUI spinners max at scale=100, exponent=5, cap.y=100
-(`gui/ui_builder.inl:225,230,235`). Measured worst configurable combos:
+The sanitizer used to have **no upper bound** on `scale`, `exponent_power`,
+`cap.x`, `cap.y`, or `output_offset` (only negative→0 and floors), so a
+hand-edited JSON or CLI value could push `pow(scale·x, n)` astronomically.
+**R48 update (P120 / Aj 8 BUG-3):** the unbounded-escape class is now closed —
+`sanitize_accel_args` clamps these five gain-driving fields to exactly the GUI
+gauge maxima (`config.hpp:18-22`: `SCALE_MAX=100`, `EXP_POWER_MAX=5`,
+`CAP_X_MAX=500`, `CAP_Y_MAX=100`, `OUTPUT_OFFSET_MAX=100`; `src/config.cpp`
+`sanitize_accel_args`), the CLI `set-param` domains use the same limits
+(`cli/main.cpp` `cmd_set_param` `range_ok` caps), and the GUI spinners are
+bounded at the same values (`gui/ui_builder.inl` `make_spin`: scale 0.01..100,
+power_exp 0.01..5, cap_x 0..500, cap_y 0..100, output_offset 0..100). So no
+consumer can exceed what the GUI gauge itself allows — **but every combo below
+is still in-envelope (valid at the boundary values themselves) and remains
+GUI-typed**: the 10⁴× class survives at the exact maxima. Measured worst
+configurable combos:
 
 | combo (power + GAIN) | gain @0.5 | gain @1 | gain @10 | verdict |
 |----------------------|----------:|--------:|---------:|---------|
@@ -442,10 +462,12 @@ is >5% off its steady-state target at the knee).
 | 100 | 5.0 | 249 | 382.5 | 191.2 |
 
 Readings:
-- **`sync_speed` is essentially irrelevant to latency** (0.5 vs 0.9 vs 5.0 differ
-  by <2% in the muddy window). The sigmoid is a log-space function of
-  `x/sync_speed`; its knee slope is the same relative steepness regardless of
-  where you place it. `sync_speed` positions the *knee*, it does not gate *lag*.
+- **`sync_speed` is latency-neutral only off the operating point** (0.5 vs 0.9
+  vs 5.0 differ by <2% in the muddy window of this step-to-own-knee test). The
+  sigmoid is a log-space function of `x/sync_speed`; its knee slope is the same
+  relative steepness regardless of where you place it. `sync_speed` positions
+  the *knee*, it does not gate *lag* — but **parking the knee on your tracking
+  speed multiplies the halflife cost ~3.5×** (P118 nuance below).
 - **Halflife is the entire story.** Settling is ~3.5× the halflife (10 ms → 99%
   in ~35 ms; 100 ms → 99% in ~383 ms). Halving the halflife halves the muddy
   window: 100 ms ≈ **190 ms of wrong gain** (>3 frames — floaty/gliding);
@@ -454,12 +476,37 @@ Readings:
   halflife is **how long you live with it**, which is the responsiveness that
   players feel.
 
+**P118 nuance — `sync_speed` parked on the tracking speed multiplies the
+halflife cost (~3.5×).** The step-to-own-knee test above always lands on the
+knee, so the EMA lag converts to gain error at constant steepness and the
+positioning effect stays hidden. Re-measured (P118,
+`/tmp/opencode/p118/p118_sync_ema.cpp`) at a **fixed tracking speed of
+7.5 ips**, comparing a near and a far placement:
+
+| halflife | sync_speed | ±5% settle | ±1% settle | near/far ratio |
+|---------:|-----------:|-----------:|-----------:|---------------:|
+| 100 ms   | 5.0 (near) | **148 ms** | **243 ms** | 3.5× / 2.3× |
+| 100 ms   | 0.5 (far)  | 42 ms      | 106 ms     | — |
+| 10 ms    | 5.0 (near) | 14 ms      | 18 ms      | 2.3× / 1.6× |
+| 10 ms    | 0.5 (far)  | 6 ms       | 11 ms      | — |
+
+A sync_speed near the tracking speed turns the *same* halflife into a **~3.5×
+longer** wrong-gain window: the sluggish EMA input hangs on the steepest gain
+slope, so its latency becomes gain error at full knee steepness. "sync_speed is
+latency-neutral" is therefore **only true away from your operating speed**; a
+100 ms halflife that feels like ~42 ms at a far placement feels like ~190 ms
+when the knee sits on your tracking speed. Tuning corollary: place `sync_speed`
+slightly off your typical tracking band — or, if you deliberately park it for
+accuracy, treat the halflife as ~3.5× more expensive.
+
 **Latency-safest combo recommendation:** `input_speed_smooth_halflife = 0`
 (smoothing off) is the only zero-lag config; if jitter demands smoothing use
 **input halflife ≤ 10 ms** (**never 100 ms**), and prefer `scale_smooth_halflife`
 or `output_speed_smooth_halflife` (simple EMA, no trend term) over
 input-speed smoothing when a smooth feel is the goal. Keep `motivity ≤ ~2` to
-keep the knee slope — and the smoothing-amplified gain error — gentle.
+keep the knee slope — and the smoothing-amplified gain error — gentle, and
+**keep `sync_speed` off your typical tracking speed** (a knee parked on the
+operating point multiplies the halflife cost ~3.5×; P118 nuance above).
 
 ### 8.4 lookup LUT ∩ output_dpi — no double normalization (verified code path)
 
@@ -507,10 +554,33 @@ axis.
 | **classic** | `acceleration=0.005, exponent_classic=2, input_offset=0..20, cap_mode=out, cap_y=1.5–2, gain=true` | GAIN cap tail bounds gain (§8.2 control row = safe); `input_offset` is honored. The `out` cap at `cap_y≤2` keeps worst gain ~2×. |
 | **natural** | `limit=1.3–1.8, decay_rate=0.08–0.12, input_offset=0..5, gain=true` | Bounded by `limit` asymptote (no cap needed); `input_offset` honored; no `scale^n` blow-up exists in natural. |
 | **power** | `scale=1 (≤2 max), exponent_power=0.5–1.0, output_offset∈[0,1], cap_mode=out, cap_y=1.5–2, gain=true` | Avoids the §8.2 class immediately: far cap + scale≥50, and the tiny-`n` + `output_offset≥1` plateau/cap-bypass. Never the default `n=0.05` with a positive floor. **Do not set `input_offset` expecting it to work here (inert).** |
-| **synchronous** | `smooth=0.25–0.5, motivity≤2, gamma=1, sync_speed≈your typical tracking speed, input_speed_smooth_halflife≤10 (prefer 0), scale/output halflifes optional` | §8.3: halflife is the only latency lever (10 ms ≈ one frame, 100 ms ≈ floaty); motivity≤2 keeps the knee slope — and smoothing-amplified error — gentle. |
+| **synchronous** | `smooth=0.25–0.5, motivity≤2, gamma=1, sync_speed slightly OFF your tracking band (or on it with halflife=0), input_speed_smooth_halflife≤10 (prefer 0), scale/output halflifes optional` | §8.3: halflife is the only latency lever (10 ms ≈ one frame, 100 ms ≈ floaty) and **a knee parked on your tracking speed multiplies it ~3.5×** (P118 nuance); motivity≤2 keeps the knee slope — and smoothing-amplified error — gentle. |
 | **lookup** | points in normalized ips on both axes; velocity mode `gain=y/x`; `output_dpi=1000` (or native dpi), **never fold output_dpi into LUT y** | §8.4: keeps the single-normalization contract; user-side double normalization is the only failure mode. |
 | **noaccel / disable** | `raw_passthrough=true` preset for true 1:1 (P101) | Default config ≠ raw 1:1 (it normalizes to 1000 dpi); the preset is the only byte-exact 1:1 path. |
 
 These are *picks*, not claims of optimality: they are the smallest-config
 destinations from which a new player can tune one param at a time without
 double-normalizing, capping-away, or unlatching the power gain.
+
+**P118 audit note — serialized-only ("dormant") config fields.** Two fields are
+stored and round-tripped by the config layer but **never read by the daemon**,
+so setting them alone has zero functional effect on the mouse:
+- **`use_raw_input`**: serialized as an app-level bool (`src/config.cpp`
+  `save_config`/`load_config`), but the daemon keys raw 1:1 passthrough off
+  **`raw_passthrough`** instead (`daemon.cpp` `flush_motion` /
+  `process_device` raw branches); `use_raw_input` is *ignored*. The byte-exact
+  1:1 path is the `raw_passthrough=true` preset (P101), never this flag.
+- **`disable`**: serialized per profile (`src/config.cpp`
+  `save_config`/`load_config` → `device_config::disable`), but **no code path
+  reads it** — the daemon only ever applies dpi/poll per device; a
+  `disable=true` device still receives full processing.
+
+**R48 admin decision (BUG-4, Aj 1):** both flags are **kept**, deliberately,
+as documented "dormant/saklı" config fields — neither wired to the daemon nor
+removed. Since R48 they are **surfaced in every CLI status/show output**
+(P120/A5-09: `cli/main.cpp` status `disabled:` lines + `--json` `use_raw_input`
+/ per-profile `disable`), so the config can no longer silently hide them.
+**User guidance:** do not expect either flag to change cursor behaviour — the
+true raw/1:1 line is the profile-level **`raw_passthrough=true`** (the
+`disable` preset, or `rawaccel-cli set-param <profil> raw true` + reload).
+Treat `use_raw_input`/`disable` as stored-only metadata.
