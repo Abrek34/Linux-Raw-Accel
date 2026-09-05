@@ -12,7 +12,7 @@
 
 pkgname=rawaccel-linux
 pkgver=0.5.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Raw Accel mouse acceleration daemon (Linux port): kernel-level uinput grab + GTK4 GUI + CLI"
 arch=('x86_64')
 url="https://github.com/rawaccel-linux/rawaccel-linux"
@@ -21,6 +21,10 @@ depends=('libevdev' 'gtk4' 'glib2' 'polkit' 'systemd')
 makedepends=('cmake' 'pkgconf' 'gcc')
 optdepends=('python: KDE compositor acceleration auto-fix (kde-fix-accel.sh)')
 install="$pkgname.install"
+# /etc/rawaccel/settings.json is user state (their profiles): pacman must not
+# overwrite it on reinstall/upgrade (it was a file-conflict before — fix so
+# `pacman -U` never collides with an existing install).
+backup=('etc/rawaccel/settings.json')
 source=()
 sha256sums=()
 

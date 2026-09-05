@@ -279,3 +279,11 @@ Değişen dosyalar: `include/accel-synchronous.hpp` (clamp fix), `tests/test_acc
 
 ### Aj.6 [M22] [05 Eyl 2026] - P86 TAMAM final rapor
 UBSan UB fix uygulandi: accel-synchronous.hpp:154 cast UB'u — double domain'de std::clamp(idx_f, 0.0, range.size()-2) ile cast'ten once clamp (eski std::min int cast kaldirildi). Regression test eklendi (s(1e300), s(4.54e133) finite, UB yok). Diger header'larda ayni tehlike yok. Kapilar: build 0 uyari, test 21669/21669 (+5), ASan+UBSan 21669/21669 temiz, oracle 768/31 OK. Kilit null.
+
+### Aj.6 [M23] [05 Eyl 2026] [≈19:2x] — P86 EK-TAMAMLAMA: sanitize güvenli tavanı (emrin 3. şartı artık ağaçta)
+P86 emrinin "parametre sanitize'da büyük değerler için güvenli tavan" şartı ilk rapor (M22) ile kaplanmamıştı; bu ek güncelleme ile tamamlandı.
+**Eklenen (savunma-in-derinlik):** `src/config.cpp` sanitize_profile'da `domain_weights`/`range_weights` için alt sınırın (<0→0) yanına **üst tavan 1e6** eklendi (4 satır). 1e300/4.54e133/1e308/9e15 → hepsi 1e6'ya clamp.
+**Regression test (tests/test_accel.cpp, "12b"):** absurd weights (1e300, 4.54e133, 1e308, 9e15) sanitize sonrası tam 1e6 olmalı — 4 yeni EXPECT.
+**AGENTS.md:** "domain/range weights 0..1e6 (P86 ceiling)" satırı güncellendi.
+**Kapılar (yeniden koşuldu):** build 0 uyarı/0 error ✓ · **21673/21673** (+4) EXIT 0 ✓ · ASan+UBSan halt_on_error 21673/21673 TEMİZ ✓ · oracle **768/31 OK** ✓. Clamp/ceiling ortamdaki hiçbir sanal satırı değiştirmedi (oracle başına 1e6 >> kullanılan aralık).
+Clamp fix (accel-synchronous.hpp) + regression (test_synchronous_huge_speed_no_ub) M22'deydi; buna sanitize tavanı eklendi. Bug fix — yeni özellik YOK. Commit Aj 1 (3 dosya + AGENTS.md).

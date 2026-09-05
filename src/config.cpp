@@ -414,10 +414,18 @@ static void sanitize_profile(profile& p) {
         p.speed_processor_args.output_speed_smooth_halflife = 0;
     // Domain/range weights: negative values invert axes — confusing and unintended.
     // Clamp to a small positive minimum so acceleration math stays well-defined.
+    // Upper bound (P86): absurd magnitudes (e.g. 1e300) could push accel-LUT
+    // lookups past representable indices; clamp to a safe ceiling (defense-in-depth
+    // on top of the synchronous gain_apply() clamp). 1e6 × speed stays far inside
+    // double range and far beyond any real-world domain/range weight usage.
     if (p.domain_weights.x < 0) p.domain_weights.x = 0;
     if (p.domain_weights.y < 0) p.domain_weights.y = 0;
     if (p.range_weights.x < 0) p.range_weights.x = 0;
     if (p.range_weights.y < 0) p.range_weights.y = 0;
+    if (p.domain_weights.x > 1e6) p.domain_weights.x = 1e6;
+    if (p.domain_weights.y > 1e6) p.domain_weights.y = 1e6;
+    if (p.range_weights.x > 1e6) p.range_weights.x = 1e6;
+    if (p.range_weights.y > 1e6) p.range_weights.y = 1e6;
     // Acceleration arguments: clamp per-algorithm fields to safe ranges
     sanitize_accel_args(p.accel_x);
     sanitize_accel_args(p.accel_y);

@@ -2343,6 +2343,22 @@ static void test_accel_args_sanitize() {
         EXPECT(dp.prof.range_weights.y >= 0);
     }
 
+    // 12b. P86: absurd domain/range weights (e.g. 1e300) → clamped to 1e6 ceiling
+    //       so sanitized config can never push accel-LUT lookups past
+    //       representable indices (defense-in-depth under the gain_apply clamp).
+    {
+        device_profile dp;
+        dp.prof.domain_weights.x = 1e300;
+        dp.prof.domain_weights.y = 4.54e133;
+        dp.prof.range_weights.x = 1e308;
+        dp.prof.range_weights.y = 9e15;
+        sanitize_device_profile(dp);
+        EXPECT_NEAR(dp.prof.domain_weights.x, 1e6, 1e-9);
+        EXPECT_NEAR(dp.prof.domain_weights.y, 1e6, 1e-9);
+        EXPECT_NEAR(dp.prof.range_weights.x, 1e6, 1e-9);
+        EXPECT_NEAR(dp.prof.range_weights.y, 1e6, 1e-9);
+    }
+
     // 13. JSON round-trip with negative accel_args → sanitized on load
     {
         const char* tmp = "/tmp/rawaccel_test_accel_args_sanitize.json";

@@ -54,6 +54,16 @@ done
 # ── Root kontrolü ────────────────────────────────────────────────────────────
 [[ $EUID -eq 0 ]] || die "Lütfen sudo ile çalıştırın: sudo bash setup.sh"
 
+# ── Paket çakışma kontrolü ────────────────────────────────────────────────────
+if command -v pacman &>/dev/null && pacman -Qi rawaccel-linux &>/dev/null 2>&1; then
+    warn "Arch paketi rawaccel-linux yüklü (pacman)."
+    warn "setup.sh ile üstüne kurmak /etc/rawaccel/settings.json, .desktop ve polkit dosyalarında"
+    warn "çakışmaya neden olur ve paket kurulumunu bozar."
+    warn "Tavsiye ya da: sudo pacman -Rns rawaccel-linux ile kaldırın, ya da sadece paketi kullanın."
+    echo "Devam etmek için Enter'a basın (iptal için Ctrl+C)..."
+    read -r
+fi
+
 # ── Gerçek kullanıcı ──────────────────────────────────────────────────────────
 REAL_USER="${SUDO_USER:-${USER:-}}"
 if [[ -z "$REAL_USER" || "$REAL_USER" == "root" ]]; then
@@ -263,8 +273,8 @@ do_install() {
         install -Dm644 "$ROOT/scripts/rawaccel.desktop" \
             /usr/share/applications/rawaccel.desktop
 
-    # systemd servis
-    install -Dm644 "$ROOT/scripts/rawaccel.service" /etc/systemd/system/rawaccel.service
+    # systemd servis → /usr/lib/systemd/system'e kur (/etc'de gölgeleme yapmaz)
+    install -Dm644 "$ROOT/scripts/rawaccel.service" /usr/lib/systemd/system/rawaccel.service
     systemctl daemon-reload
 
     # input grubu

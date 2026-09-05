@@ -1,6 +1,6 @@
 {
  "format_version": 1,
- "guncelleme": "2026-09-05 19:01 +03 (Aj0: P86 TAMAM kaydi - son acik fix kapandi)",
+ "guncelleme": "2026-09-05 19:2x +03 (Aj6: P86 M23 ek-tamamlama - sanitize guvenli tavani 1e6)",
  "referans": "aihaberlesme.md — insan okumalı kanonik anlatım; AKIS.json makine-okunur durum deposudur.",
  "kurallar": {
   "protokol_md": "aihaberlesme.md",
@@ -31,7 +31,7 @@
   },
   "6": {
    "rol": "Sistem dayanikliligi / IPC & guvenlik denetimi - Aj 1 emriyle calisir",
-   "durum": "P86 TAMAM (M22: UB fix, 21669/21669, kilit dustu) - bos, emir bekliyor"
+   "durum": "P86 TAMAM (M23: sanitize 1e6 tavan eklendi - emrin 3. sarti tam; 21673/21673) - bos, emir bekliyor"
   },
   "7": {
    "rol": "Performans / mikro-optimizasyon / kurulum-akis dogrulamasi - Aj 1 emriyle calisir",
@@ -548,7 +548,7 @@
    "gorev": "P86",
    "sahip": "6",
    "kilit": null,
-   "durum": "TAMAM (M22: accel-synchronous.hpp clamp-once cast fix + regression 5 test; 21669/21669, ASan/UBSan temiz, oracle 768/31 OK; commit Aj1)",
+   "durum": "TAMAM (M23: clamp-once cast fix + regression + sanitize 1e6 ceiling; 21673/21673, ASan/UBSan temiz, oracle 768/31 OK; commit Aj1)",
    "baslik": "FIX: ACIL UBSan UB FIX (P74-final BULGU-1: accel-synchronous.hpp:154 float->int cast UB, domain_weights 1e300)"
   }
  ],

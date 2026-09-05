@@ -69,6 +69,16 @@ sudo bash setup.sh --reinstall    # clean old install, then reinstall (default)
 `scripts/install.sh` is a thin wrapper that forwards to `setup.sh` (kept for
 backwards compatibility).
 
+> **Arch package coexistence**: on Arch-based distros you can instead install
+> the packaged binary (`packaging/rawaccel-linux-0.5.0-1-x86_64.pkg.tar.zst`,
+> `sudo pacman -U ...`) or publish it via an AUR package. Do **not** mix
+> `setup.sh` and the pacman package: setup.sh installs to `/usr/local/bin` +
+> `/etc/systemd/system`, the package to `/usr/bin` + `/usr/lib/systemd/system`,
+> and the `/etc` unit shadows the packaged one. Since 0.5.0-1 the package
+> auto-cleans legacy setup.sh files and never overwrites your existing
+> `/etc/rawaccel/settings.json`. If you have an old manual install, either run
+> `setup.sh --uninstall` first, or let the package's pre-install hook clean it.
+
 Uninstall (keeps your `~/.config/rawaccel` and `/etc/rawaccel/settings.json`):
 
 ```bash
