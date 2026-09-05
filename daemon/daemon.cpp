@@ -921,6 +921,26 @@ static inline bool uinput_write(libevdev_uinput* uidev, unsigned int type,
     return libevdev_uinput_write_event(uidev, type, code, value) == 0;
 }
 
+/// P93: batch REL_X + REL_Y into a SINGLE write() syscall instead of two
+/// libevdev_uinput_write_event() calls (each = one write()).  The kernel uinput
+/// driver injects every input_event struct found in the write buffer, so the
+/// event stream is byte-identical — this only collapses the two syscalls into
+/// one.  Zero-valued axes are skipped (behaves exactly like the old
+/// `if (x != 0) write; if (y != 0) write` sequence).  Returns false on any
+/// short/failed write so the caller can mark the device disconnected.
+static inline bool uinput_write_rel(libevdev_uinput* uidev, int x, int y) {
+    struct input_event evs[2];
+    int n = 0;
+    if (x != 0) { evs[n] = {}; evs[n].type = EV_REL; evs[n].code = REL_X; evs[n].value = x; n++; }
+    if (y != 0) { evs[n] = {}; evs[n].type = EV_REL; evs[n].code = REL_Y; evs[n].value = y; n++; }
+    if (n == 0) return true; // nothing to forward
+    const int fd = libevdev_uinput_get_fd(uidev);
+    if (fd < 0) return false;
+    const ssize_t want = static_cast<ssize_t>(n) * sizeof(struct input_event);
+    const ssize_t got  = write(fd, evs, want);
+    return got == want;
+}
+
 /// Apply acceleration to accumulated (dx,dy) and write REL events to uidev.
 /// Updates dev timing and subpixel remainder. Does NOT write SYN.
 /// Measures processing latency (time from call entry to last uinput write) in µs.
@@ -942,8 +962,7 @@ static bool flush_motion(mouse_device& dev, libevdev_uinput* uidev,
         if (!std::isfinite(dy)) dy = 0;
         int ix = static_cast<int>(std::clamp(dx, INT_LO, INT_HI));
         int iy = static_cast<int>(std::clamp(dy, INT_LO, INT_HI));
-        if (ix != 0 && !uinput_write(uidev, EV_REL, REL_X, ix)) return false;
-        if (iy != 0 && !uinput_write(uidev, EV_REL, REL_Y, iy)) return false;
+        if (!uinput_write_rel(uidev, ix, iy)) return false;
         double lat_us = static_cast<double>(now_ns() - t_start) / 1000.0;
         dev.lat.record(lat_us);
         // Live telemetry: raw-passthrough path (no modifier). Fill counters and
@@ -956,7 +975,14 @@ static bool flush_motion(mouse_device& dev, libevdev_uinput* uidev,
         return true;
     }
 
-    double now = now_ms();
+    // P93-perf: derive the interval timestamp from the latency-start read
+    // (t_start) instead of calling now_ms() again.  This drops the per-event
+    // clock_gettime read count from 3 to 2 (start + end) — one fewer vDSO call
+    // (~13 ns on this kernel) with no semantic change: the interval is measured
+    // start-to-start, and the sub-µs gap between the old now_ms() read and
+    // function entry is negligible vs a >=0.0625ms poll window.  Both timers
+    // stay on the same CLOCK_MONOTONIC_RAW source (AGENTS.md contract).
+    double now = static_cast<double>(t_start) / 1'000'000.0; // ns -> ms, same clock source
     milliseconds time_ms = now - dev.last_time_ms;
     // D6: modify() returns early when time<=0 (no motion applied).
     // flush_motion follows the same strategy: don't send motion for zero/negative intervals.
@@ -969,8 +995,7 @@ static bool flush_motion(mouse_device& dev, libevdev_uinput* uidev,
     apply_motion_math(dev.mod, dev.sp, dev.settings, dev.dpi_factor, time_ms,
                       dx, dy, dev.remainder_x, dev.remainder_y, out_x, out_y);
 
-    if (out_x != 0 && !uinput_write(uidev, EV_REL, REL_X, out_x)) return false;
-    if (out_y != 0 && !uinput_write(uidev, EV_REL, REL_Y, out_y)) return false;
+    if (!uinput_write_rel(uidev, out_x, out_y)) return false;
 
     // Live telemetry (T30): last-motion sample. IPS = magnitude(delta counts) *
     // (dpi_factor / time_ms) — same normalization the modifier uses. Stores are

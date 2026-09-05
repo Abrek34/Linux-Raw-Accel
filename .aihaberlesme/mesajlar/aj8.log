@@ -100,3 +100,53 @@ Yönetici (Aj 1), P74 son kapanış turunu tamamladım. Kanıtlar:
 
 ### Aj.8 [M10] [05 Eyl 2026] [18:47] - BOŞTA / EMİR BEKLİYORUM
 Yönetici (Aj 1), Aj 8 boştayım — P74 tamam (M7), BULGU-1 mini-yama kararı bekliyor. Kanalı 10s/aralıkla izliyorum; atanmış açık görev yok. Emir gelirse hemen üstlenirim.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - ATAMA P88: ARASTIRMA & OG-RENME GOREVLISI (KALICI ROL)
+Aj 8, kullanicinin talebiyle KALICI ARASTIRMA ve YAZILIM ARASTIRMASI/OGRENME/EGITIM gorevlisi atandi. P88'i ustlen:
+- RawAccel orijinal matematigini (Kaplow fenomenolojik modeli: natural/power/classic/synchronous) derinlemesine arastir
+- 31 belgeli oracle sapmanin kok nedenini analiz et (classic exp<=1 linear-path sabit gain + power/synchronous s(0) identity) — kabul edilebilir mi yoksa duzeltilebilir mi
+- Literatur: kaplow original C library, accel formulas, float hassasiyeti, UBSan/fiziksel dogruluk
+- Bulgulari docs/research/" kodlanmis olsun" diye degil REHBER dokumanlar haline getir (docs/research/formulas.md vs), diger ajanlara egitim/referans sagla
+- Kod degisikligi YOK (sadece docs/ + kanal); onerileri P-onayli yoneticiye raporla
+Rol gerekcesi: kullanici "program daha dogru hesaplar yapsin" + "arastirma ve ogrenme/egitim icin birini gorevlendir" dedi.
+
+### Aj.8 [M11] [05 Eyl 2026] - P88 ARAŞTIRMA RAPORU (formül + 31 sapma kök neden)
+Yönetici (Aj 1), P88'i üstlenip tamamladım. Kod değişikliği YOK (yalnız docs/ + kanal). Çıktılar:
+- **docs/research/formulas.md** — Kaplow modeli (natural/power/classic/synchronous), InterAccel kökeni, formül karşısı port uygulaması, 31 sapmanın kök neden analizi, float/UBSan korumaları, literatür.
+- **docs/research/index.md** — 5-dk özet, temel kurallar, literatür dizini, araştırma ajandası.
+
+**31 sapma özeti (sınıf A/B):**
+- **A (23 satır)** `classic_gain_exp_le1`: port exp≤1'de sabit gain `1+acc` kuralı uygular; referans `x^(exp−1)` patlar (exp=0.5 @ 0.001 → gain≈448). Config erişilemez (GUI spinner [1,10] + sanitize [1,10]) → dahili-API only, kullanıcıya ulaşmaz. **KABUL — as-is.**
+- **B (8 satır)** `power/sync s=0`: port `x≤0 → 1.0` identity; referans formülü kör çalıştırıp power→0 / sync→≈0.667 artifact üretiyor. s=0 fiziksel değil (output=input×gain=0 etki yok). **KABUL — as-is.**
+
+**Yönetici kararına öneri:** 31 sapmanın tamamı bilinçli güvenlik/fizik korumasıdır; düzeltme/kabul değişikliği gerektirmez. Oracle uyumu (rel 1e-9) geri kalan tüm alanda bit-idéal. Detay: docs/research/formulas.md. Emrin "öğrenme/egitim" ayağı: index.md diğer ajanlara hazır.
+
+### Aj.8 [M12] [05 Eyl 2026] - P88 FINAL RAPORU (4 doküman + 31 sapma tablosu + precision)
+
+Yönetici (Aj 1), M11 özetin tamamı; işte P88'in son kapsamlı çıktısı. Kod değişikliği YOK (yalnız docs/ + kanal), commit YOK. Ağaçta başka ajanların uncommitted değişikliklerine dokunmadım.
+
+**Oluşturulan dokümanlar (docs/research/):**
+- index.md — ekip giriş noktası/5-dk özet
+- formulas.md — her modun formülü, GAIN/LEGACY, 3 cap-mode dalı, edge case'ler, include/accel-*.hpp file:line çapraz referanslı
+- deviations.md — 31 sapmanın kök neden raporu + KEEP/FIXABLE kararları
+- precision.md — float/double, hot-path ULP riskleri, pow argument-reduction, -ffast-math analizi
+- learning.md — Kaplow/InterAccel kökeni, log-space sigmoid gerekçesi, cap teorisi, literatür
+
+**31 sapma karar tablosu (oracle 768 satır / 737 birebir rel 1e-9 / 31 belgeli):**
+| Sınıf | Satır | Referans değer | Yerel | Karar |
+|---|---|---|---|---|
+| A: classic_gain_exp_le1 (23) | 0.001…100000 | exp=0.5 @0.001 → gain≈448 → 1.0'a söner | sabit 1+0.005=1.005 | **KEEP** |
+| B1: power_gain/legacy_p1 @0 (2) | gain 0 | base_fn(0)=offset.y=0 | 1.0 | **KEEP** |
+| B1: sync_gain_p2/p1/p07 + sync_legacy_p2/p1 @0 (5) | 0.667 | data[0]/x_start ; log(0)→-inf→1/motivity | 1.0 | **KEEP** |
+| B2: game_apex_power @0 (1) | 0.9 | offset katı (0.9, artifact değil) | 1.0 | **KEEP** |
+
+**Kök neden:** A = port'un exp≤1 "linear-path" kuralı (accel-classic.hpp:28-34,47-48); referans formülü exp<1'de (a·x)^(exp−1) negative-küslü modele düşüp düşük hızda patlar. GUI spinner [1,10] + sanitize [1,10] (src/config.cpp, gui/ui_builder.inl) ile üretimden erişilemez → yalnız ham API. B = port'un tek tip x≤0→1 koruması (accel-power.hpp:89, accel-synchronous.hpp:43); v=0 fare için fiziksel değil, referans artifact üretiyor.
+
+**Potansiyel FIXABLE?** Evet ama YAPILMAMALI: (1) A: short-circuit silinirse referansa eşit olur ama exp=0.5'te gain 448'lik fiziksel saçmalık geri gelir — regresyon; (2) B1: guard silinirse NaN/0 artifact döner; (3) B2 tek semantik-eşitlenebilir satır (ref 0.9 gerçek offset tabanı) ama v=0'da output zaten 0 → fiziksel etki yok, tek tip guard korunur. Tamamı özellik testleriyle sabitli ("classic linear path (exp<=1) cap", "synchronous power<1").
+
+**Precision riskleri (file:line):** accel-classic.hpp:164 pow(x-io, exp) argument-reduction → |exp|·ULP (üst sınır exp=10, ~1e-15); :166 ar·p/x küçük x'te mutlak gürültüyü büyütür; accel-synchronous.hpp:117 trapezoid 2-partition (O(interval²) diskretizasyon hatası — modun asıl doğruluk tavanı); :138 float32 LUT (~5.96e-8/hücre) + lerp; accel-power.hpp:126 tiny-n pow(1/n) overflow → port akıllıca floor ediyor (fiks); cap_X branch'leri 1-ULP jitter'a duyarsız çünkü GAIN kuyrukları tangent-continuous (constant = (base_fn(cap_x)-cap_y)·cap_x).
+
+**Math-lib:** -ffast-math HİÇBİR yerde yok (scripts/build.sh:75) — doğru: subnormal korunur, isfinite guard'ları anlamlı, oracle TOL güvenli. -O3 -march=native'de GCC -ffp-contract=fast muhtemel FMA; -O1 oracle'a göre son-ULP farkı ~1e-15, TOL 1e-9 >> gürültü.
+
+**Yöneticiye (Aj 1) doğruluk önerisi (deviation'lara dokunmadan):**
+1. (Asıl kazanç) synchronous GAIN LUT: trapezoid partition 2→4 (accel-synchronous.hpp:117) ve/veya LUT'u double'a çevir (:138, rawaccel-base.hpp:59) — oracle satırı DEĞİL (LUT içeriği karşılaştırılmıyor), hiçbir belgeli sapmayı değiştirmez. 2. classic/power base_fn'de ar·p/x → fma zincirine dönüşüm ≤1 ULP — kozmetik, ertelenebilir. 3. -ffast-math yasağını CMake'e dokümante et. Detaylar: docs/research/precision.md §4.1, §6; deviations.md sonuç bölümü.

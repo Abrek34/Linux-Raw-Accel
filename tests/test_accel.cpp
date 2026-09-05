@@ -292,6 +292,88 @@ static void test_synchronous() {
     synchronous sd(args_d);
     EXPECT_NEAR(sd(5.0, args_d), 1.0, 1e-6);
     EXPECT_NEAR(sd(50.0, args_d), 1.0, 1e-6);
+
+    // P95 — GAIN LUT accuracy envelope vs the exact closed-form integral.
+    //
+    // The GAIN curve is a piecewise-trapezoid integral of the LEGACY sigmoid
+    // fn() over the log grid { -3, 9, 8 }, stored as a float LUT and linearly
+    // interpolated. Its discretization error is O(1/N^2) in the trapezoid
+    // partition count N. This test independently re-integrates the same legacy
+    // sigmoid at high resolution (the "exact closed form") and binds the
+    // shipped LUT to a tight absolute tolerance that the current N=2
+    // construction must satisfy, AND verifies the physical shape the LUT is
+    // meant to encode: gain rises monotonically through the sync_speed gain
+    // point and is bounded between 1/motivity and motivity.
+    //
+    // NOTE (P95 finding): raising N 2->4 would ~halve this error (measured:
+    // max |LUT - exact| ≈ 1.28e-2 at N=2 vs ≈ 6.4e-3 at N=4, worst near the
+    // gain-transition midpoint x≈7.5). It is NOT shipped because the local
+    // synchronous LUT is compared bit-for-bit against the vendored RawAccel
+    // reference by tests/oracle/run_oracle.sh, which uses N=2; changing N
+    // would drift all 57 sync_gain rows well past its 1e-9 relative gate
+    // (measured ~6e-3). The error bound below is therefore pegged to the
+    // reference-parity N=2 construction, not to the tighter N=4 curve.
+    SECTION("P95 — synchronous GAIN LUT: exact-integral envelope, monotonic, gain point");
+    {
+        // Legacy sigmoid: full-precision closed-form fn() the LUT integrates.
+        accel_args lg_args = args_g;            // smooth=0 linear-clamp sigmoid
+        lg_args.gain = false;
+        synchronous lg(lg_args);
+
+        // fp_rep_range { -3, 9, 8 } grid: x_k = 2^e * (1 + k/8).
+        auto grid_x = [](int k) { return std::ldexp(1.0 + (k % 8) / 8.0, -3 + k / 8); };
+
+        // High-resolution piecewise trapezoid of fn() over [0, x] on the SAME
+        // log grid the ctor uses, N partitions per segment. This is the exact
+        // gain the LUT approximates: (1/x) * integral of the LEGACY sigmoid.
+        auto integral = [&](int N, double x) {
+            double sum = 0, a = 0;
+            int k = 0;
+            while (a < x) {
+                double b = k <= 96 ? grid_x(k) : std::scalbn(1, 9);
+                if (b > x) b = x;
+                double h = (b - a) / N;
+                for (int i = 1; i <= N; i++) sum += lg(a + i * h, lg_args) * h;
+                a = b; ++k;
+            }
+            return sum / x;                     // average sensitivity = gain
+        };
+
+        // Probe across every behavioural region: flat floor, the gain point
+        // (sync_speed = 5) transition, the ramp, and the saturated tail.
+        const double probes[] = { 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.5,
+                                  10.0, 15.0, 30.0, 50.0, 100.0, 250.0, 500.0 };
+        const int NEXACT = 4096;                // near-converged integral
+
+        // P95-error envelope pegged to the reference-parity N=2 LUT: measured
+        // max |LUT - exact| ≈ 1.28e-2 at the transition midpoint x=7.5; use a
+        // comfortable deterministic cap (2x) so float rounding / platform FP
+        // cannot false-fail while still catching any regression that pushes
+        // the LUT more than 2.6x past its documented accuracy.
+        constexpr double ENV = 2.7e-2;
+
+        double prev = -1.0;                     // monotonicity sentinel
+        bool monotonic = true;
+        bool gain_crosses_one = false;
+        for (double x : probes) {
+            double exact = integral(NEXACT, x);
+            double lut   = sg(x, args_g);
+            EXPECT(std::isfinite(lut) && lut > 0);
+            // accuracy: LUT interpolated gain within envelope of exact integral
+            EXPECT_NEAR(lut, exact, ENV);
+            // physical bounds: gain in [1/motivity, motivity]
+            EXPECT(lut >= 1.0 / 1.5 - ENV && lut <= 1.5 + ENV);
+            // monotonic non-decreasing through the gain point
+            if (prev > 0 && lut + 1e-6 < prev) monotonic = false;
+            if (prev > 0 && lut >= 1.0 && prev < 1.0) gain_crosses_one = true;
+            prev = lut;
+        }
+        EXPECT(monotonic);
+        // the "gain point": the curve must pass through exactly 1.0 where the
+        // integral-average sensitivity crosses identity (between 6 and 10 ips
+        // for motivity 1.5 / sync_speed 5 / smooth 0).
+        EXPECT(gain_crosses_one);
+    }
 }
 
 // ── Test 6: lookup (LUT) ─────────────────────────────────────────────────────
@@ -6116,6 +6198,168 @@ static void test_synchronous_huge_speed_no_ub() {
     EXPECT(g_normal > 0.0);
 }
 
+// ── P91 — denormal / extreme-input hardening ────────────────────────────────
+
+static void test_p91_denormal_extreme_inputs() {
+    SECTION("P91 — denormal speed (1e-300) finite and reasonable in every mode");
+    {
+        accel_union au;
+        for (int m = 0; m < 7; ++m) {
+            accel_mode mode = static_cast<accel_mode>(m);
+            accel_args a = make_args(mode);
+            au.init(a);
+            double g = au.apply(1e-300, a);
+            EXPECT(std::isfinite(g));
+            EXPECT(g >= 0.0);
+            EXPECT(g < 1000.0); // no explosion from underflow/overflow paths
+        }
+        // Direct constructors: classic / natural / power / synchronous
+        accel_args ca = make_args(accel_mode::classic);
+        classic     cl(ca);
+        accel_args na = make_args(accel_mode::natural);
+        natural     nt(na);
+        accel_args pa = make_args(accel_mode::power);
+        power       pw(pa);
+        accel_args sa = make_args(accel_mode::synchronous);
+        synchronous sy(sa);
+        EXPECT(std::isfinite(cl(1e-300, ca)));
+        EXPECT(std::isfinite(nt(1e-300, na)));
+        EXPECT(std::isfinite(pw(1e-300, pa)));
+        EXPECT(std::isfinite(sy(1e-300, sa)));
+        EXPECT(std::isfinite(cl(5e-324, ca))); // smallest positive denormal
+        EXPECT(std::isfinite(pw(5e-324, pa)));
+    }
+
+    SECTION("P91 — denormal DPI factor through modifier pipeline");
+    {
+        for (int m = 0; m < 7; ++m) {
+            profile prof{};
+            prof.accel_x.mode = static_cast<accel_mode>(m);
+            prof.accel_x.gain = true;
+            prof.accel_x.acceleration = 0.007;
+            prof.accel_x.exponent_classic = 2.0;
+            prof.accel_x.exponent_power = 1.5;
+            prof.accel_x.limit = 2.0;
+            prof.accel_x.scale = 0.01;
+            prof.accel_x.decay_rate = 0.1;
+            prof.accel_x.sync_speed = 5.0;
+            prof.accel_y = prof.accel_x;
+            modifier_settings settings;
+            settings.prof = prof;
+            init_settings(settings);
+            speed_processor sp;
+            sp.init(prof.speed_processor_args);
+            modifier mod;
+            vec2d input = { 50.0, 25.0 };
+            mod.modify(input, sp, settings, 1e-300, 16.0); // dpi_factor denormal
+            EXPECT(std::isfinite(input.x));
+            EXPECT(std::isfinite(input.y));
+            EXPECT(input.x < 1000.0);
+            EXPECT(input.y < 1000.0);
+        }
+    }
+
+    SECTION("P91 — denormal cursor delta (1e-300) through apply_motion_math");
+    {
+        profile prof{};
+        prof.accel_x.mode = accel_mode::classic;
+        prof.accel_x.gain = true;
+        prof.accel_x.acceleration = 0.007;
+        prof.accel_x.exponent_classic = 2.0;
+        prof.accel_x.exponent_power = 1.5;
+        prof.accel_x.limit = 2.0;
+        prof.accel_x.scale = 0.01;
+        prof.accel_x.decay_rate = 0.1;
+        prof.accel_x.sync_speed = 5.0;
+        prof.accel_y = prof.accel_x;
+        modifier_settings settings;
+        settings.prof = prof;
+        init_settings(settings);
+        speed_processor sp;
+        sp.init(prof.speed_processor_args);
+        modifier mod;
+        double rx = 0.0, ry = 0.0;
+        int out_x = 0, out_y = 0;
+        apply_motion_math(mod, sp, settings, 1.0, 16.0,
+                          1e-300, 1e-300, rx, ry, out_x, out_y);
+        EXPECT(out_x == 0);
+        EXPECT(out_y == 0);
+        EXPECT(std::isfinite(rx));
+        EXPECT(std::isfinite(ry));
+        // Fraction must be preserved (not lost to NaN/Inf clamping).
+        EXPECT(rx > 0.0 && rx < 1.0);
+        EXPECT(ry > 0.0 && ry < 1.0);
+    }
+
+    SECTION("P91 — natural gain at extreme high speed (1e9 ips) stays finite");
+    {
+        // natural<GAIN> output = limit*(decay/accel - offset_x) - limit/accel,
+        // gain = output/x + 1. At extreme speed the log-domain-style integral
+        // must converge to args.limit without overflow (decay → 0, no Inf/NaN).
+        accel_args args = make_args(accel_mode::natural);
+        args.decay_rate  = 0.1;
+        args.limit       = 1.5;
+        args.input_offset = 0.0;
+        args.gain        = true;
+        natural n(args);
+        double g = n(1e9, args);
+        EXPECT(std::isfinite(g));
+        EXPECT(g > 0.0);
+        EXPECT_NEAR(g, 1.5, 5e-3);   // asymptote → args.limit
+    }
+}
+
+static void test_p91_known_deviation_boundaries() {
+    SECTION("P91 — s(0) identity rows (power/synchronous at speed 0)");
+    {
+        // The 7 documented power/synchronous @0 deviations are identity rows:
+        // official ref yields gain exactly 1 at speed 0.
+        accel_args pa = make_args(accel_mode::power);
+        power       pw(pa);
+        accel_args sa = make_args(accel_mode::synchronous);
+        synchronous sy(sa);
+        EXPECT_NEAR(pw(0.0, pa), 1.0, 1e-12);
+        EXPECT_NEAR(sy(0.0, sa), 1.0, 1e-12);
+        // identity persists for tiny but non-zero speed too (matches ref)
+        double g_tiny_p = pw(1e-12, pa);
+        EXPECT(std::isfinite(g_tiny_p));
+        EXPECT(g_tiny_p > 0.0);   // finite, positive — not exactly 1 below s=0
+        EXPECT(g_tiny_p < 1000.0);
+    }
+
+    SECTION("P91 — classic exp<=1 constant-gain (documented linear path)");
+    {
+        // known_deviations: classic_gain_exp_le1 — exponent <= 1 collapses to a
+        // constant gain on the linear path; validate the boundary is respected
+        // at exactly exp=1 and below, and that the discontinuity with exp>1
+        // does not leak into the deviating regime.
+        for (double e : { 0.5, 1.0 }) {
+            accel_args args = make_args(accel_mode::classic);
+            args.exponent_classic = e;
+            classic c(args);
+            double g_low  = c(1.0, args);
+            double g_mid  = c(12.0, args);
+            double g_high = c(200.0, args);
+            EXPECT(std::isfinite(g_low));
+            EXPECT(std::isfinite(g_mid));
+            EXPECT(std::isfinite(g_high));
+            EXPECT_NEAR(g_low, g_mid, 1e-9);   // constant along speed
+            EXPECT_NEAR(g_low, g_high, 1e-9);  // constant along speed
+        }
+        // exp just above 1 is NOT in the deviation set: with a roomy gain cap
+        // (10 > 1.5) it must vary with speed, not stay constant.
+        accel_args args = make_args(accel_mode::classic);
+        args.exponent_classic = 1.01;
+        args.cap.y = 10.0; // avoid the 1.5 default cap clamping at s=1 already
+        classic c(args);
+        double g_a = c(5.0, args);
+        double g_b = c(50.0, args);
+        EXPECT(g_a > 1.0);
+        EXPECT(g_b > g_a + 1e-6); // monotonic increase — not constant
+    }
+}
+
+
 // ── main ─────────────────────────────────────────────────────────────────────
 
 static void print_usage(const char* argv0) {
@@ -6305,6 +6549,10 @@ int main(int argc, char** argv) {
 
     // P86 — synchronous gain_apply UB fix regression
     test_synchronous_huge_speed_no_ub();
+
+    // P91 — denormal/extreme-input hardening + known-deviation boundaries
+    test_p91_denormal_extreme_inputs();
+    test_p91_known_deviation_boundaries();
 
     if (g_list_only) return 0;
 

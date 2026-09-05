@@ -279,3 +279,74 @@ Ağaçta üç düzeltme de mevcut ve çalışıyor. Bağımsız panel:
 **NOT (önemli):** Görev metni 21627/21627 bekliyor; ağaç 21664/21664 veriyor. Fark, görev yazımından sonra test suite + GUI çevirilerinin P80-era işlerle büyümesinden (test_accel.cpp +50 satır, tr.inl +2) kaynaklı. 0 FAIL semantiği sağlanıyor.
 
 Kapsam: sadece cli/main.cpp, src/config.cpp, AGENTS.md + aj5.log dokunuldu; commit YOK; canlı config/daemon'a dokunulmadı.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P92 (CLI DOGRULUK + KULLANIM)
+Aj 5, P92'yi ustlen (cli/main.cpp, kod IZINLI):
+- `rawaccel-cli list --json` ciktisini dogrula (tum alanlar, R37 apex degerleri birebir)
+- set-param: bilinmeyen alan icin net hata (simdiki mesaj nedir?), parse hatasinda do-formati
+- createp preset '--help' aciklamasi deger tablosu getirsin (Hangi degerler kullanilir)
+- `--no-daemon` dokumantasyonu AGENTS.md'de mi ve yardim ciktisinda mi — eksikse CLI da ekle
+- Kapsam DAR; build 0 uyari + test + ASan + oracle OK + tr PASS
+
+### Aj.5 [M23] [05 Eyl 2026] [19:49 — P92 CLI DOĞRULUK + KULLANIM RAPORU]
+
+Görev: P92 (cli/main.cpp — kod IZINLI). Yalnızca cli/main.cpp değiştirildi; commit YOK.
+
+== 1. `list --json` DOĞRULAMA ==
+- BULGU (gage): mevcut `list --json` JSON DEĞİL, --json'ı yutup düz metin basıyordu.
+  DÜZELTME: `list --json` → `app_config_to_json(cfg)` ile tam JSON dökümü (global `--json`
+  bayrağı eklendi; `list --json` VE `--json list` her ikisi çalışır, düz `list` değişmedi).
+- Doğrulama: `-c /tmp/t92f.json create-preset apex apxf` → `list --json` (geçerli JSON).
+  Apex profili presets.hpp make_preset("apex") ile BİREBİR (hücre bazında):
+  mode=power, gain=true, scale=2.2, exponent_power=0.8, input_offset=0.02,
+  output_offset=0.9, cap=[28.0,2.2], cap_mode=out, dpi=800, polling_rate=1000,
+  output_dpi=1000, X==Y simetrik. UYUMSUZ ALAN YOK. ✅
+
+== 2. set-param UX (canlı mesajlar) ==
+- Bilinmeyen alan (önce): "Unknown key: bogus" — alanı adlandırıyor ama geçerli alan
+  önermiyordu. DÜZELTME: artık 40 geçerli anahtarı listeliyor:
+  "Unknown key: bogus" + "Valid keys: mode, gain, cap_mode, cap_x, cap_y, ... range_weight_y"
+  rc=1. ✅
+- NaN (değişiklik yok — zaten iyi): `set-param apxf exponent_power nan` →
+  "Invalid numeric value: nan (NaN/Inf not allowed)" rc=1. Reddediliyor. ✅
+- Bilinmeyen mode (değişiklik yok): "Invalid mode: 'classicc'.  Valid: classic, power,
+  natural, jump, synchronous, lookup, noaccel" rc=1. ✅
+
+== 3. create-preset --help değer tablosu ==
+- Eksikti (yalnız 8 isim satır içinde). EKLENDİ (include/presets.hpp verisiyle, tek kaynak):
+  preset/mode/gain/exp-power/cap[in,out]/output-offset; gaming classic on —; office natural;
+  precision classic; disable raw-passthrough; cs2 classic cap[18.0,1.6]; valorant natural
+  cap[30.0,2.0]; apex power 0.8 cap[28.0,2.2] output-offset 0.9; fps classic cap[20.0,1.8].
+  Not satırı: exp-power = power-mode exponent; hepsi dpi 800 / poll 1000. `--help`'te 8 satır
+  doğrulandı; `create-preset --help` aynı tabloyu gösteriyor. Diff: cli/main.cpp +13 satır.
+
+== 4. --no-daemon / --dry-run dokümantasyonu ==
+- CLI help: MEVCUT (Options bloğu, satır 28: "-n, --no-daemon, --dry-run ...").
+- AGENTS.md: MEVCUT (satır 257, P82-CRIT-1). İkisi de yerinde; ekleme GEREKMEDİ. ✅
+
+== 5. KAPS (son, stabilize ağaçta) ==
+- build.sh → 0 uyarı/error (3 binary)
+- run_tests.sh → 21754/21754 (kapı ≥21669) ✅
+- run_tests_asan.sh → 21754/21754, 0 sanitizer ✅
+- oracle → OK (768 satır, 31 belgeli sapma, TOL 1e-9) ✅
+- run_tr_coverage.sh → Result: PASS ✅
+- NOT: Panel sırasında 2 geçici FAIL yakalandı (21751/21753) — tests/test_accel.cpp eşzamanlı
+  aj güncellemesi (mtime 19:42); 2. koşumda 21754/21754, sonraki tüm koşumların da kararlı
+  yeşil. GUI de eşzamanlı düzenlemedeydi (profile_mgr.inl mtime 19:40 kırık ara durum gördü,
+  19:42 sonrası derlendi) — benim kapsamım değil, dokunmadım.
+
+== DEĞİŞİKLİK ÖZETİ ==
+Sadece cli/main.cpp (+44 satır): cmd_list_json eklendi, `--json` global bayrak, set-param
+bilinmeyen-alan için geçerli anahtar önerisi, help'e preset değer tablosu. AGENTS.md'ye gerek
+yoktu (no-daemon zaten işlenmiş). Commit YOK — rapor dosyası için yönetici onayı bekliyor.
+
+### Aj.5 [M24] [05 Eyl 2026] [22:14 — GÖREV TALEBİ]
+
+Yönetici Aj 1, görev talep ediyorum. Boştayım (kilit null; P80/P82/P92 kapalı, P71 tamam). Son izleme pencerem canlı görevi yakalayamadan ilerledi (P92 M23 ile kapandı). Hazır olduğum / önerdiğim işler:
+
+1. **P93 devam bacağında bağımsız kesişim teyidi** — Aj 6 kilitli (DEVAM); kilit disiplinini bozmadan, P93 çıktısı yayınlanınca build/test/ASan/oracle/tr ikinci göz.
+2. **P82 takip:** "--no-daemon OPSİYONEL clobber riski" notumun kararı — "veya" seçeneği (config path == daemon path ise set_config) uygulanacaksa ben UPST; yoksa kapat.
+3. **P92 kapanış teyidi:** list --json / --json global bayrağı için yönetici onayı + (gereken) çok-komutlu smoke tablosu.
+4. **R29 yayın**: 5+ commit ve uncommitted dentelle origin'e gitmedi; senkron commit/push (R39+ ... R4x) yönetici takdirinde ise commit önderliğini üstlenebilirim (yönetici onayıyla).
+
+Emir verirsen hemen kilit alır, koşar, raporlarım. Boştayım.

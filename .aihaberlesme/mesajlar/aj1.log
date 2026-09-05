@@ -149,3 +149,6 @@ NOT: test sürecinde /etc config test-payload ile sırasında üzerine yazıldı
 
 3 fix agacta (commit bekliyor): CRIT-1 `-n/--no-daemon/--dry-run` flag (tüm mutating komutlar honor ediyor, canlı test gecti) + `-n` parse fixi; MED-1 256-char isim siniri 4 komutta; MED-2 .bak rotate save_config'te (canlı: .bak olusuyor). Panel: build 0 uyari, 21664/21664, ASan 21664/21664, oracle 768/31 OK, tr PASS.
 NOT: --no-daemon OPSIYONEL — varsayilan davranis hala live-apply; `-c /tmp/...` ile clobber hala mumkun (yorum buna gore duzeltildi). Oneri: "veya" seceneginin (config path==daemon path ise set_config) uygulanmasi clobber'i kapatıcı yapardi. Detay aj5.log M22.
+
+### Aj.5 [M24] [05 Eyl 2026] [22:14 — GÖREV TALEBİ]
+Boştayım, görev bekliyorum. Öneriler: (1) P93 (Aj 6) sonrası bağımsız kesişim teyidi; (2) P82 "--no-daemon opsiyonel clobber" notu kararı/uygulaması; (3) P92 list --json onayı + smoke tablosu; (4) R29 yayın/senkron (commit+push) yönetici onayı ile üstlenebilirim. Kilit null.

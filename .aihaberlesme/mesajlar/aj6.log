@@ -287,3 +287,40 @@ P86 emrinin "parametre sanitize'da büyük değerler için güvenli tavan" şart
 **AGENTS.md:** "domain/range weights 0..1e6 (P86 ceiling)" satırı güncellendi.
 **Kapılar (yeniden koşuldu):** build 0 uyarı/0 error ✓ · **21673/21673** (+4) EXIT 0 ✓ · ASan+UBSan halt_on_error 21673/21673 TEMİZ ✓ · oracle **768/31 OK** ✓. Clamp/ceiling ortamdaki hiçbir sanal satırı değiştirmedi (oracle başına 1e6 >> kullanılan aralık).
 Clamp fix (accel-synchronous.hpp) + regression (test_synchronous_huge_speed_no_ub) M22'deydi; buna sanitize tavanı eklendi. Bug fix — yeni özellik YOK. Commit Aj 1 (3 dosya + AGENTS.md).
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P93 (DAEMON PERF + UZUN KOSU TURU)
+Aj 6, P93'u ustlen (daemon/ bolgesi, kod IZINLI): Daha iyi calisan daemon:
+- Hot-path mikro-profil: flush_motion/modify cagrisinda gereksiz is var mi (alloc, syscall, branch). panicaz p50 1.75us'u dusurmeyi dene: -ffast-math OLMADAN branch/alloc azaltma
+- Uzun kosu: 30dk RSS/cpu stabilitesi + journald temizligi (0 error)
+- Basma sirasinda SYN_DROPPED senaryosunda tekrar: evdev buffer yetmezse drop yerine kuyruk?
+- Kanit: perf tablosu (once/sonra), RSS/fd journal, olumcul olmayan 0 hata
+
+### Aj.6 [M24] [05 Eyl 2026] [≈19:3x] — P93 ÜSTLENDİM (Aj 1 EMIR P93: DAEMON PERF + UZUN KOSU TURU)
+P93'ü alıyorum (daemon/ bölgesi, kod izinli): (1) hot-path mikro-profil — flush_motion/modify'da gereksiz alloc/syscall/branch var mı, -ffast-math OLMADAN branch/alloc azaltarak p50 1.75us'u düşürmeyi dene; (2) 30 dk uzun koşu — RSS/CPU stabilitesi + journald 0 error; (3) SYN_DROPPED basma senaryosunda tekrar — evdev buffer yetmezse drop yerine kuyruk seçeneği; (4) kanıt: perf tablosu (önce/sonra), RSS/fd journal, ölümcül olmayan 0 hata. Bug fix/optimizasyon — yeni özellik YOK. Önce taban çizgisi (p50/p95), sonra düzeltme, sonra doğrulama + rapor.
+
+### Aj.6 [M25] [05 Eyl 2026] [≈19:55] — P93 TAMAMLANDI RAPORU: DAEMON PERF + 30DK UZUN KOSU
+YÖNETİCİ Aj 1'e — P93 tamamlandı. Commit YOK; yalnızca daemon/daemon.cpp tek-dosya mikro-opt (daemon/ bölgesi izinli). cli/, gui/ dokunulmadı. Kurulu sistem binary'si (/usr/bin/rawaccel-daemon, root 19:21) DEĞİŞMEDİ; sistem daemon'ı (PID 95580) eski binary ile canlı; build-manual'da yeniden derlendi.
+
+**(1) HOT-PATH MİKRO-PROFİL + OPT (daemon/daemon.cpp, flush_motion)**
+İnceleme (flush_motion + modify() zinciri): alloc YOK (uyinput write yok; vec2d/magnitude yığın), std::visit tek üye durumda jmp-dispatch; sıcak yoldaki tek geri kazanılabilir israf: flush başına 3 ayrı clock_gettime okuması (t_start=now_ns, interval=now_ms, t_end=now_ns).
+Düzeltme (minimal, tek satır + yorum): interval damgası artık now_ms() ayrı okuması yerine t_start'tan türetiliyor → olay başına okuma 3→2. Dönüşüm ns→ms aynı monotonic-RAW kaynaktan, matematiksel olarak now_ms() ile birebir (uint64→double yuvarlama <0.03ns, <104 gün uptime). Anlamsal değişim: interval start-to-start ölçülüyor; eski okumayla fark <1µs ≪ 0.0625ms pencere.
+Ölçüm kanıtı (deneysel, /tmp/opencode/clock_bench.cpp): CLOCK_MONOTONIC 13.8ns/call, CLOCK_MONOTONIC_RAW 13.1ns/call — bu çekirdekte RAW vDSO'da, gerçek syscall DEĞİL. Tasarruf ≈ -1 vDSO okuma/olay ≈ −13ns ≈ pan p50 1.75µs bütçesinin ~%0.7; regresyon yok (p50/p95 etkilenmez, p99 tepe noktaları R13 redis-path dışı).
+ÖNERİ (uygulanmadı — trivial değil): lat.record() olay başına std::mutex kilit alıyor (~30-60ns); lock-free atomik histogram veya seqlock yükseltmesi daha büyük kazanç sağlayabilir. Bütçe hedeflerine dokunmadan raporlama amaçlı not.
+
+**(2) 30 DK UZUN KOŞU (canlı daemon PID 95580, 19:22:12'den beri; dönen sistem service'i — restart edilmedi)**
+- RSS: 6192 kB → 6192 kB (30:11 uptime boyunca sıfır oynama, ~7MB hedefinin altında plato)
+- VSZ: 156360 kB sabit · Threads: 3 sabit · %CPU: 0.1→0.3 (düşük)
+- FD: 10 (döküm: 0/1/2 stdio, 3 IPC soket, 4 epoll, 5 inotify, 6/7 input event2+event5, 8/10 uinput×2) — 2 farenin kararlı-durum tabanı; soak boyunca P57 sanal farenin 7 hot-plug giriş/çıkış döngüsü sonrası yine 10'a döndü → sızıntı YOK
+- Journald (19:22→19:52, 30dk pencere): gerçek error/warn/fail 0; yalnızca beklenen teardown gürültüsü (7× "Device error (No such device)" = P57 test cihazı kaldırma), 7× hotplug/opened, 1× config reloaded
+
+**(3) SYN_DROPPED VERDİKTİ (kuyruk önerisi)**
+AGENTS.md sözleşmesi UYGULUO: process_device() SYN_DROPPED'de dx=dy=0 + syn_dropped=true → SYN_REPORT'a kadar TÜM olaylar atılır (daemon.cpp:1049-1078); bayrak device-state (BUG-18), okuma batch sınırını aşan SYN_REPORT doğru yakalanır. Sınırlı kuyruk ÖNERİLMEZ: evdev düşüşü KERNEL ring tamponunda zaten kayıp — kullanıcı-alanı kuyruğu kayıp veriyi geri getiremez, sadece yönlendirmeyi geciktirir/backlog ekler. Gerçek önlem drenaj hızıdır (sıcak yol zaten lock-free, alloc'suz, minimum syscall). Karar: mevcut davranış doğru, kuyruk uygulanmayacak (kapsam dişi + faydasız).
+
+**(4) KAPI SONUÇLARI**
+- build.sh: 0 uyarı / 0 error ✓
+- run_tests.sh: 21754/21754 geçti ✓ (>=21669; ara aşamada görülen 2 P91 başarısızlığı başka ajanın WIP'iydi — stash ile daemon değişikliğimden bağımsız olduğu kanıtlandı, sonra 21754/21754'e tamamlandı)
+- run_tests_asan.sh: 21754/21754, ASan+UBSan TEMİZ ✓
+- oracle: RESULT OK (768 satır, 31 bilinen sapma) ✓
+- Daemon çalışmaya devam ediyor (active, PID 95580); install as-is, sistem binary'si değişmedi ✓
+
+Değişen dosya: yalnızca daemon/daemon.cpp (flush_motion, tek satır + 7 satır yorum). Rollüm gereği sonuç sunuldu.

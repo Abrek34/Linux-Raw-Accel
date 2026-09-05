@@ -2,6 +2,52 @@
 
 #include "../include/presets.hpp"
 
+/// Compact, localized one-line description of a built-in preset. Rendered from
+/// make_preset() (the single source of truth) so the preview can never drift
+/// from the values actually applied to the profile. Empty for unknown presets.
+static std::string preset_preview_text(const std::string& preset) {
+    auto dp = rawaccel::make_preset(preset, "_"); // non-empty name marks known presets
+    if (dp.name.empty()) return ""; // unknown preset — no preview
+    const auto& m = dp.prof.accel_x;
+    std::string mode;
+    switch (m.mode) {
+    case accel_mode::jump:        mode = tr("Jump");         break;
+    case accel_mode::synchronous: mode = tr("Synchronous");  break;
+    case accel_mode::lookup:      mode = tr("Lookup (LUT)"); break;
+    case accel_mode::power:       mode = tr("Power");        break;
+    case accel_mode::classic:     mode = tr("Classic");      break;
+    case accel_mode::natural:     mode = tr("Natural");      break;
+    case accel_mode::noaccel:     mode = tr("None (1:1)");   break;
+    }
+    auto dfmt = [](double v) {
+        std::ostringstream os;
+        os << std::setprecision(3) << v; // defaultfloat, '.' decimal separator
+        return os.str();
+    };
+    std::string summary = std::string(tr("mode")) + ": " + mode;
+    if (dp.prof.raw_passthrough) {
+        summary += std::string(", ") + tr("no acceleration (1:1 raw)");
+        return trf("%s → %s", preset.c_str(), summary.c_str());
+    }
+    if (m.gain) summary += std::string(", ") + tr("gain");
+    switch (m.mode) {
+    case accel_mode::classic:
+        summary += std::string(", ") + tr("exp") + " " + dfmt(m.exponent_classic)
+                + std::string(", ") + tr("cap") + " " + dfmt(m.cap.x) + "x" + dfmt(m.cap.y);
+        break;
+    case accel_mode::power:
+        summary += std::string(", ") + tr("scale") + " " + dfmt(m.scale)
+                + std::string(", ") + tr("exp") + " " + dfmt(m.exponent_power);
+        break;
+    case accel_mode::natural:
+        summary += std::string(", ") + tr("limit") + " " + dfmt(m.limit);
+        break;
+    default:
+        break;
+    }
+    return trf("%s → %s", preset.c_str(), summary.c_str());
+}
+
 // "New Profile" dialog: name entry + optional build-in preset dropdown. A
 // chosen preset seeds the profile via make_preset() (single source shared with
 // the CLI); "None (blank)" keeps the current behaviour (defaults).
@@ -36,6 +82,30 @@ void show_new_profile_dialog(AppState* S) {
     gtk_drop_down_set_selected(GTK_DROP_DOWN(combo), 0);
     g_object_unref(sl); // dropdown holds its own reference
     gtk_box_append(GTK_BOX(vbox), combo);
+
+    // Preset preview: a compact read-only summary of the selected preset,
+    // updated from make_preset() (single source of truth) on every selection.
+    GtkWidget* preset_info = gtk_label_new(nullptr);
+    gtk_label_set_xalign(GTK_LABEL(preset_info), 0.0);
+    gtk_label_set_wrap(GTK_LABEL(preset_info), TRUE);
+    gtk_widget_set_margin_top(preset_info, 2);
+    gtk_widget_set_visible(preset_info, FALSE); // "None (blank)" selected initially
+    gtk_box_append(GTK_BOX(vbox), preset_info);
+    g_signal_connect(combo, "notify::selected",
+        G_CALLBACK(+[](GtkWidget* dd, GParamSpec*, gpointer data) {
+            GtkWidget* info = GTK_WIDGET(data);
+            int idx = gtk_drop_down_get_selected(GTK_DROP_DOWN(dd));
+            std::string preset =
+                (idx > 0 && idx <= rawaccel::PRESET_COUNT) ? rawaccel::PRESET_NAMES[idx - 1] : "";
+            std::string txt = preset.empty() ? "" : preset_preview_text(preset);
+            if (txt.empty()) {
+                gtk_widget_set_visible(info, FALSE);
+            } else {
+                gtk_label_set_wrap(GTK_LABEL(info), TRUE);
+                gtk_label_set_text(GTK_LABEL(info), txt.c_str());
+                gtk_widget_set_visible(info, TRUE);
+            }
+        }), preset_info);
 
     GtkWidget* hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_halign(hbox, GTK_ALIGN_END);

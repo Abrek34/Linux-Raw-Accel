@@ -160,6 +160,11 @@ static bool daemon_apply_config(const app_config& cfg) {
 /// silently clobber the live daemon config unless the user explicitly wants it.
 static bool g_no_daemon = false;
 
+/// When true, `list` renders the config as JSON (machine-readable) instead of
+/// the human-readable profile dump.  Parsed as a global option so it works in
+/// either position: `rawaccel-cli list --json` or `rawaccel-cli --json list`.
+static bool g_json = false;
+
 /// Apply a config change to the running daemon, honoring the global --no-daemon
 /// flag.  When the flag is set the change is written to the local config file
 /// only; the user can later push it with `rawaccel-cli reload` (or rerun
@@ -312,6 +317,14 @@ static int cmd_list(const app_config& cfg) {
         print_profile(dp);
         std::cout << "\n";
     }
+    return 0;
+}
+
+/// `rawaccel-cli list --json` — machine-readable rendering of the whole config.
+/// Round-trips the exact field names/values the daemon and GUI agree on, so
+/// scripts can cross-check preset loads against include/presets.hpp directly.
+static int cmd_list_json(const app_config& cfg) {
+    std::cout << app_config_to_json(cfg) << "\n";
     return 0;
 }
 
@@ -830,7 +843,19 @@ static int cmd_set_param(app_config& cfg, const std::string& config_path,
     else if (key == "range_weights")   { dp->prof.range_weights.x = dp->prof.range_weights.y = v; }
     else if (key == "range_weight_x")  { dp->prof.range_weights.x = v; }
     else if (key == "range_weight_y")  { dp->prof.range_weights.y = v; }
-    else                                { std::cerr << "Unknown key: " << key << "\n"; return 1; }
+    else                                {
+        std::cerr << "Unknown key: " << key << "\n"
+                  << "Valid keys: mode, gain, cap_mode, cap_x, cap_y, acceleration, "
+                     "exponent_classic, exponent_power, limit, decay_rate, motivity, "
+                     "gamma, input_offset, output_offset, scale, sync_speed, smooth, "
+                     "raw, device_id, rotation, snap, dpi, polling_rate, speed_min, "
+                     "speed_max, output_dpi, lr_ratio, ud_ratio, yx_ratio, "
+                     "distance_mode, lp_norm, input_smooth_halflife, "
+                     "scale_smooth_halflife, output_smooth_halflife, domain_weights, "
+                     "domain_weight_x, domain_weight_y, range_weights, range_weight_x, "
+                     "range_weight_y\n";
+        return 1;
+    }
 
     // Sanitize after setting — clamps DPI, polling rate, rotation, etc. to safe ranges
     sanitize_device_profile(*dp);
@@ -1142,6 +1167,19 @@ Options:
   -n, --no-daemon, --dry-run    Save config changes locally only — do NOT push
                                 them to the running daemon (default: live-apply)
 
+Presets (values loaded by `create-preset <preset> <name>`):
+  preset      mode            gain  exp-power  cap [in,out]  output-offset
+  gaming      classic         on    —          —             —
+  office      natural         on    —          —             —
+  precision   classic         on    —          —             —
+  disable     raw-passthrough (noaccel, all processing bypassed)
+  cs2         classic         on    —          [18.0, 1.6]   —
+  valorant    natural         on    —          [30.0, 2.0]   —
+  apex        power           on    0.8        [28.0, 2.2]   0.9
+  fps         classic         on    —          [20.0, 1.8]   —
+  exp-power = power-mode exponent; classic/natural presets use
+  exponent_classic/other defaults instead.  All presets: dpi 800, poll 1000.
+
 Parameters (for set-param):
   raw               true|false|1|0  (raw passthrough — bypass all processing)
   mode              classic|power|natural|jump|synchronous|lookup|noaccel
@@ -1219,6 +1257,8 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "-V") == 0 || strcmp(argv[i], "--version") == 0) {
             std::cout << "rawaccel-cli " << VERSION << "\n";
             return 0;
+        } else if (strcmp(argv[i], "--json") == 0) {
+            g_json = true;
         } else if (strcmp(argv[i], "-n") == 0 ||
                    strcmp(argv[i], "--no-daemon") == 0 ||
                    strcmp(argv[i], "--dry-run") == 0) {
@@ -1315,7 +1355,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (cmd == "list")   return cmd_list(cfg);
+    if (cmd == "list") {
+        if (g_json) return cmd_list_json(cfg);
+        return cmd_list(cfg);
+    }
     if (cmd == "show")   return cmd_show(cfg, args[1]);
     if (cmd == "set")    return cmd_set(cfg, config_path, args[1]);
     if (cmd == "create") return cmd_create(cfg, config_path, args[1]);

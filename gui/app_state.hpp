@@ -99,6 +99,7 @@ struct AppState {
     GtkWidget* dpi_autofill_btn      = nullptr;
     GtkWidget* polling_autofill_btn  = nullptr;
     GtkWidget* battery_detected_lbl  = nullptr; // battery % label
+    GtkWidget* latency_lbl           = nullptr; // read-only latency stats display
 
     // ── Widgets ──────────────────────────────────────────────────────────────
     GtkWidget* window            = nullptr;

@@ -9,16 +9,21 @@
  *   rawaccel-cli latency                        # read the per-device histogram
  *
  * Scenarios (counts/sec):
- *   flick : very fast short bursts (one-shot big deltas) — RTS/hero shooter flicks
- *   pan   : sustained high-speed horizontal panning (4000 cnt/s sustained)
- *   mix   : blend of flick + slow precise micro-moves (idle/precision)
+ *   flick     : very fast short bursts (one-shot big deltas) — RTS/hero shooter flicks
+ *   pan       : sustained high-speed horizontal panning (4000 cnt/s sustained)
+ *   mix       : blend of flick + slow precise micro-moves (idle/precision)
+ *   precision : P94 "precision flick" — 1 s sawtooth ramping 120→4000 cnt/s
+ *               (≈150→5000 ips at 800 DPI), crossing the esport grid
+ *               landmarks 2000/3000/4000 ips each sweep, exercising the
+ *               precision band (120–900) and fast-flick (>4000 cnt/s)
+ *               curve regions in one run.
  *
  * The daemon's is_physical_mouse() ignores devices whose phys contains
  * "uinput" or whose name ends "(RawAccel)" — so we must NOT use those
  * markers if we want the daemon to grab this device.
  *
  * Usage: virtmouse_game <scenario> <duration_sec>
- *   scenario: flick | pan | mix
+ *   scenario: flick | pan | mix | precision
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,7 +90,7 @@ static void emit_rel(int fd, int dx) {
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        fprintf(stderr, "usage: %s <flick|pan|mix> <duration_sec>\n", argv[0]);
+        fprintf(stderr, "usage: %s <flick|pan|mix|precision> <duration_sec>\n", argv[0]);
         return 2;
     }
     const char* scenario = argv[1];
@@ -117,6 +122,19 @@ int main(int argc, char** argv) {
             emit_rel(fd, pan_sign * 4);
             pan_sign = -pan_sign;
             sleep_us(1000);
+        } else if (strcmp(scenario, "precision") == 0) {
+            /* P94 (P64 harness genişletme): "precision flick" — 1 s sawtooth
+             * that sweeps the injected rate 120→4000 cnt/s (≈150→5000 ips at
+             * 800 DPI) and back, crossing the esport grid landmarks
+             * 2000/3000/4000 ips (1600/2400/3200 cnt/s at 800 DPI) every
+             * sweep. Slow end emits one count per tick, so the precision band
+             * (120–900 cnt/s) injects real micro-motion instead of idling. */
+            double ramp = ((now - t0) % 1000000L) / 1000000.0; /* 0..1 sawtooth */
+            double rate = 120.0 + (4000.0 - 120.0) * ramp;     /* cnt/s */
+            long tick_us = (long)(1000000.0 / rate);           /* 1-count tick */
+            if (tick_us < 250) tick_us = 250;                  /* floor, keep comfy */
+            emit_rel(fd, 1);
+            sleep_us(tick_us);
         } else { /* mix */
             /* heavy flick burst then slow precise micro-moves */
             emit_rel(fd, 20);

@@ -633,3 +633,59 @@ void on_daemon_reload(GtkButton*, gpointer user_data) {
     set_status(S, tr("Daemon reloaded (SIGHUP)."));
     update_daemon_status(S);
 }
+
+// ── Latency stats view ────────────────────────────────────────────────────────
+
+/// Extract a numeric JSON field value (first occurrence) from an IPC response.
+/// Returns -1 when the key is absent or unparseable.
+static double daemon_json_field(const std::string& resp, const char* key) {
+    std::string needle = "\"" + std::string(key) + "\":";
+    size_t pos = resp.find(needle);
+    if (pos == std::string::npos) return -1;
+    size_t start = resp.find_first_not_of(" \t", pos + needle.size());
+    size_t end = resp.find_first_of(",}", start);
+    if (end == std::string::npos || end <= start) return -1;
+    std::string val = resp.substr(start, end - start);
+    errno = 0;
+    char* e = nullptr;
+    double v = std::strtod(val.c_str(), &e);
+    if (e == val.c_str() || errno != 0 || !std::isfinite(v)) return -1;
+    return v;
+}
+
+/// Format a latency figure with 2 decimals ('' '.' decimal separator — C++
+/// streams keep the "C" locale even after setlocale(LC_ALL, "")).
+static std::string fmt_us(double v) {
+    std::ostringstream os;
+    os << std::fixed << std::setprecision(2) << v;
+    return os.str();
+}
+
+/// "Performans" button in the status bar: read the daemon's latency snapshot
+/// (same IPC channel as update_daemon_status) and show Avg/p50/p95/p99/Max.
+/// The daemon status_json exposes these per-device µs stats (histogram bucket
+/// midpoints); a Min is not part of the snapshot, so Max stands in as the tail
+/// bound. Non-blocking: the IPC query itself carries a 1 s socket timeout.
+void on_perf_clicked(GtkButton*, gpointer user_data) {
+    auto* S = static_cast<AppState*>(user_data);
+    if (!daemon_running()) {
+        set_status(S, tr("Daemon is not running."));
+        return;
+    }
+    std::string resp = daemon_ipc_query("status");
+    double samples = daemon_json_field(resp, "lat_samples");
+    if (samples <= 0) {
+        gtk_label_set_text(GTK_LABEL(S->latency_lbl),
+            tr("Latency: no samples recorded yet."));
+        return;
+    }
+    double avg = daemon_json_field(resp, "lat_avg_us");
+    double p50 = daemon_json_field(resp, "lat_p50_us");
+    double p95 = daemon_json_field(resp, "lat_p95_us");
+    double p99 = daemon_json_field(resp, "lat_p99_us");
+    double mx  = daemon_json_field(resp, "lat_max_us");
+    gtk_label_set_text(GTK_LABEL(S->latency_lbl),
+        trf("Latency: Avg %s · p50 %s · p95 %s · p99 %s · Max %s µs",
+            fmt_us(avg).c_str(), fmt_us(p50).c_str(), fmt_us(p95).c_str(),
+            fmt_us(p99).c_str(), fmt_us(mx).c_str()).c_str());
+}

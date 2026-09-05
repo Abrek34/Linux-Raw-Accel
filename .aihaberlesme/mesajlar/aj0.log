@@ -564,3 +564,21 @@ Yönetici (Aj 1), gözetimde: **P86 (Aj6, ACİL UBSan UB fix) TAMAM (M22):**
 - Yönetici kararı bekleyen mini-yamalar: Aj8-BULGU-2 (`-c ""`), Aj5-P82 CRIT-1 alternatif, Aj3-P84 gözlem (config.cpp MAX_NAME_LEN-1). BULGU-1 truncate redundant kapanabilir.
 - Commit/push: 766 dosya uncommitted, push OAuth workflow scope'u bekliyor (kullanıcı).
 İzleme sürüyor (10s). Kilit null.
+
+### Aj.0 [M49] [05 Eyl 2026] [22:37 — KANAL GÖZETİM: YENİ ROUND TESPİT + AKIS EŞİTLENDİ]
+
+Yönetici (Aj 1), gözetimde yeni geliştirme round'u (P88-P95) ve önemli durumlar:
+
+**Tespit — yeni order dalgası icra edilmiş:**
+- **P88 (Aj8) TAMAM:** docs/research/formulas.md + index.md; 31 sapma kök neden (23 classic_gain_exp_le1 + 8 power/sync s=0) — tümü bilinçli koruma, KABUL as-is önerisi.
+- **P90 (Aj3) TAMAM:** GUI preset önizleme + Latency görünümü (Avg/p50/p95/p99/Max); tr PASS, build 0 uyarı, 21754/21754.
+- **P91 (Aj4) TAMAM:** test derinleştirme (denormal 1e-300 7 mod finite, s(0) identity).
+- **P92 (Aj5) TAMAM:** list --json GERÇEK JSON (eski metin yutuyordu), set-param net hata, create-preset --help değer tablosu, --no-daemon dokümantasyonu.
+- **P93 (Aj6)** DEVAM (kilit Aj.6): daemon perf + 30dk uzun koşu.
+- **P94 (Aj7) TAMAM:** gerçek-fare kiti genişletme (docs 3.2/3.3/3.4 + bölüm 4).
+- **P95 (Aj2)** DEVAM (kilit Aj.2): **partition 2→4 doğruluk kazancı GERÇEK (max LUT hatası 1.28e-2→6.39e-2... 6.39e-3) AMA oracle referansı da N=2 kullandığından kapı kırılıyor (57 UNKNOWN row)** → kod değişikliği şip EDİLMEDİ; kapı-uyumlu regresyon testi eklendi (47 assertion, exact-integral envelope/monotonluk/gain-point). gerçek kazanç için referansın da N=4'e çekilmesi ayrı P gerekir.
+- **P89 (Aj2) TAMAM:** 31 sapma KABUL, 0 fixable.
+
+**AKIS eşitlemesi:** P88/P90/P92/P87 kayıtları eksikti → eklendi (84 görev). YAYIN READY öncesi son çekirdek **R44** (kurulum çakışması fix: setup.sh shadow + backup + pre_install).
+
+**AÇIK:** P93 (Aj6) · P95 (Aj2, karar: referans N=4 ayrı P mi — Aj1). Gözlüyorum. Kilit null.

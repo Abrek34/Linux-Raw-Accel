@@ -1,13 +1,21 @@
-# Real-Hardware Feel Session Protocol (P71)
+# Real-Hardware Test Kit (P71 base + P94 expansion)
 
 This document is the step-by-step protocol for validating RawAccel Linux's
-"feel" on **real hardware**. This VM contains only virtual mice, so real feel
-must be assessed on your physical machine. Run this session on the machine and
-mouse you actually game with.
+"feel" and **processing latency** on **real hardware**. This VM contains only
+virtual mice, so real feel must be assessed on your physical machine. Run this
+session on the machine and mouse you actually game with.
 
 > Play/test each profile long enough to judge it. Per README: "spend
 > 30–60 min per config before judging" — for this fast A/B pass we use the
 > compact 5–10 min window below, but lengthen it if you are unsure.
+
+**What P94 added to this kit** (real-user validation screws): (a) A/B at
+multiple mouse DPI settings so accel effects can be told apart from sensor
+smoothing (Section 3.2); (b) a per-preset *expected behavior* table derived
+from `include/presets.hpp` so you know what "normal" feels like at slow vs fast
+flicks (Section 3.3); (c) a Windows/macOS → Linux "what changes" note (Section
+3.4); (d) a step-by-step P57 latency methodology for real hardware with
+p50/p95/p99 interpretation (Section 4).
 
 ---
 
@@ -59,6 +67,10 @@ is flat (see README → "KDE Plasma Setup"):
 bash scripts/kde-fix-accel.sh --check
 ```
 
+> **GNOME users** get the same double-acceleration risk: set the mouse
+> acceleration profile to *flat* (GNOME Settings → Mouse & Touchpad, or
+> `gsettings set org.gnome.desktop.peripherals.mouse accel-profile flat`).
+
 Create the profiles you will test (one-shot):
 
 ```bash
@@ -77,6 +89,8 @@ The **raw 1:1 baseline** (`p71-raw`) is your reference point for every compare.
 ---
 
 ## 3. A/B test protocol
+
+### 3.1 Per-preset feel pass
 
 For each of the 5 presets, in order:
 
@@ -105,26 +119,220 @@ the raw baseline and play 1 minute. Judge the differences.
 
 **Record** a line per preset in the Feel Score table below.
 
+### 3.2 DPI ladder A/B — separate accel from sensor smoothing
+
+The accel curve is **DPI-agnostic by design**: the daemon converts raw counts
+to *input speed in ips* with `input_ips = (counts/s) · (1000 / device_dpi)`
+(`NORMALIZED_DPI = 1000`). For the same physical hand motion:
+
+- high mouse DPI → more counts/sec → identical ips (because the profile DPI is
+  raised to match) → **exactly the same gain**;
+- output counts are then re-normalized by `output_dpi`, so on-screen distance
+  for a given hand movement is also the same at any input DPI.
+
+Consequence you can test on **your** hardware: if a preset behaves differently
+at 400 / 800 / 1600 DPI, the culprit is **not the accel math** — it is either a
+wrong profile DPI, or the *sensor's* own DPI-dependent behavior (smoothing,
+interpolation, native resolution).
+
+**Protocol (run per preset you care about, plus the raw baseline):**
+
+1. Set your mouse's hardware DPI to **400** (button/software), then sync the
+   profile:
+
+   ```bash
+   rawaccel-cli set-param p71-<preset> dpi 400
+   rawaccel-cli set p71-<preset>
+   ```
+
+2. Do the 3 focus tasks (micro-aim / flick / tracking), 2–3 min each. Note
+   *where* on the curve the gain seems to kick in and how the cap feels.
+3. Repeat at **800** and **1600** (update `dpi` first). Keep the same game,
+   sensitivity, resolution, and mousepad surface.
+4. Compare. The accel *fingerprint* (kick-in point, curve shape, cap feel)
+   should be **identical** across all three DPI settings.
+
+**Reading the results:**
+
+| Observation across 400/800/1600 | Meaning | What to do |
+|----------------------------------|---------|-----------|
+| Gain curve feels the same at all three DPI | True accel, DPI-correct | Nothing — proceed to Section 4 latency |
+| Curve shifts with DPI (feels faster/slower per DPI even though DPI is synced) | Profile DPI mismatch, or accel misreading the count stream | Re-check `rawaccel-cli status` DPI vs the mouse's real setting; re-sync `dpi` |
+| Only *one* DPI feels "washed out"/muddy/wobbly, others clean | Sensor smoothing / interpolation at that DPI (hardware) | Not an accel bug — avoid that DPI for gaming; re-test on the clean DPI |
+| Sub-1:1 muddy micro-aim at every DPI | accel `input_offset` too high / output offset floor | Tune per `docs/user_guide.md`, re-run |
+
+> The 400/800/1600 ladder is also a quick "is my profile DPI right?" sanity
+> check before the full feel pass. If you only have time for one DPI, use the
+> sensor's **native or most commonly shipped** step and keep it constant.
+
+### 3.3 Per-preset expected behavior (slow vs fast flicks)
+
+Values below are computed from `include/presets.hpp` `make_preset()` — the
+**single source of truth** the CLI `create-preset` and the GUI dropdown both
+use. If this table ever disagrees with what the release ships, fix the doc,
+not the preset. Gain = multiplier on the raw count stream (1.00 = raw 1:1).
+Speeds are *input* speed in ips (same hand-speed axis the curve uses).
+
+Common to all game presets: `gain = true`, DPI 800, polling 1000 Hz,
+`output_dpi = 1000`, `raw_passthrough = off`.
+
+| Preset | mode | tuned params (presets.hpp) | Slow register (micro-aim / gentle micro-adjust, ~0.2–2 ips) | Mid register (tracking, ~5–30 ips) | Fast register (flick / 180°, ≥80–900 ips) | Cap plateau check |
+|--------|------|----------------------------|--------------------------------------------------------------|------------------------------------|---------------------------------------------|-------------------|
+| `cs2` | classic | accel 0.004, exp 2.0, input_offset 0, limit 1.6, cap {18.0, 1.6} out | near 1:1 — gain 1.00–1.01 (micro-corrections do NOT accelerate) | gentle rise 1.02→1.12 | 1.32 @80 ips → 1.59 @900 ips (asymptote ~1.6) | no plateau before ~1.6; ends just under limit |
+| `valorant` | natural | limit 1.3, decay 0.08, motivity 1.2, input_offset 0.02, cap {30.0, 2.0} out | 1.01 → 1.07 @2 ips (soft entry) | smooth 1.13→1.26 | 1.29 @80 → 1.30 (gently saturates at ~1.3) | very flat ceiling ~1.3 — cap 2.0 effectively unused |
+| `apex` | power | scale 2.2, exp_power 0.8, input_offset 0.02, output_offset 0.9, cap {28.0, 2.2} out | ~0.90 floor at the very slowest, → 1.95 @2 ips (fastest kick-in) | 2.10–2.18 | ~2.20 (reaches cap early, holds) | **early** plateau: hits cap around 5 ips — deliberate for 180° speed |
+| `fps` | classic | accel 0.005, exp 2.0, input_offset 0.01, limit 1.8, cap {20.0, 1.8} out | 1.00–1.01 | 1.02→1.15 | 1.40 @80 → 1.79 @900 ips (asymptote 1.8) | gentle climb to 1.8 — least aggressive plateau |
+
+**How to read a row while playing:**
+
+- `cs2` — a slightly larger than 1:1 micro-aim response is expected *feels
+  right*; flicks should ramp but never shoot past ~1.6.
+- `valorant` — the whole curve lives in a narrow band (1.0–1.3); it should feel
+  calm, *not* "slippery", at both slow and fast flicks.
+- `apex` — expects a *fast* ramp: the crosshair should get markedly faster on a
+  180° flick while slow tracking stays near 1:1 (the 0.9 floor). If your flick
+  feels *un*changed from raw, the power ramp is not engaging — suspect
+  DPI issue or smoothing, not the curve.
+- `fps` — the safe middle ground: firm but late ramp, high ending (1.8).
+
+> If a row's numbers are what you *want* but the hand feel disagrees strongly,
+> run the DPI ladder (3.2) before touching parameters — sensor behavior is the
+> usual hidden variable.
+
+### 3.4 Coming from Windows / macOS — what changes on Linux
+
+**Where accel runs.** On Windows, RawAccel runs as a *kernel filter driver* and
+rewrites mouse reports before the OS/game sees them. On Linux, the rawaccel
+daemon does the equivalent job **kernel-side**: it grabs the real evdev node,
+applies the modifier (per-event, µs-level), and re-emits an accelerated stream
+through uinput. Either way, the accel sits **below** the game and the desktop —
+it is not a surface macro or an in-game setting.
+
+**What actually changes on Linux:**
+
+1. **Desktop double-acceleration.** Windows only has "Enhance pointer
+   precision" to disable; **Linux desktops (KDE Plasma especially) accelerate
+   the pointer themselves on top of your evdev stream**. If you skip the KDE
+   flat fix, you get accel-on-accel and the preset feels "too fast"
+   (this is the #1 reported symptom):
+
+   ```bash
+   bash scripts/kde-fix-accel.sh   # installer already ran it; re-run to be safe
+   ```
+
+   GNOME equivalent: set mouse accel profile to `flat` (see Section 2).
+   Wayland compositors: the daemon stream is flat by definition (no compositor
+   pointer accel on top of evdev apps), but check your compositor's mouse
+   settings anyway.
+
+2. **Raw input / in-game sensitivity.** Games read the accelerated evdev/uinput
+   stream the same way they read the mouse on Windows, so "Raw Input: ON" needs
+   no extra knob. If a game also applies its own "mouse smoothing", disable it
+   in-game as you would on Windows.
+
+3. **Sensor/DPI expectations are unchanged.** Your mouse's DPI, polling rate
+   and native resolution behave identically. Sync the real values into the
+   profile (`rawaccel-cli set-param <profile> dpi … polling_rate …`) exactly
+   as you would in the Windows RawAccel GUI.
+
+4. **Your old RawAccel numbers still make sense.** The parameter vocabulary
+   (acceleration, exponent, limit, input_offset, output_offset, cap, cap_mode,
+   mode classic/natural/power) is the same project lineage — if you exported a
+   config on Windows (or know your community curve), re-enter the same values;
+   the presets here are matched starting points (Section 3.3), not rules.
+
+5. **macOS switchers.** macOS has no RawAccel and applies its own "smart"
+   system acceleration. On Linux you get RawAccel-style control for the first
+   time. Start from `precision` (very light) or `office` if macOS's default
+   motion felt right, and use `disable` (raw 1:1) as your mental reference —
+   that is the exact macOS-familiar 1:1 you may have been chasing.
+
 ---
 
-## 4. Latency measurement (per profile)
+## 4. Latency measurement on real hardware (P57 methodology)
 
-Measure processing latency with the built-in histogram for each active profile.
-`rawaccel-cli latency` sends `SIGUSR1`; the histogram appears in the daemon log.
+The daemon keeps a per-device **processing latency histogram** (µs) on its
+hot path. On Linux it is measured exactly as on the VM (P57/P64/P73 harness
+work): `rawaccel-cli latency` pushes that histogram out; it is the per-event
+cost of `flush_motion()` entry → modifier math → last uinput write. HID
+polling (the sensor→USB delivery) is **NOT** included — that is dominated by
+your mouse's polling rate and is a constant you already know.
+
+### 4.1 Step-by-step (per profile)
 
 ```bash
-# with the target profile active:
+# 1. Daemon up and your real mouse grabbed?
+rawaccel-cli status                 # your mouse listed
+
+# 2. Activate the profile under test
+rawaccel-cli set p71-<preset>
+
+# 3. Launch your game / aim trainer and play at real speed for ~30–60 s.
+#    The histogram only fills while motion events flow, so play, don't idle.
+
+# 4. Snapshot the live histogram (SIGUSR1 → snapshot_and_reset)
 rawaccel-cli latency
-journalctl -u rawaccel -n 30    # read p50 / p95 / p99 (µs)
+
+# 5. Read it — the dump lands in the daemon log
+journalctl -u rawaccel -n 30
+#   === RawAccel Processing Latency ===
+#   Device: <your mouse>
+#     Samples  : n
+#     Min / Avg / p50 / p95 / p99 / Max  (µs)
+#     Overflow : k samples > 500 µs
 ```
 
-Record the three numbers in the table. Do this **while your game is running**
-(real load), after each 5–10 min feel window — not cold.
+Repeat **3× while playing** and take the middle value of each percentile (the
+daemon resets counters on every dump, so each run is independent).
 
-**Reference numbers** (from the project's own synthetic measurements, n=2454,
-Aj 1 live data — README): p50 33 µs, p95 86 µs, p99 266 µs. Your real-hardware
-numbers should be in the same ballpark while gaming; anything hugely worse at
-p95/p99 points at a per-device / queue issue worth reporting (P-round).
+### 4.2 How to interpret p50 / p95 / p99
+
+| Column | What it is | Your "normal" target |
+|--------|------------|----------------------|
+| p50 (median) | typical per-event processing cost | **low single-digit µs** (1–5 µs) — a tiny fraction of one polling frame |
+| p95 | 95th-percentile tail | should stay within a few µs of p50 on the same surface |
+| p99 | worst-99% tail (the "I'm still feeling ok" bound) | still < ~10 µs single-digit; small humps while gaming are expected |
+| Max / Overflow | rare queue spikes (`> 500 µs`) | expect occasional VM/scheduler spikes **on this VM**; on real hardware, a *recurring* > 500 µs Max or a growing Overflow count is the flag to report |
+
+**Frame-budget yardstick** (how small this really is):
+
+- 1000 Hz mouse → one frame = 1000 µs. A p50 of 1–3 µs is **~0.1–0.3%** of the
+  frame budget; the daemon cannot be your latency bottleneck.
+- 8000 Hz (8k) mouse → frame = 125 µs. Still: p50 ≈ 1–3 µs ≈ **1–2%** of the
+  frame.
+
+**Reference measurements** (all from the project's own runs, µs):
+
+| Data set | p50 | p95 | p99 | Notes |
+|----------|-----|-----|-----|-------|
+| P31 synthetic hot-path (VM, n=2454) | 33 | 86 | 266 | VM host jitter heavy; older tooling |
+| P57 / P64 / P73 live daemon, pan~4000 cnt/s (VM) | 1.75–2.25 | 2.75–3.75 | 3.75–5.25 | uinput virtual mouse, consistent across runs |
+| P94 precision ramp (VM, n=19487) | 1.75 | 3.25–3.75 | 4.75 | new `precision` scenario, reproducible |
+
+Your real-hardware numbers should be **in the low single digits at p50/p95**,
+matching the P57/P64/P94 ballpark (VM jitter disappears on real hardware). A
+p50 in the tens of µs, or p95/p99 that grow under load, points at a
+per-device/grab issue worth a P-round report.
+
+### 4.3 Optional: run the game-speed harness on your real machine too
+
+The same scenarios used to produce the reference numbers can run on your box
+(no real mouse needed — it isolates only the daemon, exactly as it did in the
+VM):
+
+```bash
+gcc -O2 -o build-manual/virtmouse-game scripts/virtmouse-game.c
+sudo build-manual/virtmouse-game precision 60     # 120→4000 cnt/s sawtooth ramp
+rawaccel-cli latency
+```
+
+Scenarios: `flick` (fast bursts), `pan` (sustained 4000 cnt/s), `mix`
+(flick + micro-moves), `precision` (P94: 1 s sawtooth 120→4000 cnt/s,
+≈150→5000 ips at 800 DPI, crossing the esport grid 2000/3000/4000 ips). Then
+do the real-mouse version (Section 4.1) while gaming — the two together give
+you the full split: *daemon processing* vs *HID + game*. Compare the Max/tail
+between them: on real hardware the harness Max should largely vanish, which
+confirms the VM tail was host jitter.
 
 ---
 
@@ -147,7 +355,7 @@ Fill in **1–5** for each row (1 = unusable, 3 = acceptable, 5 = excellent).
 - **Slow aim low (1–2)** → likely sub-1:1 muddy micro-aim. Check the preset's
   `input_offset` / `output_offset`; raise `input_offset` if slow aim feels floaty.
 - **Flick low (1–2)** → cap plateau (cap too low / cap_mode wrong). Raise the
-  cap or check `limit`.
+  cap or check `limit`. Before tuning, cross-check the DPI ladder (3.2).
 - **Tracking low (1–2)** → curve too aggressive mid-range, or compositor
   double-acceleration still on.
 - **Any row with p95/p99 badly elevated** → note it for the latency P-round,
@@ -187,3 +395,5 @@ Record the final verdict here:
 - Run on the same game, same settings, same resolution for all profiles.
 - If KDE: re-run `kde-fix-accel.sh` before the session to be safe.
 - One window at a time — reset the table if you rush two presets back to back.
+- Keep a **fixed DPI for the 3.1 pass** (use the ladder in 3.2 only when you
+  explicitly want to separate accel from sensor behavior).

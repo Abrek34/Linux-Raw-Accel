@@ -758,6 +758,19 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     gtk_widget_add_css_class(S->battery_detected_lbl, "battery-label");
     gtk_box_append(GTK_BOX(status_hbox), S->battery_detected_lbl);
 
+    // Latency stats view: read-only display + a button that pulls the daemon's
+    // latency snapshot over IPC (see on_perf_clicked in widgets_sync.inl).
+    S->latency_lbl = trlbl("Latency: —");
+    gtk_label_set_xalign(GTK_LABEL(S->latency_lbl), 0.0);
+    gtk_widget_add_css_class(S->latency_lbl, "latency-label");
+    gtk_widget_set_margin_end(S->latency_lbl, 4);
+    gtk_box_append(GTK_BOX(status_hbox), S->latency_lbl);
+
+    GtkWidget* perf_btn = trbtn("Performance");
+    trtip(perf_btn, "Read the daemon's latency snapshot (Avg/p50/p95/p99/Max)");
+    g_signal_connect(perf_btn, "clicked", G_CALLBACK(on_perf_clicked), S);
+    gtk_box_append(GTK_BOX(status_hbox), perf_btn);
+
     gtk_box_append(GTK_BOX(outer_vbox), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
     gtk_box_append(GTK_BOX(outer_vbox), status_hbox);
 
