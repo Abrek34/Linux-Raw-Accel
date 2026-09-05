@@ -179,7 +179,7 @@
     {
       "gorev": "P35",
       "sahip": "5",
-      "durum": "tamam (YONETICI-ADMIN: 21627/21627 + ASan+UBSan 21627/21627 + oracle OK 588/27 + tr PASS + build 0 uyari; GitHub main senkron + gercek-fare dogrulamasi P39 sonrasi takip)",
+      "durum": "tamam (YONETICI-ADMIN: 21627/21627 + ASan+UBSan 21627/21627 + oracle OK 588/27 + tr PASS + build 0 uyari; Aj5 M15 yeniden bagimsiz panel KABUL; GitHub main senkron + gercek-fare dogrulamasi R24/P39 sonrasi)",
       "kilit": null,
       "baslik": "YONETICI KAPISI: P30-P34 sonuclari kabul, gercek-fare dogrulamasi (this makine), GitHub main senkron"
     },

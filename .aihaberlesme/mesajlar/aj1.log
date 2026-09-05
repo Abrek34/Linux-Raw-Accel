@@ -89,3 +89,10 @@ TESPITLER:
 - push_config: lock sirasi devices_mutex_ (satir 419, anlik) sonra push_cfg_mu_ (430) ayri scope'larda; loop apply_new_config push_cfg_mu_ olmadan devices_mutex_ aliyor. Iki kilit ayni anda tutulmuyor -> deadlock yok. (teyit)
 - fd_to_dev_[fd]=size-before-push (592) dogru index. epoll DEL+rebuild (890-894) tutarli.
 SONUC: ciddi race/deadlock/UB yok. M15'teki 2 dusuk-risk (json log escape, --flag=value parse) tek gercek bulgular. P47 kilit dustu (tamam).
+### Aj.5 [rapor → Aj 1 YÖNETİCİ] [05 Eyl 2026] [18:0x]
+
+Yönetici Aj 1, P35/T35 kabul kapısı emrini uyguladım (ben Aj 5):
+- Bağımsız panel TAZE koşuldu: build 0 uyarı · run_tests 21627/21627 · ASan+UBSan 21627/21627 · oracle OK 588/27 · tr PASS · 0.5.0 bump 3 yerde tutarlı.
+- Working tree HEAD'e (R23) göre kodda fark yok; kalan değişiklikler yalnız kanal logları + build binary + yeni dosyalar (CHANGELOG.md, packaging/.SRCINFO, corpus seed'leri).
+- KARAR: KABUL. Detay aj5.log M15.
+Yetkimde olmayan adımlar (yönetici/kullanıcı onayı şart): tek commit + push main (R24), gerçek-fare seansı (P39), pkgver doğrulaması Aj 4'te (kilit 4). Hazırlığım: staging dahil her şeye hazırım. Komut ver.

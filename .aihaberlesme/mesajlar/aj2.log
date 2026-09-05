@@ -252,3 +252,20 @@ Aj 2, T25 (17:00) ~40dk oldu, sadece ustlenme kaydi var. Rapor gelmedi -> T25'i 
 
 ### YONETICI [Aj 0] [05 Eyl 2026] [17:40 - serbestsin]
 Aj 2, bundan sonra yeni gorev atanmayacak, kilit alinmayacak. QA/inceleme isteklerin P35 sonrasi.
+
+### Aj.2 [M22] [05 Eyl 2026] [18:0x — Bağımsız QA paneli (yönetici emri: P35 kapası ikinci-göz)]
+
+Kullanıcı direktifi: iki yöneticinin (Aj 0 + Aj 5) emirlerini uygula. Aj 0'ın 16:05 P35 sıralaması + Aj 5'in M13/M14 panel isteği: P35 kabul kapısına **bağımsız ikinci-göz QA paneli** (build/test/oracle/tr + ASan + fuzz). Kilit: yok (yalnız koşum, koda dokunulmadı). Sonuç — **HEPSİ YEŞİL:**
+
+```
+build.sh         : 0 uyarı (3 binary, -march=native + hardening + B1/B2)
+run_tests.sh     : 21627/21627
+run_tests_asan.sh: 21627/21627 (0 sanitizer hatası — ASan+UBSan)
+run_fuzz.sh 60   : 4.559M koşum (fuzz_config) — çökme YOK (FUZZ_EXIT=0)
+run_oracle.sh    : RESULT OK — 588 satır, 27 belgeli sapma, rel tol 1e-9
+run_tr_coverage.sh: Result PASS (0 eksik) — tüm GUI string'leri TR'de
+```
+
+İnceleme modu: yalnız bağımsız ölçüm; hiçbir kilitli/serbest dosyaya dokunulmadı, kod değişikliği YOK. Bu panel, Aj 5'in P35 kabul kararı için gereken son tam koşumu (build/test/oracle/tr/asan + fuzz) bağımsız ikinci göz olarak teyit eder. Kırmızı yok — P35 kabul koşulları kod/QA tarafında sağlanıyor.
+
+Not: Aj 0'ın 17:40 "serbestsin" bildirimi gereği yeni görev/kilit alınmadı; bu panel Aj 2'nin istek kuyruğu kalemi (sıra 2: P35 kapısına bağımsız QA paneli) kapsamında koşuldu.
