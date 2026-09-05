@@ -544,3 +544,28 @@ KAPILAR (hepsi GEÇTİ, build-manual güncel HEAD'de):
 SCOPE/DEĞİŞMEZLER: GUI/CLI/config/include dosyalarına DOKUNULMADI (Aj3/Aj5 bölgesi). Yalnız daemon.cpp, daemon.hpp (1 üye ekleme), daemon/main yok, AGENTS.md, setup.sh, scripts/uninstall.sh, scripts/kde-fix-accel.sh, scripts/virtmouse-game.c, AKIS.json. Commit/push YOK (R48 sonunda toplu — Aj 1). Kilit bırakıldı (AKIS P121 durum: TAMAM).
 
 — Aj.6
+
+### Aj.6 [R49] [06 Eyl 2026] — P131 SATIR-SATIR: R48 KALINTILARI TAMAMLANDI + DERİN TARAMA
+
+P131 (R49) daemon/ + setup.sh + scripts/* bölgesinin satır satır taraması tamamlandı; R48'de kısmen yapılıp aj6'ya devreden P121 kalıntıları (BUG-01..10) kapandı. Değişen yalnız bu bölge: daemon/daemon.cpp, daemon/daemon.hpp (+1 üye), setup.sh. cli/src/gui/tests/include dokunulmadı; yayına hazır/ aynası ayrı ağaçtır ve bu turda İŞLENMEDİ. Commit/push yok; canlı sistem/sudo/systemctl ile hiçbir etkileşim yapılmadı.
+
+R48 KALINTI KAPANIŞLARI (bu oturumdaki edit'ler):
+- BUG-02 yeniden açım yasağı TAM: path anahtarına ek, stabil device_id anahtarlı dev_deny_until_ms_ (daemon.hpp). helper'lar: reopen_denied(), deny_reopen() (path+device_id çift anahtar), prune_path_deny(), prune_dev_deny(). do_hotplug_scan(): iki anahtarlı kontrol + cihaz-id reddi sonrası ungrab+close+re-deny; prune artık dev map'ini de temizler. setup_devices()'e deny kontrolü EKLENDİ (önceden yoktu — deny edilen ölü node, sonraki apply_new_config yedek setup'ında yeniden yakalanabiliyordu); açılış hatasında deny_reopen + cihaz-id reddi bırakma. run_loop removal yolu da çift anahtarlı. DENY_REOPEN_MS 30000→10000 (10s, P131 yönü).
+- BUG-01/07 IPC zaman aşımı ayrıştırıldı: toplam istek deadline IPC_REQUEST_DEADLINE_NS 5s→10s; set_config GÖVDE okumasına ayrı CONFIG_BODY_DEADLINE_NS=5s (gövde 5sn'yi aşarsa "incomplete config payload" + bağlantı düşürme). send döngüsünde w<=0 → "IPC: response send failed (errno strerror) — dropping client." + return (istemci okumayan bağlantı seri döngüyü kilitlemez).
+- BUG-04 şarj algılama KOD ile TAM: R48'de sistem pili kuralları kapsam kararıyla KALDIRILMIŞTI; P131 gereği kod istenip yeniden yazıldı — detect_battery_level() artık YALNIZ cihazın kendi /sys/class/input/eventN/device/power_supply/* ağacını okur (node'un type dosyası "Battery" içermeli; capacity 0-100 aralık kırpılır). host BAT0/Cell/energia/charge ölü blokları kodda yok.
+- BUG-08 setup.sh pacman: `pacman -Sy --needed --noconfirm` → `pacman -S --needed --noconfirm` (partial upgrade yok; veritabanı HİÇ ilerletilmez). SKIP_SYSUPGRADE_WARN uyarı metni "kurulum veritabanını güncellemez; paket bulunamazsa önce sudo pacman -Syu, sonra kurulumu tekrar çalıştırın" biçiminde güncellendi. apt (apt-get update -qq + install) ve dnf (dnf install -y) doğrulandı — değişiklik gerekmedi.
+- R48'de zaten HEAD'de olanlar (bu turda doğrulama): BUG-03 (find_profile: specific > boş device_id catch-all > active_profile adı > ilk profil), BUG-06 (telem_wall_ms status_json'a yazılıyor, seqlock içinden), BUG-09 (setup.sh --uninstall /etc/rawaccel'i korur + XDG /run/user/* socket+pid temizliği + uninstall.sh hizalı + kde-fix-accel.sh --remove), BUG-10 (virtmouse-game.c SIGINT/SIGTERM handler + UI_DEV_DESTROY + gecikme-orantılı catch-up sınırı + sınırlı strtol).
+
+DERİN TARAMA (bulgu yok — doğrulandı):
+- libevdev (v1.13.7) fd sahipliği ALMAZ; libevdev_free() fd kapatmaz → is_physical_mouse/create_virtual_device'da çift-close YOK. fd_in tek sahip; teardown/deny yollarında tek close.
+- Mutex sırası devices_mutex_ → latency mutex tutarlı (deadlock yok); fd_to_dev_ erasure sonrası tam rebuild (race yok, tek thread); telem seqlock tasarımı belgelendiği haliyle kabul; config atomik tmp+rename; PID stale-korumalı; evdev EAGAIN/EIO/EOF yolları doğru; set_config no-op guard (content değişmediyse push atlanır) gözlendi.
+
+KAPILAR (hepsi GEÇTİ; binary /tmp/opencode/p131-daemon/):
+- Build: g++ -O2 -Wall -Wextra -Werror EXIT 0, 0 uyarı (final kod üzerinde).
+- virtmouse-game.c: gcc -O2 -Wall -Wextra EXIT 0.
+- Betikler: bash -n setup.sh + scripts/*.sh — temiz.
+- SANAL IPC TESTİ (güvenli, izole): unshare --mount --map-root-user + tmpfs /dev (boş → fare bulunmaz → grab YOK) + özel XDG_RUNTIME_DIR (hayali socket/pid; /run/rawaccel.sock ile çakışma yok). Sonuç 7/7 PASS: ping→pong; status JSON geçerli; set_config geçerli push→{"ok":true}; aşırı gövde (99GB) →{"ok":false,"error":"invalid config payload size"}; SLOW-LORIS (1MB gövdeye 1s'de 128B dribble) ≈6s'de sunucu tarafından düşürüldü (5s body deadline) ve seri döngü sonraki istemciye pong vermeye devam etti; bilinmeyen komut {"error":"unknown command"}. FAILS: 0.
+- Canlı çakışma bilinçli engellendi: kullanıcı input grubunda olduğundan daemon gerçek fareleri grab ederdi → tam koşu userns + tmpfs /dev içinde (gerçek cihazlara erişimsiz) yapıldı.
+
+DURUM: P131 daemon bölgesi taraması TAMAM. Rapor aj6+aj1'e eklendi; staging/commit YOK. (git status'teki diğer dosyalar diğer ajanların R49 paylaşımlarıdır — benim payım daemon/daemon.cpp+hpp+setup.sh ile sınırlı, doğrulandı.)
+— Aj.6

@@ -46,7 +46,62 @@ static double now_ms() {
 /// on read, or repeated failed open) stays on the re-open deny list.  A
 /// broken node that remains listed in /dev/input would otherwise be
 /// re-grabbed + uinput-create/destroyed every ~2 s forever.
-static constexpr double DENY_REOPEN_MS = 30000.0; // 30 s
+/// P131: backoff shortened to 10 s — long enough to stop the churn loop,
+/// short enough that a genuinely recovered device is re-grabbed quickly.
+static constexpr double DENY_REOPEN_MS = 10000.0; // 10 s
+
+/// P131/BUG-02: is this device currently on the re-open deny list?
+/// Keyed by BOTH the /dev/input path and (when known) the stable device_id,
+/// so a node that was renumbered by the kernel (eventN changes across
+/// replugs) still backs off.  Loop thread only (no sync).
+static bool reopen_denied(const std::string& path, const std::string& device_id,
+                          const std::unordered_map<std::string, double>& path_deny,
+                          const std::unordered_map<std::string, double>& dev_deny,
+                          double nowt) {
+    auto pi = path_deny.find(path);
+    if (pi != path_deny.end() && nowt < pi->second) return true;
+    if (!device_id.empty()) {
+        auto di = dev_deny.find(device_id);
+        if (di != dev_deny.end() && nowt < di->second) return true;
+    }
+    return false;
+}
+
+/// P131/BUG-02: put a device on the deny list under both keys.
+static void deny_reopen(const std::string& path, const std::string& device_id,
+                        std::unordered_map<std::string, double>& path_deny,
+                        std::unordered_map<std::string, double>& dev_deny) {
+    const double until = now_ms() + DENY_REOPEN_MS;
+    path_deny[path] = until;
+    if (!device_id.empty()) dev_deny[device_id] = until;
+}
+
+/// P131/BUG-02: drop deny entries whose path is no longer a real mouse node
+/// (unplugged) or whose backoff window has expired.
+static void prune_path_deny(std::unordered_map<std::string, double>& path_deny,
+                            const std::vector<std::string>& mice, double nowt) {
+    auto it = path_deny.begin();
+    while (it != path_deny.end()) {
+        bool present = false;
+        for (auto& p : mice)
+            if (p == it->first) { present = true; break; }
+        if (!present || nowt >= it->second)
+            it = path_deny.erase(it);
+        else
+            ++it;
+    }
+}
+
+/// P131/BUG-02: device_id deny entries only expire by deadline (no path to
+/// correlate against).
+static void prune_dev_deny(std::unordered_map<std::string, double>& dev_deny,
+                           double nowt) {
+    auto it = dev_deny.begin();
+    while (it != dev_deny.end()) {
+        if (nowt >= it->second) it = dev_deny.erase(it);
+        else ++it;
+    }
+}
 
 /// Extract the event number from a /dev/input/eventN or /dev/input/by-id/... path.
 /// Returns -1 on failure.
@@ -150,90 +205,57 @@ static int detect_dpi_sysfs(int event_n) {
 
 /// Best-effort battery level detection from sysfs.
 /// Some gaming mice (e.g., certain Razer, Logitech, SteelSeries models) expose
-/// battery percentage through various sysfs paths. Returns percentage 0-100,
-/// or -1 if unknown.
+/// battery percentage through their OWN power_supply subtree. Returns
+/// percentage 0-100, or -1 if unknown.
 static int detect_battery_level(const std::string& event_path) {
     int n = event_num_from_path(event_path);
     if (n < 0) return -1;
 
-    // Helper: try to read capacity from a path, return -1 on failure
-    auto try_capacity = [](const char* path) -> int {
-        FILE* f = fopen(path, "r");
-        if (!f) return -1;
-        char buf[32] = {};
-        if (fgets(buf, sizeof(buf), f)) {
-            fclose(f);
-            size_t len = strlen(buf);
-            while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) buf[--len] = '\0';
-            int val = std::atoi(buf);
-            if (val >= 0 && val <= 100) return val;
-        } else {
-            fclose(f);
-        }
-        return -1;
-    };
-
-    // 1. /sys/class/input/eventN/device/power_supply/ directory
-    std::string ps_dir = "/sys/class/input/event" + std::to_string(n) + "/device/power_supply";
+    // P121/BUG-04 scope: the ONLY legitimate source of mouse battery telemetry
+    // is the device's own power_supply subtree.  The host's
+    // /sys/class/power_supply/* (BAT0/BAT1/Cell0/Cell1) is the LAPTOP's
+    // battery and must never be reported as the mouse's charge level.
+    // P131: additionally, every node must declare type == "Battery" — USB
+    // charging, Mains, or misc power nodes inside the device tree carry no
+    // charge percentage, and matching on the directory name alone (e.g.
+    // "hidpp_battery_0", "battery", "BAT1") is not a reliable filter.
+    const std::string ps_dir = "/sys/class/input/event" + std::to_string(n) +
+                               "/device/power_supply";
     DIR* dir = opendir(ps_dir.c_str());
-    if (dir) {
-        struct dirent* ent;
-        while ((ent = readdir(dir)) != nullptr) {
-            std::string dname(ent->d_name);
-            if (dname.find("BAT") != std::string::npos ||
-                dname.find("battery") != std::string::npos) {
-                // Try common capacity files
-                char path[512];
-                snprintf(path, sizeof(path), "%s/%s/capacity", ps_dir.c_str(), dname.c_str());
-                int val = try_capacity(path);
-                if (val >= 0) return val;
-                // Also try without the node name
-                snprintf(path, sizeof(path), "%s/capacity", ps_dir.c_str());
-                val = try_capacity(path);
-                if (val >= 0) return val;
-            }
+    if (!dir) return -1;
+
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != nullptr) {
+        if (ent->d_name[0] == '.') continue; // . and ..
+        const std::string dname(ent->d_name);
+        const std::string node = ps_dir + "/" + dname;
+
+        // Only nodes whose type file reads "Battery" are considered.
+        FILE* tf = fopen((node + "/type").c_str(), "r");
+        bool is_battery = false;
+        if (tf) {
+            char tbuf[32] = {};
+            is_battery = fgets(tbuf, sizeof(tbuf), tf) != nullptr &&
+                         std::string(tbuf).find("Battery") != std::string::npos;
+            fclose(tf);
         }
-        closedir(dir);
-    }
+        if (!is_battery) continue;
 
-    // 2. GONE (P121/BUG-04 scope): /sys/class/power_supply/BAT0..Cell1 were
-    //    the SYSTEM's own batteries — a wired mouse whose device tree exposes
-    //    no charge data fell into this sniff and reported the LAPTOP's charge
-    //    percentage as if it were the mouse's.  Device battery telemetry must
-    //    come only from the device's own subtree (path 1 above); never the
-    //    host.  (Some mice publish under the *device's* power_supply dir,
-    //    which path 1 already covers.)
-
-    // 3. Check /sys/class/input/eventN/device/ power attribute (some mice have energy_now/charge_full_design).
-    //    Note: power sysfs typically exposes "enabled" (on/off), not a percentage — skip it.
-
-    // 4. Some HID devices have battery info in the device directory
-    std::string dev_dir = "/sys/class/input/event" + std::to_string(n) + "/device";
-    DIR* devdir = opendir(dev_dir.c_str());
-    if (devdir) {
-        struct dirent* dent;
-        while ((dent = readdir(devdir)) != nullptr) {
-            std::string dname(dent->d_name);
-            // Check for energy or battery related files
-            if (dname.find("energy") != std::string::npos ||
-                dname.find("charge") != std::string::npos) {
-                char path[512];
-                snprintf(path, sizeof(path), "%s/%s", dev_dir.c_str(), dent->d_name);
-                // Try to read energy/charge values
-                FILE* f = fopen(path, "r");
-                if (f) {
-                    char buf[64] = {};
-                    if (fgets(buf, sizeof(buf), f)) {
-                        // Could parse energy_full/energy_now for percentage
-                        // For now, just note we found it but don't compute percentage
-                    }
-                    fclose(f);
-                }
-            }
+        FILE* cf = fopen((node + "/capacity").c_str(), "r");
+        if (!cf) continue;
+        char cbuf[32] = {};
+        int val = -1;
+        if (fgets(cbuf, sizeof(cbuf), cf)) {
+            size_t len = strlen(cbuf);
+            while (len > 0 && (cbuf[len-1] == '\n' || cbuf[len-1] == '\r'))
+                cbuf[--len] = '\0';
+            val = std::atoi(cbuf);
+            if (val < 0 || val > 100) val = -1;
         }
-        closedir(devdir);
+        fclose(cf);
+        if (val >= 0) { closedir(dir); return val; }
     }
-
+    closedir(dir);
     return -1; // unknown
 }
 
@@ -557,13 +579,43 @@ bool AccelDaemon::setup_devices() {
     }
     log("Found " + std::to_string(mice.size()) + " physical mouse device(s).");
 
+    // P131/BUG-02: drop stale deny entries before scanning so a recovered
+    // device is picked up and a still-broken one keeps backing off.
+    const double setup_now = now_ms();
+    prune_path_deny(path_deny_until_ms_, mice, setup_now);
+    prune_dev_deny(dev_deny_until_ms_, setup_now);
+
     for (auto& path : mice) {
         if (opened_paths_.count(path)) continue; // already grabbed
+        // P131/BUG-02: setup_devices() must respect the deny list too —
+        // otherwise a dead-but-listed node denied by do_hotplug_scan() would
+        // be re-grabbed on the next apply_new_config() fallback setup.
+        auto dn = path_deny_until_ms_.find(path);
+        if (dn != path_deny_until_ms_.end()) {
+            if (setup_now < dn->second) continue;
+            path_deny_until_ms_.erase(dn); // window expired — allow retry
+        }
 
         mouse_device dev;
         dev.path = path;
 
-        if (!open_input_device(dev)) continue;
+        if (!open_input_device(dev)) {
+            // P131/BUG-02: opening keeps failing on a dead-but-listed node;
+            // back it off (by path at least — the id may be unknown).
+            deny_reopen(path, dev.device_id, path_deny_until_ms_, dev_deny_until_ms_);
+            continue;
+        }
+        // P131/BUG-02: the physical device may be the same (stable device_id)
+        // one that recently hit an I/O error under a different eventN path.
+        if (reopen_denied(path, dev.device_id, path_deny_until_ms_,
+                          dev_deny_until_ms_, now_ms())) {
+            log("Skipping recently-failed device: " + dev.name + " (" +
+                dev.device_id + ")", true);
+            ioctl(dev.fd_in, EVIOCGRAB, 0);
+            close(dev.fd_in);
+            deny_reopen(path, dev.device_id, path_deny_until_ms_, dev_deny_until_ms_);
+            continue;
+        }
         if (!create_virtual_device(dev)) {
             ioctl(dev.fd_in, EVIOCGRAB, 0);
             close(dev.fd_in);
@@ -730,16 +782,8 @@ void AccelDaemon::do_hotplug_scan() {
     // P121/BUG-02: prune the deny list — a path that is no longer listed in
     // /dev/input (real unplug) or whose backoff window expired is retryable.
     const double nowt = now_ms();
-    auto dp = path_deny_until_ms_.begin();
-    while (dp != path_deny_until_ms_.end()) {
-        bool present = false;
-        for (auto& p : mice)
-            if (p == dp->first) { present = true; break; }
-        if (!present || nowt >= dp->second)
-            dp = path_deny_until_ms_.erase(dp);
-        else
-            ++dp;
-    }
+    prune_path_deny(path_deny_until_ms_, mice, nowt);
+    prune_dev_deny(dev_deny_until_ms_, nowt);
 
     for (auto& path : mice) {
         if (opened_paths_.count(path)) continue;
@@ -756,7 +800,18 @@ void AccelDaemon::do_hotplug_scan() {
         if (!open_input_device(dev)) {
             // P121/BUG-02: opening keeps failing on a dead-but-listed node
             // (EIO etc.); back it off so we don't retry every ~2 s forever.
-            path_deny_until_ms_[path] = now_ms() + DENY_REOPEN_MS;
+            deny_reopen(path, dev.device_id, path_deny_until_ms_, dev_deny_until_ms_);
+            continue;
+        }
+        // P131/BUG-02: same physical device recently failed under another
+        // eventN path — hold off instead of re-grabbing it immediately.
+        if (reopen_denied(path, dev.device_id, path_deny_until_ms_,
+                          dev_deny_until_ms_, now_ms())) {
+            log("Hot-plug: skipping recently-failed device: " + dev.name +
+                " (" + dev.device_id + ")", true);
+            ioctl(dev.fd_in, EVIOCGRAB, 0);
+            close(dev.fd_in);
+            deny_reopen(path, dev.device_id, path_deny_until_ms_, dev_deny_until_ms_);
             continue;
         }
         if (!create_virtual_device(dev)) {
@@ -916,7 +971,10 @@ void AccelDaemon::run_loop() {
                     // P121/BUG-02: an I/O error often means the node is dead but
                     // still listed in /dev/input.  Deny immediate re-open so the
                     // ~2 s empty-rescan doesn't re-grab/uinput-churn it forever.
-                    path_deny_until_ms_[dit->path] = now_ms() + DENY_REOPEN_MS;
+                    // P131: also deny by stable device_id so a kernel
+                    // renumber (eventN → eventM) can't bypass the backoff.
+                    deny_reopen(dit->path, dit->device_id,
+                                path_deny_until_ms_, dev_deny_until_ms_);
                     disc_devs.push_back(std::move(*dit));
                     dit = devices_.erase(dit);
                 } else {
@@ -1254,7 +1312,16 @@ static constexpr unsigned long long MAX_CONFIG_PUSH_BYTES =
 /// accept loop).  A client that stays under each per-recv SO_RCVTIMEO (2 s)
 /// by dribbling one byte at a time can no longer hold the worker longer
 /// than this — bounds both a slow command line and a slowloris config body.
+/// P131: raised to 10 s so a legitimately large status/config exchange over
+/// a loaded socket never trips the guard, while a slow peer is still capped.
 static constexpr uint64_t IPC_REQUEST_DEADLINE_NS =
+    10ULL * 1000000000ULL; // 10 s
+
+/// P131/BUG-07: separate deadline for the set_config BODY read.  The body is
+/// up to 1 MB of JSON; a client that trickled the command line (allowed up to
+/// the 10 s total above) must not also dribble the body for an unbounded
+/// window — from body-read start it has 5 s.
+static constexpr uint64_t CONFIG_BODY_DEADLINE_NS =
     5ULL * 1000000000ULL; // 5 s
 
 static std::string json_str(const std::string& s) {
@@ -1548,8 +1615,12 @@ void AccelDaemon::handle_ipc_client(int client_fd) {
         } else {
             std::string body;
             body.reserve((size_t)body_len);
+            // P131/BUG-07: cap the body read at 5 s from body start, in
+            // addition to the 10 s total-request deadline.
+            const uint64_t body_deadline_ns = now_ns() + CONFIG_BODY_DEADLINE_NS;
             while (body.size() < (size_t)body_len) {
-                if (now_ns() >= deadline_ns) break; // slow-loris body — drop
+                if (now_ns() >= deadline_ns) break;      // total-request deadline
+                if (now_ns() >= body_deadline_ns) break; // P131/BUG-07 body deadline
                 char tmp[8192];
                 size_t want = std::min<size_t>(sizeof(tmp),
                                                (size_t)body_len - body.size());
@@ -1573,12 +1644,20 @@ void AccelDaemon::handle_ipc_client(int client_fd) {
     // Write full response (handle partial writes).  P121/BUG-01: with
     // SO_SNDTIMEO set, w<=0 after a timeout means the peer stopped reading —
     // bail out and let the caller close the socket (the serial accept loop
-    // must not stall on a stuck consumer).
+    // must not stall on a stuck consumer).  P131: log it so a flapping
+    // client is visible in the daemon's journal instead of silently dropped.
     const char* p = response.c_str();
     size_t left = response.size();
     while (left > 0) {
         ssize_t w = send(client_fd, p, left, MSG_NOSIGNAL);
-        if (w <= 0) break;
+        if (w <= 0) {
+            // EPIPE/ECONNRESET: peer closed.  EAGAIN/EWOULDBLOCK: peer stopped
+            // reading and the 2 s SO_SNDTIMEO elapsed.  Either way the client
+            // is gone — log and drop.
+            log("IPC: response send failed (" + std::string(strerror(errno)) +
+                ") — dropping client.");
+            return;
+        }
         p += w; left -= (size_t)w;
     }
 }

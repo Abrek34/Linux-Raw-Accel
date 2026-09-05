@@ -615,3 +615,39 @@ A5-01 device_id>256 REJECT (canlı: 256 kabul, 257 rc=1) · A5-05 daemon_apply_i
 - derleme: cli (src/config.cpp+cli/main.cpp) ve daemon (src/config.cpp+daemon) bağımsız g++ -Wall -Wextra 0 uyarı; build.sh'ın gui ayağı gui/mouse_test.inl:180 "daemon_json_field" hatasıyla kırık — BAŞKA AGENT'İN (Aj8) SÜREN gui/ düzenlemesi, benim dosyalarımdan değil (yalnız cli/main.cpp, src/config.cpp, config.hpp değişti).
 R15 (6121-6137) + fuzz round-trip (2729-2798) + P54-B4 (2102) + P99-B (6907) + test_power_extreme_params (3147-3206) tamamen yeşil; eklenen cap'lere hiçbiri takılmadı (R15 sınır değerleri = cap değerleri).
 Commit yok. Canlı /etc dokunulmadı. Kanala kilit: — kapalı.
+
+### Aj 5 [06 Eyl] P130 R49 SATIR-SATIR
+
+Görev: src/config.cpp (790) + cli/main.cpp (1683) satır satır; bug tespit + DÜZELT (yalnız cli/main.cpp + src/config.cpp; config.hpp SADECE OKUNDU — Aj2 alanı, öneri gerekmedi). HEAD 01ad98e (R48) baseline. Canlı /etc'ye dokunulmadı; test /tmp/kopya + -n. Commit yok.
+
+== DÜZELTİLEN BUG'LAR ==
+[BUG-1] cli/main.cpp:1142 cmd_rename — ACTIVE profili yeniden adlandırınca `active_profile` ESKİ adla dangling kalıyordu. Kanıt (R49 öncesi): `rename main main2` rc=0, sonra `validate` → "ERROR: Active profile 'main' not found" rc=1; kaydedilen config ANINDA geçersiz. cmd_delete (P115-A5-08) bunu zaten çözüyordu, rename çözülmemişti. → `if (cfg.active_profile == old_name) cfg.active_profile = new_name;`. Test: rename → `--json status` active_profile='main2', validate rc=0 ✓.
+[BUG-2] cli/main.cpp:1592-1610 main — BİLİNMEYEN komut (typo) config-yükleme bloğuna düşüyor, `-c /tmp/x/settings.json bogus` rc=1 verirken VAROLMAYAN yere 2679B DEFAULT settings.json YARATIYORDU (typo yan etkisi = mutasyon). Arity tablosu known-command kontrolü find_config_path/load/seed-üretiminden ÖNCE eklendi: `Unknown command:` + help + rc=1, dosya DOKUNULMAZ. Test: bogus/foo-bar-baz → hedef dizin BOŞ; bilinen komutlar hâlâ seed üretiyor (regresyon yok) ✓.
+[BUG-3] cli/main.cpp:1429 help — `exponent_power  Power/synchronous exponent` R48 Aj7 BUG-06 ile ÇELİŞİYOR (README:268 "Power mode exponent", parameter_index:74 "power"; accel-synchronous.hpp exponent_power OKUMUYOR — grep teyit). → `Power exponent (synchronous ignores it)`. Diğer aile metinleri doğrulandı/+dokunulmadı: limit=natural ✓, motivity/gamma=synchronous ✓, smooth=jump+synchronous ✓, sync_speed=synchronous-only (accel-jump GOP okumuyor) ✓.
+[BUG-4] cli/main.cpp:288 print_profile — `disable` için "(device bypasses all processing)" abartı; daemon `device_config::disable`'ı HİÇ okumuyor (rg: daemon.cpp yalnız dpi/poll/raw_passthrough; Aj8 BUG-4 dormant tespiti). → "(stored flag — dormant: daemon hot path ignores it; real 1:1 bypass = set-param <profile> raw true)".
+[BUG-5] cli/main.cpp:1253 status — `use_raw_input` "(daemon bypasses input processing)" aynı dormant yalan; daemon use_raw_input okumuyor. → "(stored flag — dormant: ... real 1:1 raw = set-param <profile> raw true)". print_profile:292 `raw: true (all processing bypassed)` DOĞRU — daemon flush_motion/process_device gerçekten baypaslıyor; DOKUNMADIM.
+[BUG-6] cli/main.cpp:132-153 + 1106-1113 cmd_reload — başarısızlıkta SIGHUP İKİNCİ kez gönderiliyordu (yalnız rc raporlamak için). `daemon_reload_via_any_path()` artık `signal_result` döndürüyor; tek kill(), doğru rc (not_running/permission_denied/other), çift syscall kalktı.
+[CLEAN] 8 ölü `return 0;` — cmd_set/create/delete/duplicate/create_preset/set-param/import/rename'de `return daemon_apply_if_enabled(cfg);` altındaki erişilemez satırlar (P115-A5-05 kalıntısı). Kaldırıldı.
+
+== R49 DOĞRULAMA (regresyon YOK — teyit listesi) ==
+- A5-02: 12 numerik guard sağlam; string tip → "config field 'scale' must be a number, got string" + rc=1 (hand-edit config REJECT, dosya değişmez) ✓; cap/lut/cap_mode/gain degrade-guard'ları korunuyor ✓.
+- A5-01: device_id 256 kabul / 257 `too long` rc=1 ✓.
+- Sanitize cap'leri set-param'da sınır-değer senkron: scale 100 ok/100.1 rc=1, exponent_power 5/5.1, cap_x 500/501, cap_y 100/101, output_offset 100/101, sync_speed 0 rc=1, lp_norm 0 rc=1 ✓. LOAD tarafı: scale=1e6→100, exponent_power=50→5, output_offset=1e9→100, cap=[1e9,1e9]→[500,100] (show teyidi) ✓ — bu yüzden src/config.cpp'de DEĞİŞİKLİK GEREKMEDİ.
+- A5-10: `--config=/yol` kabul rc=0, `--config=` (boş) rc=1, `-c ""` rc=1 ✓. Arity 16: eksik/fazla arg rc=1 + usage ✓.
+- --json 4 yüzey: list / show / status (+status içinde devices[]) → python3 -m json.tool geçiyor ✓.
+- .bak rotate: eski nesil birebir .bak + geçerli JSON; yeni dosya 0644 ✓.
+- Root davranışı: find_config_path SUDO_USER (D7) — kod inceleme ile ✓.
+- "preview" CLI'da YOK (yalnız GUI graph = Aj8/Aj3 bölgesi); preview/set/apply tutarlılığı = ortak config.hpp sabitleri (SCALE_MAX vb.) + set-param domain + load sanitize + daemon config-push (app_config_from_json), hepsi aynı cap'lerden geçiyor ✓.
+
+== GATES ==
+- derleme: g++ -O2 -Wall -Wextra -I include src/config.cpp cli/main.cpp → 0 (yalnız önceden var olan include/accel-power.hpp:97 unused-param — Aj3 bölgesi, benim kodum değil).
+- birim: tests/run_tests.sh → 33460/33460 geçti ✓.
+- ASan+UBSan: tests/run_tests_asan.sh → 33459/33460, 1 FAIL tests/test_accel.cpp:7211 (P106 speed_processor `isinf(calc_speed_whole({3,4},1.0))` lp_norm=1e-9). Bu test binary'si cli/main.cpp İÇERMİYOR (yalnız test_accel.cpp+src/config.cpp) ve diff'im cli-only → benimle İLGİSİZ, pre-existing/env (tekrarlanabilir; izole `pow` repro'da isinf=1 çıkıyor — pipeline durumuna/FP hassasiyetine bağlı). tests/ = Aj0/C baski — KANALA raporlandı, dokunulmadı.
+- tr: PASS ✓. oracle: accel-*.hpp değişmedi → etkilenmesi imkânsız, çalıştırılmadı (R48 sabit 915/31).
+- Canlı: yalnız /tmp kopyası + `-n`, daemon sorgulanmadı ✓.
+
+== INFO (düzeltme yok) ==
+- save_config yeni dosyayı open(0644) ile yazıyor → eski custom mode (ör 0640) rename'de korunmaz; .bak eski modu taşır. Güvenli/belgeli davranış (AGENTS atomic write), sadece not düşüldü.
+- status rc: `(running && config_ok) ? 0 : 1` — daemon çalışmasa da config hatası zaten P115-A5-07 ile rc≠0; ayrı exit kodu (ör 2) ayrımı TASARIM KARARI → kanal.
+
+Commit yok. Canlı /etc dokunulmadı.

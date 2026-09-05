@@ -460,9 +460,13 @@ void update_daemon_status(AppState* S) {
                         trf("<b>Battery: %d%%</b>", battery).c_str());
                 }
             } else {
-                gtk_widget_set_visible(GTK_WIDGET(S->battery_detected_lbl), TRUE);
-                gtk_label_set_markup(GTK_LABEL(S->battery_detected_lbl),
-                    tr("<b>Battery: unknown</b>"));
+                // A batteryless/wired mouse, a transient read failure, or a
+                // daemon with no device open yet must NOT advertise a phantom
+                // "Battery: unknown" — that is exactly the misleading readout
+                // BUG-10 was meant to kill for the daemon-down case, and it
+                // leaked here for every batteryless mouse with the daemon up.
+                // Hide the label; the value is re-queried on the next 3 s tick.
+                gtk_widget_set_visible(GTK_WIDGET(S->battery_detected_lbl), FALSE);
             }
         } else {
             // Daemon down: no status to show — hide the battery row (BUG-10)

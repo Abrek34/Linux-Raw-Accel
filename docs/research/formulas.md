@@ -7,7 +7,7 @@ Kapsam: Kaplow fenomenolojik modeli (natural/power/classic/synchronous), 31 belg
 
 ## 0. Özet
 
-Bu port, RawAccel'in (RawAccelOfficial/rawaccel) Linux taşımasıdır. Oracle (tests/oracle/ref) resmi Windows kaynağının bit-bit referans çıktısıdır; **31 satır bilinçli ve belgeli sapma** (tests/oracle/known_deviations.txt) dışında rel-tolerans 1e-9 ile birebirdir.
+Bu port, RawAccel'in (RawAccelOfficial/rawaccel) Linux taşımasıdır. Oracle (tests/oracle/ref) resmi Windows kaynağının bit-bit referans çıktısıdır; mevcut ağaçta (current tree) **915 satırın 884'ü birebir** — **31 satır bilinçli ve belgeli sapma** (tests/oracle/known_deviations.txt) dışında rel-tolerans 1e-9 ile birebirdir.
 
 31 sapma iki sınıfa ayrılır:
 

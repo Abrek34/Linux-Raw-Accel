@@ -20,11 +20,20 @@ A Linux port of [Windows Raw Accel](https://github.com/a1xd/rawaccel), using the
 
 ```bash
 # Arch Linux
-sudo pacman -S libevdev gtk4 base-devel cmake
+sudo pacman -S --needed libevdev gtk4 base-devel cmake pkgconf polkit systemd python qt6-tools
 
 # Debian/Ubuntu
-sudo apt install libevdev-dev libgtk-4-dev build-essential cmake
+sudo apt install build-essential cmake pkg-config libevdev-dev libgtk-4-dev libpolkit-gobject-1-dev systemd udev policykit-1 python3 qt6-tools-dev-tools
+
+# Fedora/RHEL
+sudo dnf install gcc-c++ make cmake pkgconf-pkg-config libevdev-devel gtk4-devel polkit polkit-devel systemd python3 qt6-qttools
 ```
+
+`pkgconf`/`pkg-config` is required to build (`scripts/build.sh` and the CMake
+target use `pkg-config` for `libevdev`/`gtk4`); `polkit`, `systemd`, `python3`
+and the qt6 tools (qdbus6) are runtime/aux deps for the GUI's systemd control
+and the KDE flat-acceleration fix. `setup.sh` installs exactly this set and
+verifies it — prefer it over manual package setup.
 
 ## Build
 
@@ -143,7 +152,7 @@ rawaccel-cli show gaming
 
 # Create / clone / rename profiles
 rawaccel-cli create gaming                # new profile with defaults
-rawaccel-cli create-preset gaming pro1    # from preset (gaming, office, precision, disable)
+rawaccel-cli create-preset gaming pro1    # from preset (gaming, office, precision, disable, cs2, valorant, apex, fps)
 rawaccel-cli duplicate gaming backup      # clone (clears device_id)
 rawaccel-cli rename gaming fps            # rename
 rawaccel-cli delete fps                   # delete
@@ -166,7 +175,8 @@ rawaccel-cli set gaming
 
 # Live status: profiles + per-device detected DPI / polling rate / battery,
 # which profile each connected mouse resolves to, plus per-device live last-motion
-# telemetry (telem_in_ips / telem_out_ips / telem_gain / telem_dx / telem_dy)
+# telemetry (telem_in_ips / telem_out_ips / telem_gain / telem_dx / telem_dy /
+# telem_wall_ms — sample timestamp in CLOCK_MONOTONIC_RAW ms since boot)
 rawaccel-cli status
 
 # Export/import as JSON
@@ -547,7 +557,7 @@ are tuned starting points — research-backed, then adjust by feel:
 | `fps` | classic | Balanced FPS starting point (moderate accel + cap 1.8) |
 | `office` | natural | Light desktop acceleration (limit 1.3) |
 | `precision` | classic | CAD / design work (low accel 0.002) |
-| `disable` | raw | Raw passthrough — 1:1, no acceleration |
+| `disable` | noaccel (raw passthrough) | Raw passthrough — 1:1, no acceleration |
 
 ```bash
 # Create from preset (CLI)
@@ -620,7 +630,7 @@ rare **p99/max queue spikes** felt behind "flicks" are under investigation (P-ro
 ### Safe defaults
 
 Everything ships safe out of the box:
-- Default profile: raw input on, output normalized to 1000 DPI, speed processor on
+- Default profile: **noaccel** — acceleration-free (RAW 1:1 is NOT the default; the literal 1:1 bypass is the `disable` preset, `raw_passthrough=true`), output normalized to 1000 DPI, speed processor on
 - Every loaded profile passes range validation + NaN/Inf sanitisation — no bad value
   and no overflow escapes the pipeline
 - Config writes are atomic (tmp + rename + fsync) — the daemon never reads a half-written file

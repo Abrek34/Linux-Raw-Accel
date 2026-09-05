@@ -371,3 +371,20 @@ KAPILAR (hepsi gecti):
 BACKGROUND NOT: acik agac fazlasi (cli/main.cpp, daemon/*, src/config.cpp, include/*) BANA ait DEGIL — dokunulmadi. BUG-03 dokuman dogrulamasi bu turun kapsami degil. Commit YAPILMADI.
 
 BUG-02 YAKLASIM OZETI (soru-sinav): active profilin cihazi eslesmeye gore secilir — (1) status "devices" dizisinde device_id == active profilin device_id'si; bos device_id ("all devices") ise (2) telem_in_ips'li ilk cihaz, yoksa (3) dizinin ilk cihazi. daemon_device_slice bu sirayi uygular; daemon_device_field anahtari yalnizca o dilimde okur.
+
+### Aj 3 [06 Eyl] P128 R49 SATIR-SATIR
+ROUND: satır-satır gui/ turu (10 dosya, ~5171 satır). Kapsam: yalnız gui/ özel koruma derecesi dahilinde; build-manual/ yok; commit YOK. Baz: R48 BUG-01..10 + Aj8 BUG-1 (P122) doğrulandı -> korundu.
+
+YENİ KONFİRME BUGLAR (4) VE FİXLER:
+[BUG-11] gui/daemon_comm.inl:462-466 — "Battery: unknown" hayalet etiket. R48/BUG-10 yalnızca daemon-DOWN durumunu sakladı; daemon AÇIKKEN pilsiz/kablolu fare, geçici okuma hatası veya "henüz cihaz açılmadı" durumunda etiket SÜREKLİ GÖRÜNÜR "Pil: bilinmiyor" basıyordu (masaüstü kablolu farede kalıcı görsel/yanıltıcı). DÜZELTME: geçerli yüzde [0..100] yoksa etiket GİZLENİR; 3s tick tekrar sorgular. Doğrulama: derleme 0 uyarı.
+[BUG-12] gui/devices.inl:178-190 + gui/widgets_sync.inl:230-238 — cihaz bağının sessiz silinmesi. refresh_mice_combo() profilin faresini listede bulamayınca combo'yu 0'a ("Tüm cihazlar") çeker; device_id VERİSİNE dokunmaz ama SONRAKİ herhangi bir spin düzenlemesi widgets_to_profile'da sel=0 → device_id="" yazar → cihaz çıkınca (veya yeniden takılınca yenilemeden önce) kullanıcı profili kalıcı olarak bağsız hale gelir. DÜZELTME: widgets_to_profile, "Tüm cihazlar" seçimini yalnızca saklı bağ ZATEN boşsa yazar; cihaz listede yokken bağ korunur. Doğrulama: derleme 0 uyarı.
+[BUG-13] gui/widgets_sync.inl:93 — Y ekseni cap.y satırı Jump modunda gizli (X:65 ile asimetrik; X cap_y jump gösterir). Ayrık Y+Jump: adım miktarı (cap.y) düzenlenemez. DÜZELTME: {classic, power, jump}. Not: Y'de step position için cap_x_spin_y YOK — ayrık Y-jump adım konumu X'ten kopyalanır (widgets_to_profile:181); iyileştirme önerisi notu. Doğrulama: derleme 0 uyarı.
+[BUG-14] gui/ui_builder.inl:82-89 — ilk boyamada profil combo ★ işaretlemesi yok (rebuild_profile_combo her yenilemede ★ eklerken ilk açılış düz isimlerle); kozmetik tutarsızlık. DÜZELTME: aynı ★ mantığı ilk modelde de. Doğrulama: derleme 0 uyarı.
+
+DOĞRULAMALAR (R48 P122 9 fix intakt — regresyon yok): flock ikinci-instance (main.cpp:188-199), telem cihaz seçimi (daemon_device_slice/field), 150ms IPC + \n/EOF framing + 4MiB tavan (daemon_ipc_send_raw), stale-pid guard + unlink (read_daemon_pid:247), benzersiz (copy) ad (profile_mgr.inl:341-348), HUD dil yenileme (mouse_test_refresh_language), pil gizle (daemon kapalıyken), jump Limit kolu (widgets_sync.inl:61,91), MOUSE_TEST ESC/odak teardown. JSON helper'lar sakat içerikli yanıtı reddeder; palet anahtarları status alanlarıyla uyumlu.
+
+CAP DURUMU: GUI cap uyumluluğu TAMAM — scale 0.01..100(SCALE_MAX), exp_pwr 0.01..5(EXP_POWER_MAX), cap_x 0..500(CAP_X_MAX), cap_y 0..100(CAP_Y_MAX), offset 0..100(OUTPUT_OFFSET_MAX), exponent_classic 1..10; dist/lp_norm 1..32; LUT satır ≤300.
+
+KAPILAR: gui derleme 0 uyarı (/tmp çıktı); tr-cov PASS; run_tests 33459/33460 (1 flaky — eşzamanlı harici aj'ler include/tests düzenlerken; temiz tekrar 33460/33460). Commit YAPILMADI. Yalnız gui/ 3 dosya değişti; yayına hazır/gui ikizi bu 4 noktada ayrıştı (senkron kararı sahibin — kapsam dışı).
+
+NOT: app_state.hpp:93-100 detected_dpi/polling + autofill alanları ölü (kodda hiç kullanılmıyor) — bug değil, temizlik notu.

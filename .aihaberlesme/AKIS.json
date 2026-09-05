@@ -1,6 +1,6 @@
 {
  "format_version": 1,
- "guncelleme": "2026-09-06 02:02 +03 (Aj0: P125 kendi-denetim duzeltmesi - dokuman satir ref guncellemesi)",
+ "guncelleme": "2026-09-06 02:37 +03 (Aj0 P133 R49: koordinasyon + docs/research SATIR-SATIR; ajan durum R48 kapanisi + R49 (P127-P134) hizalandi, P115 stale kilit temizlendi, learning 132->170, current-tree ibaresi, performans syscall/aihaberlesme tutarliligi)",
  "referans": "aihaberlesme.md — insan okumalı kanonik anlatım; AKIS.json makine-okunur durum deposudur.",
  "kurallar": {
   "protokol_md": "aihaberlesme.md",
@@ -15,37 +15,37 @@
   },
   "2": {
    "rol": "Kod inceleme / test / QA / guvenlik - Aj 1 emriyle calisir",
-   "durum": "P89 tamam (M33); P96 TAMAM (R47 P105 kapsami); P95 BLOKE (oracle N=2 referans); P105 TAMAM (M35/M36 +7618 assert toplam 32798); P119 yurutuluyor (R48 kilit Aj.2)"
+   "durum": "P89 TAMAM (M33); P96 TAMAM (R47 P105 kapsami); P95 BLOKE (oracle N=2 referans); P105 TAMAM (M35/M36 +7618 assert toplam 32798); P119 TAMAM (R48 Faz-2); P127 TAMAM (R49: include/ 14 hpp SATIR-SATIR, 0 dogruluk hatasi, accel-power:97 hygiene)"
   },
   "3": {
    "rol": "Ozellik / UX / dokumantasyon / ceviri - Aj 1 emriyle calisir",
-   "durum": "P90 TAMAM (M34 preset on-izleme + latency); P97 TAMAM (M35 D1 active_profile + D2 atoi); P104 TAMAM (M37 gercek X11 grab); P122 yurutuluyor (R48 kilit Aj.3)"
+   "durum": "P90 TAMAM (M34 preset on-izleme + latency); P97 TAMAM (M35 D1 active_profile + D2 atoi); P104 TAMAM (M37 gercek X11 grab); P122 TAMAM (R48 Faz-2); P128 TAMAM (R49: gui/ 10 dosya SATIR-SATIR, B-11..B-14 fix)"
   },
   "4": {
    "rol": "Referans oracle / paketleme (PKGBUILD) / raporlama - Aj 1 emriyle calisir",
-   "durum": "P79 TAMAM; P83 TAMAM; P91 TAMAM (M29 denormal); P98 TAMAM (M30 oracle 915/31); P106 TAMAM (M30 uc-degerler +151); P123 yurutuluyor (R48 kilit Aj.4)"
+   "durum": "P79 TAMAM; P83 TAMAM; P91 TAMAM (M29 denormal); P98 TAMAM (M30 oracle 915/31); P106 TAMAM (M30 uc-degerler +151); P129 TAMAM (R49: tests/ SATIR-SATIR, BUG-A..I kapandi; AGENTS.md 170 grp/33460 assert)"
   },
   "5": {
    "rol": "Referans capraz-kontrol / bagimsiz dogrulama - Aj 1 emriyle calisir",
-   "durum": "P92 TAMAM (M23 list --json); P99 TAMAM (M25 F1 export); P107 TAMAM (M27/M28 41/41); P115 FAZ-2 TAMAM (01:36 A5-01..10); P120 yurutuluyor (R48 kilit Aj.5)"
+   "durum": "P92 TAMAM (M23 list --json); P99 TAMAM (M25 F1 export); P107 TAMAM (M27/M28 41/41); P115 FAZ-2 TAMAM (M28 A5-01..A5-10); P120 TAMAM (R48 Faz-2); P130 TAMAM (R49: cli/main.cpp+config SATIR-SATIR, BUG-1..6 fix; ASan 33459/33460 - P106 isinf PRE-EXISTING tests/ sahibine)"
   },
-  "6": {
-   "rol": "Sistem dayanikliligi / IPC & guvenlik denetimi - Aj 1 emriyle calisir",
-   "durum": "P93 TAMAM (M24 perf+soak); P100 TAMAM (M27 cift-fclose + uninstall); P108 TAMAM (M31 hot-path canli); P121 TAMAM (M34, 10 BUG fix + tum kapilar)"
-  },
-  "7": {
-   "rol": "Performans / mikro-optimizasyon / kurulum-akis dogrulamasi - Aj 1 emriyle calisir",
-   "durum": "P94 TAMAM (M25 gercek-fare kiti); P101 TAMAM (M26 docs 4x); P109 TAMAM (M28 kilit-penceresi kabul + virtmouse); P124 yurutuluyor (R48 kilit Aj.7)"
-  },
+"6": {
+    "rol": "Sistem dayanikliligi / IPC & guvenlik denetimi - Aj 1 emriyle calisir",
+    "durum": "P93 TAMAM (M24 perf+soak); P100 TAMAM (M27 cift-fclose + uninstall); P108 TAMAM (M31 hot-path canli); P121 TAMAM (M34, 10 BUG fix + tum kapilar); P131 TAMAM (R49: daemon/main + setup.sh SATIR-SATIR, R48 kalintilari kapandi, 7/7 sanal IPC testi)"
+   },
+"7": {
+    "rol": "Performans / mikro-optimizasyon / kurulum-akis dogrulamasi - Aj 1 emriyle calisir",
+    "durum": "P94 TAMAM (M25 gercek-fare kiti); P101 TAMAM (M26 docs 4x); P109 TAMAM (M28 kilit-penceresi kabul + virtmouse); P124 TAMAM (R48 Faz-2: README/CHANGELOG/test_window_usage/real_hardware BUG-01..07); P132 TAMAM (R49: kullanici yuzu dokumanlari SATIR-SATIR, 6 bulgu fix)"
+   },
   "0": {
    "rol": "Haberlesme agi yoneticisi (kanal moderasyonu) - Aj 1 emriyle calisir",
-   "durum": "P103 TAMAM (M59 parameter_index 43 param); P96 kapanisi (R47 P105 kapsami) icra edildi (01:26); P125 yurutuluyor (R48 kilit Aj.0: docs/research + AKIS + AGENTS.md syscall okuma 3->2)"
+   "durum": "P103 TAMAM (M59 parameter_index 43 param); P96 kapanisi (R47 P105 kapsami) icra edildi (01:26); P125 TAMAM (R48 kendi-denetim duzeltmesi: satir ref'ler fonksiyon-adi); P133 TAMAM (R49: koordinasyon + docs/research SATIR-SATIR, AKIS/AGENTS/aihaberlesme tutarliligi; learning 132->170)"
   },
-  "8": {
-   "rol": "Emir uygulayici - Aj 1 yonetici emirlerini uygular, dogrular, raporlar",
-   "durum": "P88 TAMAM (M11 formulas/index); P102 TAMAM (M13 N4/ULP); P110 TAMAM (M14 etkilesim - P118 BUG-3 10000x hazard); P126 yurutuluyor (R48 kilit Aj.8)"
-  }
- },
+"8": {
+    "rol": "Emir uygulayici - Aj 1 yonetici emirlerini uygular, dogrular, raporlar",
+"durum": "P88 TAMAM (M11 formulas/index); P102 TAMAM (M13 N4/ULP); P110 TAMAM (M14 etkilesim - P118 BUG-3 10000x hazard); P126 TAMAM (M16: precision.md §8.2/8.3/8.5 + parameter_index GAP #2/#8 + dormant bayrak); P134 TAMAM (R49: bagimsiz dogrulama harness, 23+8=31 sapma sayimi, dormant P130 teyidi)"
+    }
+  },
  "gorevler": [
   {
    "gorev": "T16",
@@ -722,21 +722,21 @@
   {
    "gorev": "P115",
    "sahip": "5",
-   "kilit": "Aj.5",
-   "durum": "tamam (M28: A5-01..A5-10 fix, panel yesil 32798/32798)",
+   "kilit": null,
+   "durum": "tamam (M28: A5-01..A5-10 fix, panel yesil 32798/32798; R48 kapanisinda stale kilit temizlendi)",
    "baslik": "bug-av Faz2: A5 bulgu fixleri (cli/src/config)"
   },
   {
    "gorev": "P119",
    "sahip": "2",
-   "durum": "DEĞERLENDİRİLMEYİ BEKLER (R48: accel-synchronous motivity<1 sign(z)·pow(tanh) + accel-power GAIN io üs-floor n=max(ep,1e-3) + grid testi)",
+   "durum": "TAMAM (R48 Faz-2: accel-synchronous motivity<1 sign(z)·pow(tanh) + accel-power GAIN io üs-floor n=max(ep,1e-3) + grid; 33460/33460, oracle 915/31, build 0 uyari; R49 P127 SATIR-SATIR teyidi 0 hata)",
    "kilit": null,
    "baslik": "BUG-AV FIX: accel-synchronous motivity<1 + power floor + grid"
   },
   {
    "gorev": "P120",
    "sahip": "5",
-   "durum": "DEĞERLENDİRİLMEYİ BEKLER (R48: A5-01..A5-10 + BUG-3 sanitize üst sınırı + dormant bayrak çıktı görünürlüğü + --help aile metni)",
+   "durum": "TAMAM (R48 Faz-2: A5-01..A5-10 + BUG-3 sanitize üst sınırı + A5-09 + BUG-06 CLI; 33460/33460, ASan temiz, oracle 915/31, tr PASS; R49 P130 SATIR-SATIR teyidi + BUG-1..6)",
    "kilit": null,
    "baslik": "BUG-AV FIX: cli/src/config (A5-01..10 + BUG-3 + A5-09 + BUG-06 CLI)"
   },
@@ -750,21 +750,21 @@
   {
    "gorev": "P122",
    "sahip": "3",
-   "durum": "DEĞERLENDİRİLMEYİ BEKLER (R48: GUI BUG-01..10 + Aj8 BUG-1 jump Limit dead knob)",
+   "durum": "TAMAM (R48 Faz-2: GUI BUG-01..10 + Aj8 BUG-1 jump Limit dead knob; kaynak ağacı P104/HEAD'e geri yüklendi; 33460/33460, build 0 uyari, tr PASS; R49 P128 SATIR-SATIR teyidi + B-11..B-14)",
    "kilit": null,
    "baslik": "BUG-AV FIX: gui/*"
   },
   {
    "gorev": "P123",
    "sahip": "4",
-   "durum": "DEĞERLENDİRİLMEYİ BEKLER (R48: BUG-A..I exit-code/--filter/CLI-skip/TOL + AGENTS.md sayılar)",
+   "durum": "TAMAM (R49 P129 kapsamında işlendi: BUG-A..I exit-code/--filter/CLI-skip/TOL + AGENTS.md sayıları; run_tests 33460/33460, oracle 915/31, tr PASS)",
    "kilit": null,
    "baslik": "BUG-AV FIX: tests/* + AGENTS.md sayıları"
   },
   {
    "gorev": "P124",
    "sahip": "7",
-   "durum": "DEĞERLENDİRİLMEYİ BEKLER (R48: README/CHANGELOG/test_window_usage/real_hardware kullanıcı yüzü: grab mimarisi, oracle 915, noaccel default, paket 0.5.0-2, latency IPC-first)",
+   "durum": "TAMAM (R48 Faz-2: README/CHANGELOG/test_window_usage/real_hardware kullanıcı yüzü BUG-01..07 + oracle 768->915/884 senkronu + paket 0.5.0-2; R49 teyit)",
    "kilit": null,
    "baslik": "BUG-AV FIX: kullanıcı dokümanları (README/CHANGELOG/docs)"
   },
@@ -774,6 +774,62 @@
    "durum": "TAMAM (M16: precision.md §8.2/§8.3/§8.5 + parameter_index GAP #2/#8 + dormant bayrak belgesi (use_raw_input/disable = raw_passthrough aktiflere karşı saklı bayrak) + bagimsiz kesişim 915/31 OK + 33460/33460; doc-only, commit yok)",
    "kilit": null,
    "baslik": "BUG-AV FIX: docs/research/precision.md §8 + kesişim teyidi"
+  },
+  {
+   "gorev": "P127",
+   "sahip": "2",
+   "durum": "TAMAM (R49: include/ 14 hpp 1595 satır SATIR-SATIR; 0 doğruluk hatası, P119 fixleri korundu; accel-power:97 isimsizleştirildi; 33460/33460, oracle 915/31, build 0 uyari; commit yok)",
+   "kilit": null,
+   "baslik": "SATIR-SATIR: include/*"
+  },
+  {
+   "gorev": "P128",
+   "sahip": "3",
+   "durum": "TAMAM (R49: gui/ 10 dosya SATIR-SATIR; R48/P122 9 fix intakt; yeni B-11..B-14 fix; GUI derleme 0 uyari, tr-cov PASS, 33460/33460; commit yok)",
+   "kilit": null,
+   "baslik": "SATIR-SATIR: gui/*"
+  },
+  {
+   "gorev": "P129",
+   "sahip": "4",
+   "durum": "TAMAM (R49: tests/ SATIR-SATIR; BUG-A..I kapandı (BUG-A --list boşluğu dahil); run_tests 33460/33460 exit 0, oracle 915/31 exit 0, tr PASS; AGENTS.md 170 grp/33460 assert; commit yok)",
+   "kilit": null,
+   "baslik": "SATIR-SATIR: tests/* + AGENTS.md"
+  },
+  {
+   "gorev": "P130",
+   "sahip": "5",
+   "durum": "TAMAM (R49: cli/main.cpp + src/config.cpp SATIR-SATIR; BUG-1 rename active profil dangling active_profile, BUG-2 bilinmeyen komut default yaratma, BUG-3 help exponent_power, BUG-4 dormant print_profile/status ibareleri (stored flag — dormant), BUG-5 SIGHUP cift gonderim, CLEAN 8 olü return 0; unit 33460/33460; ASan 33459/33460 - P106 isinf PRE-EXISTING tests/ sahibine; commit yok)",
+   "kilit": null,
+   "baslik": "SATIR-SATIR: cli/* + src/config.cpp"
+  },
+  {
+   "gorev": "P133",
+   "sahip": "0",
+   "durum": "TAMAM (R49: koordinasyon katmanı + docs/research SATIR-SATIR; P96 TAMAM dogrulandı, ajan durum hizalandı, P115 stale kilit temizlendi, learning.md 132->170, precision/learning/formulas current-tree ibaresi, P125 iptal kapsamı tamamlandı; commit yok)",
+   "kilit": null,
+   "baslik": "SATIR-SATIR: koordinasyon (AKIS/aihaberlesme/AGENTS) + docs/research tutarlılığı"
+  },
+  {
+   "gorev": "P131",
+   "sahip": "6",
+   "durum": "TAMAM (R49: daemon.cpp + daemon.hpp + setup.sh SATIR-SATIR; BUG-02 deny cift anahtar, BUG-01/07 IPC 10s/5s deadline, BUG-04 sarj agaci, BUG-08 -Sy -> -S, BUG-03/06/09/10 HEAD korundu; sanal IPC testi 7/7, build 0 uyari; commit yok)",
+   "kilit": null,
+   "baslik": "SATIR-SATIR: daemon/* + setup.sh"
+  },
+  {
+   "gorev": "P132",
+   "sahip": "7",
+   "durum": "TAMAM (R49: README/CHANGELOG/test_window_usage/real_hardware SATIR-SATIR; R48 8 fixi korundu; 6 bulgu fix (locked senaryo, create-preset 4->8, disable raw->noaccel, dependencies, safe defaults, telem_wall_ms); build-manual cli rebuild bekliyor; commit yok)",
+   "kilit": null,
+   "baslik": "SATIR-SATIR: kullanıcı yüzü dokümanları"
+  },
+  {
+   "gorev": "P134",
+   "sahip": "8",
+   "durum": "TAMAM (R49: bağımsız doğrulama harness 17 case + 121 hiz gridi, 17/17 dispatch birebir; known_deviations 23+8=31 sayımı; dormant use_raw_input/disable P130 teyidi; GUI 10000x@1ips kalıntısı Aj3'e yönlendirildi; kod degismedi; commit yok)",
+   "kilit": null,
+   "baslik": "SATIR-SATIR: bağımsız doğrulama + sapma sayımı"
   },
   {
    "gorev": "P125",

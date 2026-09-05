@@ -1,16 +1,17 @@
 # AI Haberleşme Dosyası — rawaccel-linux
 
-Bu dosya üç AI ajanını (1, 2, 3) ortaklaştırmak için haberleşme kanalıdır.
+Bu dosya tüm AI ajanlarını (0–8) ortaklaştırmak için haberleşme kanalıdır.
 Hedef: `Masaüstü/rawaccel-linux` projesini en iyi haline getirmek.
 
 ## Protokol / Kurallar
 
-- **YÖNETİCİ: Yalnızca Aj 1'dir.** Aj 1 hariç tüm ajanlar (2, 3, 4, 5, 6, 7) YÖNETİCİ (Aj 1) emrini uygular; bağımsız karar/atama/kapı yetkisi yoktur. Yeni görev, kabul kapısı, versiyon kararı, push/commit kararı, görev dağılımı yalnızca Aj 1'in emriyle yapılır.
+- **YÖNETİCİ: Yalnızca Aj 1'dir.** Aj 1 hariç tüm ajanlar (0, 2, 3, 4, 5, 6, 7, 8) YÖNETİCİ (Aj 1) emrini uygular; bağımsız karar/atama/kapı yetkisi yoktur. Yeni görev, kabul kapısı, versiyon kararı, push/commit kararı, görev dağılımı yalnızca Aj 1'in emriyle yapılır. Aj 0 (haberleşme ağı yöneticisi) kanal moderasyonu/koordinasyon işlerini de yürütür — iş yapışının sahibi değildir, yine Aj 1 emrine çalışır.
 - **Kendi yazdıklarını YAZMA, başkalarının bölümlerini SİLME.**
 - Her mesaj şu formatta başlar: `### Aj.<numara> [M<n>] [gün ay yıl] [saat]`
 - Bir görevi ÜSTLENMEDEN önce sahibi ol, başlayınca Görev Tahtası'nda durum güncelle (yeni satır). (Emir dağıtımını Aj 1 yapar.)
 - Bitince "Tamamlanan İş" bölümüne kanıtıyla (komut çıktısı özeti / dosya yolu) ekle.
 - ÇAKIŞMA: aynı anda tek ajan tek dosya üzerinde çalışsın. Editlemeye başlamadan önce bölümün altına satırına `KİLİT: Aj.N` yaz, bitirince kaldır. (Kilit/çakışmayı yöneten ve son sözü söyleyen Aj 1'dir.)
+- **R-turu commit disiplini:** Tur (R<nn>) ortasında ajanlar repo'ya COMMIT YAPMAZ; değişiklikler working tree'de birikir, her R-turu AJ 1 tarafından toplu tek commit ile kapanır (örn. `R48: bug-av paylasim turu...`). Ajan mesajlarında "COMMIT YOK" notu bu disiplinin kanıtıdır.
 - Ajanlar görevleri yaparken AGENTS.md (build/test komutları) dosyasına uymalı.
 
 ## Makine-okunur kanal (`.aihaberlesme/`)
@@ -32,6 +33,8 @@ Hedef: `Masaüstü/rawaccel-linux` projesini en iyi haline getirmek.
 | 5 | Referans çapraz-kontrol / bağımsız doğrulama — **Aj 1 emriyle çalışır** | 🟢 Emir uygulayıcı |
 | 6 | Sistem dayanıklılığı / IPC & güvenlik denetimi — **Aj 1 emriyle çalışır** | 🟢 Emir uygulayıcı |
 | 7 | Performans / mikro-optimizasyon / kurulum-akış doğrulaması — **Aj 1 emriyle çalışır** | 🟢 Emir uygulayıcı |
+| 0 | Haberleşme ağı yöneticisi (kanal moderasyonu/koordinasyon) — **Aj 1 emriyle çalışır** | 🟢 Emir uygulayıcı |
+| 8 | Emir uygulayıcı (araştırma/dokümantasyon) — **Aj 1 emriyle çalışır** | 🟢 Emir uygulayıcı |
 
 ## Proje Durumu (temel bilgi)
 

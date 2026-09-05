@@ -704,3 +704,32 @@ Not: çalışma sırasında daemon/daemon.cpp'de EŞZAMANLI başka bir ajanın i
 düzenlemesi duplicate DENY_REOPEN_MS ile build'i 1 kez kırdı; ilk build'den önce
 kendiliğinden düzeldi (etki yok), 2 denemede build 0 uyarı.
 — Aj 2 (P119)
+
+### Aj 2 [06 Eyl] P127 R49 SATIR-SATIR
+Kapsam: include/ bölgesi 14 .hpp dosyası (1595 satır: accel-classic/jump/lookup/natural/noaccel/power/synchronous/union + math-vec2 + rawaccel-base + rawaccel + config + presets; nlohmann/ vendored JSON dışı). Her dosya Read ile TAM okundu; vendored oracle referansı (tests/oracle/ref/ accel-*.hpp, rawaccel.hpp) ve docs/research/formulas.md kılavuzu ile satır satır karşılaştırıldı.
+
+BULGU: 0 doğruluk hatası (bug/doğruluk). 
+
+Tarama detayları:
+- accel-classic: exp<=1 linear path, LEGACY/GAIN cap modları (io/in/out), base_accel/gain_accel/gain_inverse sıfırdan türetilip referansla eşleşti; isfinite guard'lar korundu (Sınıf A 23 sapma değişmedi).
+- accel-jump: GAIN smooth antiderivatifi A(x)-A(0) elle yeniden türetildi; smooth_log0 = S(y0) = log1p(exp(-rate*step.x)) doğru (y>0 dalı step.y*(S-S0)/rate, y<=0 dalı step.y*((x-step.x)+(S-S0)/rate) = referans smooth_antideriv farkı) — oracle jump_gain_smooth ile teyitli. BUG yok.
+- accel-power: P119 tek n=max(ep,1e-3) paylaşımı KORUNDU (c:35-36); io/legacy özel yol, scale_from_output_point, constant_b=(base-cap)*capx; cap_x<=offset.x in-dalı (c:80) constant_b=0 ⇒ speed>=0'da tail→offset.y (referans parity). BUG yok.
+- accel-synchronous: R48 P119 motivity<1 odd işaret fixi KORUNDU (c:90-94 sign(z)*pow(tanh(|z|^s),1/s)); LUT clamp idx_safe∈[0,size-2], ilogb tepesi range.stop-1, data[0] fallback — R43 UB yok. BUG yok.
+- accel-lookup: referansla birebir (velocity alt-ilk-nokta pts[0].x bölmesi dahil); O2/O3/P55 guard'ları korundu. BUG yok.
+- accel-natural/noaccel/union: referans formüller birebir; limit≈0/accel≈0/x<1e-9 guard'ları korundu. BUG yok.
+- math-vec2: R6 zero-guard korundu.
+- rawaccel-base/config/presets: alan eşlemesi kontrol edildi (accel_args vs speed_args karıştırma YOK — R46 sınıfı); presets oyun kaseleri oracle mirror'larıyla birebir (cs2/valorant/apex/fps/gaming/office/precision/disable).
+- rawaccel.hpp: modifier akışı referansla eşit (rotate→snap→clamp→domain weight→whole/separate→dpi); EPSILON karşılaştırmalar, ips_factor/isfinite guard'ları, N/N14-D1 epsilon yaklaşımları korundu. EMA smoother'lar (simple/linear) referansla birebir (trend sırası, clamp-sonrası trend ölçümü). BUG yok.
+
+İNCELEMEYE ALINDI, DÜZELTİLMEDİ:
+- [INFO] math-vec2.hpp:15 lp_distance — küçük p (örn. 1e-9, sanitize >0 kabulü) ile pow(2,1/p) taşması → (3,4)'te +Inf → pipeline isfinite guard'ı tick'i zero'lar. Bu davranış P106 (R46) testinde AÇIKÇA pinlenmiş/tanımlanmıştır ("SURPRISE" ≠ bug; tests/test_accel.cpp:7211 EXPECT(isinf)). KEEP politikası gereği DOKUNULMADI; referans (ref/math-vec2.hpp) de aynı formülü kullanır (bit-parity). Olası iyileştirme (kullanıcıya ulaşamaz: GUI spinner [1.0,32.0]) yönetici kararı gerektirir, bu turda değişiklik dahili değildir.
+
+DEĞİŞEN DOSYA (hygiene, davranış değişmez):
+- include/accel-power.hpp:97 — operator()'un kullanılmayan `args` parametresi isimsizleştirildi (-Wextra unused-parameter uyarısı; CI warning-gate). Çıktı matematik olarak BIT-IDENTICAL.
+
+DOĞRULAMA:
+- g++ -O2 -Wall -Wextra -I include -fsyntax-only (rawaccel.hpp+config.hpp+presets.hpp içeren kaynak) → 0 uyarı, 0 hata.
+- bash tests/run_tests.sh → 33460/33460 geçti.
+- bash tests/oracle/run_oracle.sh → 915 satır / 31 sapma (known) RESULT OK — sapma seti değişmedi.
+- COMMIT YOK; yalnız include/accel-power.hpp değişti (1 satır, 0 davranış).
+— Aj 2 (P127 R49)

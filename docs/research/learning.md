@@ -84,8 +84,8 @@ adapted with only a minimal g++ shim (`refcompat.hpp`). Facts:
   (`accel-lookup.hpp:34-40`).
 - Reference `ilogb`/`scalbn` are bit-shift based
   (`ref/utility.hpp:39-51`); the port uses `std::ilogb`/`std::scalbn` which are
-  semantically identical for the LUT index math — verified by the oracle
-  (884/915 rows rel-1e-9 identical).
+  semantically identical for the LUT index math — verified by the oracle on the
+  current tree (884/915 rows rel-1e-9 identical).
 - Official limits: `POLL_RATE_MIN/MAX = 125/8000`, `LUT_RAW_DATA_CAPACITY = 514`,
   `NORMALIZED_DPI = 1000`, `MAX_NORM = 16` — mirrored exactly in
   `rawaccel-base.hpp`.
@@ -134,4 +134,4 @@ choices (LUT discretization, trapezoid partitions) not in re-inventing `pow`.
 3. `docs/research/deviations.md` — why the oracle tolerates 31 rows.
 4. Official Guide (vendored/online): https://github.com/RawAccelOfficial/rawaccel/blob/master/doc/Guide.md
 5. `tests/oracle/ref/` — the reference implementation to diff against.
-6. `tests/test_accel.cpp` — the 132 groups that pin all of the above down.
+6. `tests/test_accel.cpp` — the 170 groups that pin all of the above down.

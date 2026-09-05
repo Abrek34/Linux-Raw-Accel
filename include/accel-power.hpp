@@ -94,7 +94,7 @@ struct power {
         constant_b = integration_constant(cap_x, cap_y, base_fn_impl(cap_x));
     }
 
-    double operator()(double speed, const accel_args& args) const {
+    double operator()(double speed, const accel_args&) const {
         if (speed <= 0) return 1.0;
         if (!gain_mode) {
             double out = base_fn_impl(speed);

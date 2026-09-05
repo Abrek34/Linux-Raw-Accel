@@ -889,3 +889,16 @@ Aj8 (M16) P126 doc-fix + bağımsız kesişim:
 
 R48 FAZ-2 durumu: P119 ✓ P120 ✓ P122 ✓ P124 ✓ P126 ✓ — kalan: P121 (Aj6 daemon, kilitli), P123 (Aj4 tests/AGENTS panel 132→33460 kurşun stale).
 Kalan kilitli: P115 (Aj.5, Aj5 "tamam" raporlu ama kilit sarkık — koordinatör/R48 kapanışında temizlenecek).
+
+### Aj 0 [06 Eyl] P133 R49 SATIR-SATIR
+
+Satir satir tarama kapsami: koordinasyon katmani (AKIS.json, aj0.log, ajanlar 0-8 durumlari) + kural dokumanlari (aihaberlesme.md, AGENTS.md) + docs/research/ 6 dosya (index, deviations, parameter_index, learning, precision, formulas) + oracle 915/31 dengesi. Commit yok (R-turu disiplini).
+
+[BULGU] AKIS ajan durum satirlari R48 kapandiktan SONRA bile stale kalmisti (P119/P120/P122/P123/P124 "yurutuluyor" ve eski M-satirlari) → tum ajan 1-8 + Aj0 durumlari R48 kapanisi + R49 (P127-P134) ile hizalandi. P115 stale kilit (Aj.5) → null temizlendi.
+[BULGU] P96 (Aj2, R47 P105 kapsami) AKIS karti TAMAM (sapsiz) → dogrulandi, degisiklik gerekmedi.
+[BULGU] learning.md "132 groups" sayisi AGENTS.md'deki 170 ile uyumsuzdu (tests/test_accel.cpp 173 SECTION, 170 grupa kaptan) → 170 yapildi. precision.md/formulas.md satirlari da "current tree" ibaresiyle oracle 915/31/884'e baglandi.
+[Dogrulama] oracle yeniden calistirildi: 915 satir / 31 sapma / 884 birebir → RESULT OK (rel tol 1e-09). known_deviations 23 classic_exp_le1 + 8 s(0) = 31 (P134 ile oz-tutarli).
+[Dogrulama] parameter_index GAP (#2/#8 dormant bayrak) precision.md §8.5 + P126/P130 kayitlariyla tutarli; cli/main.cpp:291-292,1255-1257 "stored flag — dormant" metni P131 teyidiyle uyumlu. Degisiklik gerekmedi.
+[Dogrulama] syscall sayisi: README.md:587-589 ve AGENTS.md her ikisinde 3 (2×clock_gettime + 1 batched write) → AGENTS.md:273'e kanonik ifade eklendi.
+[BULGU] aihaberlesme.md YONETICI kurali "uc AI ajanini (1,2,3)" diyordu; roster Aj 0 ve Aj 8'i disliyordu + Ajanlar tablosunda Aj 0/Aj 8 satirlari yoktu → hepsi duzeltildi (0-8), R-turu commit disiplini kurali eklendi (kural sirasi dogrulandi: 1-8 son AGENTS kuralini takip et).
+[Dogrulama] AKIS.json tum degisiklik sonrasi jq -e ile gecerli JSON. R-turu kartlari: P127-P130, P131-P134 hepsi TAMAM; P132 Aj7 build-manual cli rebuild'i not etti (binary P120 duzeltmesini icermiyor), P134 GUI canli-gain kalintisini Aj3 P128'ye devretti. — Aj 0

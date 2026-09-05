@@ -218,35 +218,38 @@ hareket/kaydırma/hover görülmesi. Onu görürseniz:
 
 ## 6. Otomatik karşı kontrol (isteğe bağlı, VM/ana makine)
 
-Kilit penceresinin ürettiği *hareket imzasını* daemon üzerinde yalnız başına
-doğrulamak için `scripts/virtmouse-game.c`'nin `locked` senaryosu kullanılabilir
-(gerçek fare gerekmez — yalnız daemon ölçeği):
+Kilit penceresinin canlı okuduğu **daemon hattını** (hız/kazanç telemetrisi +
+lat histogramı) gerçek fare gerekmeden denetlemek için
+`scripts/virtmouse-game.c` kullanılabilir (yalnız daemon ölçeği):
 
 ```bash
-# (input grubu üyesi olarak) kilitlenmiş imleç imzasını 10 sn enjekte et:
+# (input grubu üyesi olarak) senaryo üretimini 10 sn enjekte et:
 gcc -O2 -o build-manual/virtmouse-game scripts/virtmouse-game.c
-build-manual/virtmouse-game locked 10     # 90×60 px kutu, 1000 Hz, re-wrap'lı koordinatlar
+build-manual/virtmouse-game precision 10   # 120→4000 cnt/s testere (esport grid 2000/3000/4000 ips)
+# veya sürekli akış için: build-manual/virtmouse-game pan 10   # 4000 cnt/s
 
 # sonra canlı histogram:
 rawaccel-cli latency
 journalctl -u rawaccel -n 30
 ```
 
-Senaryo, 90×60 px'lik kutunun içinde kalan ve kenara değince karşı duvara
-re-wrap olan koordinat akışını 1000 Hz'de üretir — gerçek kilitli imlecin
-pencere ölçeğinde yaptığına birebir benzer. p50/p95/p99 referans değerleriyle
-karşılaştırma `docs/real_hardware_test.md` Bölüm 4.2'dedir; aile başına aynı
-ölçümün cs2/valorant/apex/fps referans satırları Bölüm 4.4'teki tablodadır.
+`precision` ve `pan` senaryoları, kilit penceresinin imleci hızlandırdığı
+bantla (esport grid 2000/3000/4000 ips) aynı hız bölgesinde çalışır;
+p50/p95/p99 referans değerleriyle karşılaştırma
+`docs/real_hardware_test.md` Bölüm 4.2'dedir; aile başına aynı ölçümün
+cs2/valorant/apex/fps referans satırları Bölüm 4.4'teki tablodadır.
 
-**P109 canlı ölçüm (bu VM, cs2 preset `rtp_cs2` aktif, 10 sn × 1000 Hz):**
-`locked` 10 sn → 777 box-edge re-wrap; daemon histogramı (4661 örnek):
-Min 1.12 µs · **Avg 4.21 µs · p50 3.75 µs · p95 5.75 µs · p99 8.25 µs** ·
-Max 1656.88 µs. p50/avg ≈ 125 µs çerçeve bütçesinin ~1/30'u; **Max/over-flow'daki
-(2 örnek >500 µs) tepe noktaları re-wrap "büyük düzeltme delta"sı ve geç uyanan
-1000 Hz döngüsünün toplu işlemidir** — kilitli imlecin beklenen imzası, hata
-değil.
+> **Eski `locked` senaryosu (P109) — tarihsel nota:** R47 harness'ının
+> kilit-penceresi özel senaryosu (`locked`, 90×60 px kutu, 1000 Hz, kenara
+> değince karşı duvara re-wrap; bu VM'de 10 sn → 777 re-wrap, 4661 örnek,
+> Min 1.12 µs · Avg 4.21 µs · p50 3.75 µs · p95 5.75 µs · p99 8.25 µs ·
+> Max 1656.88 µs) R48'de `scripts/virtmouse-game.c`'den çıkarıldı (P121/BUG-10
+> harness yeniden düzenlemesi). Mevcut kod yalnız `flick|pan|mix|precision`
+> kabul eder; o ölçüm tarihsel referanstır ve bugün kaynak koddan üretilemez
+> (eski `locked` çalıştırılırsa sessizce `mix` senaryosu koşar).
 
 ---
 
 *İlgili dosyalar: `gui/mouse_test.inl` (pencere, P104), `docs/real_hardware_test.md`
-(his oturumu protokolü), `scripts/virtmouse-game.c` (`locked` senaryo, P109).*
+(his oturumu protokolü), `scripts/virtmouse-game.c` (`flick|pan|mix|precision`
+senaryoları — Bölüm 6; eski `locked` P109 ölçümü tarihseldir).*

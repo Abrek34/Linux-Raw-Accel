@@ -60,8 +60,13 @@ static std::regex  g_filter_regex;
 #define SECTION(name) do { \
     g_section = name; \
     if (g_list_only) { \
-        std::printf("%s\n", name); \
         g_section_active = false; \
+        if (g_have_filter && !std::regex_search(std::string(name), g_filter_regex)) { \
+            g_skipped_sections++; \
+        } else { \
+            g_sections_matched++; \
+            std::printf("%s\n", name); \
+        } \
     } else if (g_have_filter && !std::regex_search(std::string(name), g_filter_regex)) { \
         g_section_active = false; \
         g_skipped_sections++; \
@@ -7959,6 +7964,17 @@ int main(int argc, char** argv) {
     // P119 FAO-1 — sync motivity<1 × smooth grid (LEGACY math-ref pin + GAIN LUT envelope)
     test_fao1_sync_motivity_grid();
 
+    // P114 BUG-A: a --filter that matched nothing silently reported "0/0 geçti"
+    // + exit 0 (a typo hid the whole suite behind a green gate). No match is a
+    // hard error on stderr with exit 1. Runs BEFORE the --list early return so
+    // `--list --filter <no-match>` cannot green-wrap a typo either
+    // (R49: SECTION() now counts matches in list mode too).
+    if (g_have_filter && g_sections_matched == 0) {
+        std::fprintf(stderr,
+                     "Hata: hiçbir test eşleşmedi ('--filter') — regex/yazım hatası mı?\n");
+        return 1;
+    }
+
     if (g_list_only) return 0;
 
     std::printf("\n=== Sonuç: %d/%d geçti", g_passed, g_tests);
@@ -7967,15 +7983,6 @@ int main(int argc, char** argv) {
         std::printf(" (%d section eşleşti, %d atlandı)",
                     g_sections_matched, g_skipped_sections);
     std::printf(" ===\n");
-
-    // P114 BUG-A: a --filter that matched nothing silently reported "0/0 geçti"
-    // + exit 0 (a typo hid the whole suite behind a green gate). No match is a
-    // hard error on stderr with exit 1.
-    if (g_have_filter && g_sections_matched == 0) {
-        std::fprintf(stderr,
-                     "Hata: hiçbir test eşleşmedi ('--filter') — regex/yazım hatası mı?\n");
-        return 1;
-    }
 
     return g_failed ? 1 : 0;
 }

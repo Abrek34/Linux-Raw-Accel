@@ -17,7 +17,7 @@
 Good news: the official RawAccel reference itself also computes in `double` and
 stores the synchronous LUT as `float` (`ref/accel-synchronous.hpp:143-145`), so
 the port is **bit-for-bit faithful** in type choice. The oracle builds both
-sides at `-O1` and still sees rel 1e-9 agreement on 884/915 rows.
+sides at `-O1` and still sees rel 1e-9 agreement on 884/915 rows (current tree).
 
 ## 2. Where precision is actually lost (hot path: `au.apply(v, args)` per event)
 
@@ -228,7 +228,7 @@ No `sin/cos` in the hot path except GUI graph/rotation setup
 
 ## 5. Measured baseline (proof the port is not numerically worse)
 
-- Oracle: 915 rows; 884 within rel 1e-9 of the official reference; 31 documented
+- Oracle (current tree): 915 rows; 884 within rel 1e-9 of the official reference; 31 documented
   (see deviations.md). At `TOL=1e-11` the same 884 would still pass — the port
   does not add noise beyond libm ULP.
 - All NaN/Inf guards are `isfinite`-based (no `x != x`), consistent with

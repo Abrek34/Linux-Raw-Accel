@@ -190,6 +190,10 @@ private:
     // otherwise churn grab/uinput-create/destroy every ~2 s forever.
     // Access only from the loop thread (setup + hotplug) — no sync needed.
     std::unordered_map<std::string, double> path_deny_until_ms_;
+    // P131/BUG-02: same backoff keyed by the stable device_id, so a device
+    // that errored under eventN is not re-grabbed instantly when the kernel
+    // renumbers it to eventM.  Loop thread only.
+    std::unordered_map<std::string, double> dev_deny_until_ms_;
     // O(1) fd -> device index lookup (avoids linear scan in hot path)
     std::unordered_map<int, size_t> fd_to_dev_;
     // Hot-plug retry counter — accessed only from run_loop() thread; no sync needed.

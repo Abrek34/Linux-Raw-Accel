@@ -130,11 +130,13 @@ static std::string daemon_ipc_query(const std::string& cmd) {
 /// Ask the daemon to reload its config.  Tries the IPC socket first (works
 /// for any user in the input group regardless of who the daemon runs as),
 /// then falls back to SIGHUP for older daemons that don't speak IPC.
-/// @return  true if either path succeeded.
-static bool daemon_reload_via_any_path() {
+/// P130-R49: now returns the full signal_result so callers know *why* the
+/// reload failed (not_running vs permission_denied) instead of having to
+/// re-issue the SIGHUP a second time just to find out.
+static signal_result daemon_reload_via_any_path() {
     std::string resp = daemon_ipc_query("reload");
-    if (resp.find("\"ok\":true") != std::string::npos) return true;
-    return send_signal_to_daemon(SIGHUP) == signal_result::sent;
+    if (resp.find("\"ok\":true") != std::string::npos) return signal_result::sent;
+    return send_signal_to_daemon(SIGHUP);
 }
 
 /// Push the caller's full config to the running daemon (IPC "set_config" RPC).
@@ -148,7 +150,7 @@ static bool daemon_apply_config(const app_config& cfg) {
     std::string req = "set_config " + std::to_string(json.size()) + "\n" + json;
     std::string resp = daemon_ipc_send(req);
     if (resp.find("\"ok\":true") != std::string::npos) return true;
-    return daemon_reload_via_any_path();
+    return daemon_reload_via_any_path() == signal_result::sent;
 }
 
 // ── Global CLI flags ──────────────────────────────────────────────────────────
@@ -286,7 +288,8 @@ static void print_profile(const device_profile& dp) {
     // invisible in every listing — status claimed the profile was active while
     // its acceleration was actually bypassed.
     if (dp.dev_cfg.disable)
-        std::cout << "  disabled:     true  (device bypasses all processing)\n";
+        std::cout << "  disabled:     true  (stored flag — dormant: daemon hot path ignores it; "
+                     "real 1:1 bypass = set-param <profile> raw true)\n";
     std::cout << "  device_id:    " << (dp.device_id.empty() ? "(all)" : dp.device_id) << "\n";
     if (p.raw_passthrough) {
         std::cout << "  raw:          true  (all processing bypassed)\n";
@@ -370,7 +373,6 @@ static int cmd_set(app_config& cfg, const std::string& config_path, const std::s
             // Push the new config to the daemon (IPC set_config) so it takes
             // effect even when the daemon reads a different file (systemd /etc).
             return daemon_apply_if_enabled(cfg);
-            return 0;
         }
     }
     std::cerr << "Profile not found: " << name << "\n";
@@ -411,7 +413,6 @@ static int cmd_create(app_config& cfg, const std::string& config_path, const std
     if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Created profile: " << name << "\n";
     return daemon_apply_if_enabled(cfg);
-    return 0;
 }
 
 static int cmd_delete(app_config& cfg, const std::string& config_path, const std::string& name) {
@@ -435,7 +436,6 @@ static int cmd_delete(app_config& cfg, const std::string& config_path, const std
     if (cfg.active_profile != name)
         std::cout << "Active profile is now: " << cfg.active_profile << "\n";
     return daemon_apply_if_enabled(cfg);
-    return 0;
 }
 
 static int cmd_duplicate(app_config& cfg, const std::string& config_path,
@@ -480,7 +480,6 @@ static int cmd_duplicate(app_config& cfg, const std::string& config_path,
     if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Duplicated profile: '" << src_name << "' → '" << dst_name << "'\n";
     return daemon_apply_if_enabled(cfg);
-    return 0;
 }
 
 static int cmd_create_preset(app_config& cfg, const std::string& config_path,
@@ -512,7 +511,6 @@ static int cmd_create_preset(app_config& cfg, const std::string& config_path,
     if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Created profile '" << profile_name << "' from preset '" << preset_name << "'\n";
     return daemon_apply_if_enabled(cfg);
-    return 0;
 }
 
 /// Validate config file and report issues without modifying it.
@@ -1012,7 +1010,6 @@ static int cmd_set_param(app_config& cfg, const std::string& config_path,
     std::cout << "Set " << key << " = " << stored_value_str(*dp, key)
               << " in profile '" << profile_name << "'\n";
     return daemon_apply_if_enabled(cfg);
-    return 0;
 }
 
 static int cmd_export(const app_config& cfg, const std::string& name) {
@@ -1106,15 +1103,15 @@ static int cmd_import(app_config& cfg, const std::string& config_path, const std
     }
     std::cout << "Imported profile: " << dp.name << "\n";
     return daemon_apply_if_enabled(cfg);
-    return 0;
 }
 
 static int cmd_reload() {
-    if (daemon_reload_via_any_path()) {
+    auto r = daemon_reload_via_any_path();
+    if (r == signal_result::sent) {
         std::cout << "Daemon reloaded.\n";
         return 0;
     }
-    print_signal_failure(send_signal_to_daemon(SIGHUP), "reload", "HUP");
+    print_signal_failure(r, "reload", "HUP");
     return 1;
 }
 
@@ -1142,6 +1139,12 @@ static int cmd_rename(app_config& cfg, const std::string& config_path, const std
     for (auto& dp : cfg.profiles) {
         if (dp.name == old_name) {
             dp.name = new_name;
+            // P130-R49 (BUG): renaming the ACTIVE profile used to leave a
+            // dangling active_profile → the saved config instantly failed
+            // `validate` ("Active profile not found") even though rc was 0.
+            // Keep the pointer in sync like cmd_delete does.
+            if (cfg.active_profile == old_name)
+                cfg.active_profile = new_name;
             found = true;
             break;
         }
@@ -1153,7 +1156,6 @@ static int cmd_rename(app_config& cfg, const std::string& config_path, const std
     if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Renamed profile: '" << old_name << "' → '" << new_name << "'\n";
     return daemon_apply_if_enabled(cfg);
-    return 0;
 }
 
 static int cmd_stop() {
@@ -1251,7 +1253,8 @@ static int cmd_status(const std::string& config_path) {
         // P115-A5-09: surface the global raw-input mode; it silently stayed
         // hidden when set (status only showed per-profile fields before).
         if (cfg.use_raw_input)
-            std::cout << "Raw-input passthrough flag: true  (daemon bypasses input processing)\n";
+            std::cout << "Raw-input passthrough flag: true  (stored flag — dormant: daemon hot path "
+                         "ignores it; real 1:1 raw = set-param <profile> raw true)\n";
         std::cout << "Profiles (" << cfg.profiles.size() << "):\n";
         for (auto& p : cfg.profiles) {
             bool is_active = (p.name == cfg.active_profile);
@@ -1423,7 +1426,7 @@ REJECTED (exit 1, config untouched); default = fresh `create` profile value:
   acceleration      Acceleration multiplier. Domain any finite (negative = classic
                     decel). Default 0.005.
   exponent_classic  Classic exponent. Domain 1–10. Default 2.
-  exponent_power    Power/synchronous exponent. Domain 1e-4–5. Default 0.05.
+  exponent_power    Power exponent (synchronous ignores it). Domain 1e-4–5. Default 0.05.
   limit             Upper multiplier asymptote (natural mode). Domain ≥ 0. Default 1.5.
   decay_rate        Natural decay rate. Domain ≥ 0. Default 0.1.
   motivity          Synchronous motivity. Domain ≥ 0. Default 1.5.
@@ -1587,6 +1590,21 @@ int main(int argc, char* argv[]) {
             std::cerr << "\n";
             return 1;
         }
+    }
+
+    // P130-R49 (BUG): an UNKNOWN command must fail before any config access.
+    // Previously `rawaccel-cli <typo>` fell through to the config-load block,
+    // which CREATED a fresh default settings.json as a side effect of a typo
+    // (verified: `rawaccel-cli -c /tmp/x/settings.json bogus` wrote a file).
+    // Reject up front, before find_config_path() / load / default-creation.
+    bool known_cmd = false;
+    for (auto& a : arities) {
+        if (a.cmd == args[0]) { known_cmd = true; break; }
+    }
+    if (!known_cmd) {
+        std::cerr << "Unknown command: " << args[0] << "\n";
+        print_help();
+        return 1;
     }
 
     if (!config_path_explicit && config_path.empty()) config_path = find_config_path();

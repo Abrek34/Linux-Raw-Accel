@@ -40,7 +40,7 @@ fi
 if [ -x "$CLI" ]; then
     TMPCFG=$(mktemp)
     TMP_FILES+=( "$TMPCFG" )
-    rm -f "$TMPCFG"   # P42: var olan bos config uzerine yazilmaz; dosya yokken seed olusur   # P42: var olan bos config uzerine yazilmaz; dosya yokken seed olusur
+    rm -f "$TMPCFG"   # P42: var olan bos config uzerine yazilmaz; dosya yokken seed olusur
     TMPN256=$(mktemp)
     TMP_FILES+=( "$TMPN256" )
     TMPN257=$(mktemp)

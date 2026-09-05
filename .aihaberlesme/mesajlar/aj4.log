@@ -628,3 +628,28 @@ Doğrulamalar: 31/31 listelenen sapma gerçekten sapıyor; ghost-row (docs∉gri
 - Önerilen düzeltme (genel): AGENTS.md Test bölümünü güncel (168 section / 32798 runtime assert) — kod değişikliği değil, dokümantasyon.
 
 SONUÇ: 9 bulgu (BUG-A..I). KRİTİK 3: BUG-A (0/0 yanlış yeşil — filtre hatası tüm testleri gizler), BUG-B (CLI kapıları sessiz SKIP — CI sıfır kapsamla yeşil), BUG-C (TOL gevşetme karşı-sezgisel hard FAIL — "0 sapmasız temiz koşu" hata üretir). ÖNERİ: Faz 2'de önce A+B (kapı bütünlüğü/exit-code), ardından C (stale-TOL ayrımı) ve D (CXX); F/G tr-coverage derinleştirmesi iş yükü düşük. Oracle'ın 31/31 sapma eşleşmesi + ghost/stale kontrolleri güçlü; kod tarafında sapma/şablon uyumu temiz.
+
+### Aj 4 [06 Eyl] P129 R49 SATIR-SATIR
+P129 (R49): tests/ SATIR-SATIR taranıp kapanış. test_accel.cpp 7981L, tr_coverage.cpp 423L, fuzz_accel.cpp 133L, fuzz_config.cpp 83L, run_tests.sh 154L, oracle/run_oracle.sh 151L, run_tests_asan.sh, run_tr_coverage.sh, run_fuzz.sh, oracle_cases.hpp, known_deviations.txt. Yalnızca tests/ + AGENTS.md sayı paneli değişti; cli/src/gui/daemon/include'e dokunulmadı. COMMIT YOK.
+
+KALINTI/BULGU KAPANIŞLARI (BUG-A..I):
+- BUG-A: no-match filtre → stderr "Hata: hiçbir test eşleşmedi" + exit 1 (yuvası vardı). EKSİK YAKALANDI: `--list --filter <eslesmeyen>` erken `if (g_list_only) return 0` ile yine 0 dönüyordu. Fix: SECTION makrosu list modunda eşleşmeyi sayar + no-match kapısı g_list_only return'ün ÖNE alındı. Doğrulama: `--list --filter NO_SUCH` rc=1 (önceden 0); `--list --filter classic` 16 section rc=0; filtreli koşu 4765/4765 (16 eşleşti, 154 atlandı).
+- BUG-B: run_tests.sh SATIR 34-39 — CLI yoksa stderr "Hata: CLI kapısı çalıştırılamadı..." + exit 1, sessiz SKIP kapatıldı. KARAR: FAIL korunur (kapı kapsamı zorunlu).
+- BUG-C: run_oracle.sh 105-134 — dokümante/stale kitapçığı KANONİK 1e-9'da ayrı sayılır; kullanıcı TOL'ü yalnızca UNKNOWN row drift'ini yönetir. KARAR: TOL gevşetmek hiçbir dokümante satırı "stale" yapıp hard-FAIL edemez; yeşil kalır. KORUNUR (doküman dürüstlüğü; stale artık gerçek fix maskelenince yakalansın).
+- BUG-D: oracle $CXX onurlanıyor (15/42/47).
+- BUG-E: --tolerance <val> parse (21-34), bilinmeyen argüman/eksik değer exit 2.
+- BUG-F: tr_coverage.cpp — değişken anahtarlı çağrılar site-site "DİNAMİK ANAHTAR UYARISI" (28 site: tr.inl helper tanımları 41/407-447 + widgets_sync 109/512/598/626x2/629 + ui_builder 20/21/31/32/44/105/120); boş-string ayrı kanal (0 çağrı). PASS.
+- BUG-G: combo_array_open — NAME[]={ / NAME[5]={ / NAME={ / NAME{...} / std::array<...> NAME={ tüm kalıplar; tanımı bulunamayan combo dizisi UYARI+FAIL(exit 1). Gerçek GUI çağrı setiyle doğrulandı (mode_names/cap_names/dist_names + MODE_KEYS/CAP_KEYS/DIST_KEYS; virgüllü ilk arg yok — kokusu yok).
+- BUG-H: run_tests.sh trap cleanup_tmp EXIT + TMP_FILES (TMPCFG/TMPN256/TMPN257/TMPA/TMPP/TMPP.bak) — /tmp sızıntısı yok.
+- BUG-I: AGENTS.md:112 + 205 ölçülü güncellendi: 132 grp/21627 → 170 grp/33460 assert (koşudan).
+- Ek temizlik: run_tests.sh SATIR 43 çift "# P42:" yorumu tekleştirildi (yorum, kod davranışı yok).
+- Not: kaynakta 172 adet ` SECTION(` dizesi var ama 170'ü koşuluyor — 2 tanesi ölü/çağrılmayan kodda; ölçüm koşudan (170). 33460 assert görev eşiğini (33460+) tam tuttu.
+- P91 yorumu "7 documented power/synchronous @0" DOĞRU (aile=7; game_apex_power 8.'sı, game kategorisi) — değişiklik gerekmedi.
+
+4 KAPI:
+1. bash tests/run_tests.sh → 33460/33460 geçti, 0 FAIL, exit 0. CLI P83 (256 OK/257 red), P99 (extra-arg + -c"" red, config mutate yok), P107 (set-param domain red + config byte-aynı) ✓
+2. bash tests/oracle/run_oracle.sh → 915 satır, 31 dokümante, 31/31 kanonikte sapıyor, RESULT OK, exit 0
+3. bash tests/run_tr_coverage.sh → sözlük 205, kullanılan 183, dinamik 28 (UYARI), boş 0, MISSING none, Result: PASS, exit 0
+4. Kapsam temiz: git diff yalnız tests/test_accel.cpp + tests/run_tests.sh + AGENTS.md (iki kopya sayı paneli) + loglar. COMMIT YOK.
+
+SONUÇ: BUG-A..I kapandı/doğrulandı; tek yeni kod müdahalesi BUG-A --list boşluğu. Üstte cli/daemon/gui çakışması yok — kapılar bu çalışma ağacında tamamen yeşil.

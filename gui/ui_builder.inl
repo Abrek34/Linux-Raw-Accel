@@ -80,8 +80,15 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     // Profile combo
     {
         GtkStringList* sl = gtk_string_list_new(nullptr);
-        for (auto& p : S->config.profiles)
-            gtk_string_list_append(sl, p.name.c_str());
+        // Same ★-marking as rebuild_profile_combo() so the very first paint is
+        // consistent with every later rebuild (BUG-13: initial model used plain
+        // names while any subsequent refresh marked the active profile).
+        for (auto& p : S->config.profiles) {
+            std::string label = p.name;
+            if (p.name == S->config.active_profile)
+                label = "\xe2\x98\x85 " + p.name; // UTF-8 ★
+            gtk_string_list_append(sl, label.c_str());
+        }
         S->profile_combo = gtk_drop_down_new(G_LIST_MODEL(sl), nullptr);
         // Select the persisted active profile (set before the notify::selected
         // handler is connected so no callback fires on a half-built UI).

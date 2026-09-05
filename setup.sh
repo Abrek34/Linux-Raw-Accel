@@ -96,19 +96,18 @@ install_deps() {
     say "[1/7] Bağımlılıklar kuruluyor..."
     if is_arch_like; then
         ok "Arch/CachyOS tespit edildi → pacman"
-        # P121/BUG-08: salt "-Sy" kısmi yükseltmeye (partial upgrade) yol açar —
-        # sistem geri kalanı eski kütüphanelerde kalır, ABI uyumsuzluğu riski.
-        # "-Sy" sırf paket veritabanını senkronlamak için kullanılıyor; tam
-        # sistem güncellemesi ayrıca önerilir. Sessiz kısmi yükseltme yapmayız:
+        # P121/BUG-08: "-Sy" tek başına kısmi yükseltmeye (partial upgrade)
+        # yol açar — paket veritabanı ilerletilir ama sistemin geri kalanı eski
+        # kütüphanelerde kalır (ABI uyumsuzluğu riski). P131: veritabanını
+        # HİÇ senkronlamıyoruz; yalnızca kurulum yapan "-S" kullanılır.
         if [[ ${SKIP_SYSUPGRADE_WARN:-0} -ne 1 ]]; then
-            warn "pacman -Sy: yalnızca gerekli paketler kurulur (veritabanı senkronu)."
-            warn "Kısmi yükseltme riskini önlemek için önce bir kez:  sudo pacman -Syu"
+            warn "Kurulum paket veritabanını güncellemez (kısmi yükseltme yok)."
+            warn "Paket bulunamaz/versiyon uyuşmazsa önce: sudo pacman -Syu"
+            warn "sonra bu kurulumu tekrar çalıştırın."
             warn "Bu uyarıyı atlamak için: SKIP_SYSUPGRADE_WARN=1 bash setup.sh"
         fi
         # qt6-tools: qdbus6 → KDE Plasma 6 canlı reconfigure
-        # -Sy: paket veritabanı ilk kez yoksa/eskidiyse "bağımlılık hatası"
-        # alınmaması için önce senkronla.
-        pacman -Sy --needed --noconfirm \
+        pacman -S --needed --noconfirm \
             base-devel cmake pkgconf libevdev gtk4 polkit systemd python \
             qt6-tools
     elif is_debian_like; then

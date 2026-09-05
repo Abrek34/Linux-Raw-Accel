@@ -90,7 +90,7 @@ static void update_mode_sensitivity(AppState* S) {
     row_set_visible(S->y_row_label[2], S->exponent_spin_y, mode_uses(ymode, {accel_mode::classic}));
     row_set_visible(S->y_row_label[3], S->limit_spin_y,    mode_uses(ymode, {accel_mode::natural}));
     row_set_visible(S->y_row_label[4], S->offset_spin_y,   mode_uses(ymode, {accel_mode::classic, accel_mode::natural}));
-    row_set_visible(S->y_row_label[5], S->cap_y_spin_y,    mode_uses(ymode, {accel_mode::classic, accel_mode::power}));
+    row_set_visible(S->y_row_label[5], S->cap_y_spin_y,    mode_uses(ymode, {accel_mode::classic, accel_mode::power, accel_mode::jump}));
 
     // Mode hint — restate which parameters this mode actually uses.
     if (S->mode_hint_lbl) {
@@ -230,7 +230,14 @@ void widgets_to_profile(AppState* S) {
     if (S->device_id_combo) {
         int sel = (int)gtk_drop_down_get_selected(GTK_DROP_DOWN(S->device_id_combo));
         if (sel <= 0 || sel - 1 >= (int)S->mice_list.size()) {
-            dp.device_id = "";
+            // "All devices" — but ONLY commit that when the stored binding is
+            // already "all devices".  refresh_mice_combo() forces the combo to
+            // index 0 when the profile's mouse is merely unplugged (not present
+            // in the current list); writing "" here would silently and
+            // permanently wipe the stored device_id on the next unrelated edit.
+            // Keep the binding until the device reappears (or the user really
+            // picks "All devices" while it IS listed).
+            if (dp.device_id.empty()) dp.device_id = "";
         } else {
             auto& m = S->mice_list[sel - 1];
             dp.device_id = m.stable_id.empty() ? m.event_node : m.stable_id;

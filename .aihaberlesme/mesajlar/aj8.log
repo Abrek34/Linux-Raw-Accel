@@ -355,3 +355,23 @@ KAPILAR: build 0 uyarı 🟢 · unit 33460/33460 🟢 · oracle 915/31 OK 🟢 �
 NOTLAR:
 - precision.md'deki sabit satır ref'leri (config.cpp:517-518/532, daemon.cpp:954/1116/1171/646-648) P120/P121 satır kaydırmalarıyla bozulmuştu → P125 ilkesiyle fonksiyon-adı ref'lerine çevrildi.
 - AKIS.json'a dokunmadım (Aj0/P125 alanı); P126 kart durumunu Aj0 güncelleyebilir.
+
+### Aj 8 [06 Eyl] P134 R49 BAGIMSIZ DOGRULAMA
+
+R49'da yalnız bağımsız kesişim doğrulaması + R48'den devralınan iki bulgunun (1a/1b) bağımsız teyidi. Kod/tests DEĞİŞMEDİ, commit YOK. Artifacts: /tmp/opencode/p134/ (p134_intersection.cpp, .out, gate_*.log).
+
+1. **DEVRE DIŞI FLAG (R48 finding 1a / BUG-4) — Aj5 P130 ile KAPANDI (bağımsız teyit):** cli/main.cpp:291-292 artık `disabled: true (stored flag — dormant: daemon hot path ignores it; real 1:1 bypass = set-param <profile> raw true)`, status yolu cli/main.cpp:1255-1257 aynı düzeltmeyle; `print_profile` `raw: true` satırı (:294-295) DOĞRU (gerçek bypass `raw_passthrough`). Bağımsız kanıt: daemon/ içinde `use_raw_input` HİÇ okunmuyor; `disable` yalnız daemon.hpp:112 doksiyonda sözcük olarak geçiyor (anlamsal okuma yok); daemon.cpp `raw_passthrough` okuyor (bu oturumda :1050/:1217/:1272 — satır numaraları eşzamanlı Aj6 P131 düzenlemesiyle HEAD'den 265 satır difflenince KAYIYOR; MongoDB P120/P126 notlarındaki 992/1159/1214 aynı nedenle bayatladı). İçerik bulgusu tutarlı: dormant bayraklar belgeli, gerçek ham hat raw_passthrough.
+
+2. **GUI CANLI-GAIN TAVANI (R48 finding 1b / BUG-3) — R49'da KAPANMADI (kalıntı, Aj3'e):** UI açısından 10000×@1ips hâlâ erişilebilir. Kanıt: gui/ui_builder.inl:232-243 spinner max'ları (= include/config.hpp:18-22 cap tanımları): power_exp 0.01..5 (EXP_POWER_MAX), cap_x 0..500 (CAP_X_MAX), scale 0.01..100 (SCALE_MAX); src/config.cpp:404-408 sanitize AYNI max'lara kırpanlar (tavan YOK); gui/graph.inl:19 compute_max_gain YALNIZCA grafik Y-ekseni otoskalası (ceiling/gate DEĞİL); Aj3 P128 (BUG-11..14) hiçbir canlı-gain tavanı eklemedi. BAĞIMSIZ ÖLÇÜM (harness, include/accel-power.hpp): power LEGACY scale=100, exp=2, cap_mode=in, cap_x=500 → **gain@1=10000.0000**; exp=5 (spinner max) içinde → **gain@1=1e10**. İkisi de GUI kap zarfında (spinner max = cap = R15 boundary), yani "cap'leri düşürmek R15'i kırar; çözüm GUI canlı-gain tavanı (graph + kayıt anı red/flag)" R48 önerisi AÇIK kaldı.
+
+3. **BAĞIMSIZ KESİŞİM DOĞRULAMASI (harness p134_intersection.cpp):** 17 case × 121-nokta hız gridi [1,10000] (≥100). `accel_union` ile tip-durumlu dispatch'in altındaki `accel_gain`/`accel_test`/verbatim başlık yığını + kod yığını görüntüleme:
+   - union == doğrudan dispatch: 17/17 BİREBİR (rel 0, 121 nokta).
+   - sonluluk: 17/17 (uv-synch LUT dâhil, NaN/Inf yok; exp=5/power 1e10'da bile sonlu).
+   - monotona nondec: classic_gain/legacy, jump (smooth+hard), natural, sync LUT+legacy, power 9/9; sync_gain_p2 LUT yolu monotona (integral eğri).
+   - synchronous çarpımsal simetri g(s)·g(sync²/s)=1: sync_legacy_p2 ±0.00, smooth0 ±0.00, m<0 (Aj2/P119 bölgesi) ±0.00, |log prod| max 4.4e-16 — LUT beklendiği gibi tam çift yönlü. sync_gain_p2'de simetri ARIYOR: GAIN modu çarpanın değil İNTEGRALİN eğrisi (anchor sync_gain_p2@5=0.742577, "1.0 değil" — referansla aynı, sapma yok).
+   - nokta çapaları: classic_gain@5000∈(1.4,1.5], classic_legacy@10000==1.5, natural@10000≈1.5, jump hard@15==cap.y(1.5), jump smooth@10000≈1.5; lookup velocity/displacement düğümleri BİREBİR (2→1.25, 5→2.0, 20→100.0).
+   - SONUÇ: **PASS (failures=0)**. Şekil paramlarında (jump cap.y = hedef gain, sync GAIN integreli vb.) harness beklentilerinin ilk turu 9 hata verdi — tümü harness modelleme hatasıydı, kod değil; düzeltilince 0 hata.
+
+4. **SAPMA SAYIMI BAĞIMSIZ TÜRETİMİ:** known_deviations.txt satır satır: 23 classic_gain_exp_le1 (0.001..100000, sabit 1.005) + 8 s(0) özdeşlik = **31**. Eski notlardaki "24+7" (P89 M33) BİRER KAYIĞIDIR; dosya 23+8=31 ile öztutarlı, oracle çıktısı da 31 basıyor — düzeltilecek bir şey YOK (yalnız INFO; eski nota güvenilmesin).
+
+5. **KAPILAR (interim — Aj6 P131 daemon.cpp'yi bu oturumda 02:33:05'te DÜZENLİYOR; final koşu Aj1 tur kapanışında TEKRAR):** build.sh → EXIT 0, 0 uyarı/error 🟢 · run_tests.sh → 33460/33460 geçti 🟢 · run_oracle.sh → 915 satır / 31 belgeli sapma / 31 görüşüldü / RESULT OK (rel 1e-9) 🟢 · run_tr_coverage.sh → Result: PASS 🟢. Harness include/ başlıklarından derlendiği için Aj6'nın canlı daemon düzenlemelerinden etkilenmez; 1b ölçümü tamamen include/accel-power.hpp üzerinden. Aj 8 boş — emir bekliyor.

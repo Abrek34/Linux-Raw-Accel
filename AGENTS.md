@@ -109,7 +109,7 @@ Test file: `tests/test_accel.cpp`
 - No external dependencies (standard C++20 + project headers)
 - Each `SECTION()` is an independent test group
 - Assertions use `EXPECT` / `EXPECT_NEAR` macros
-- 132 test groups, 21627 runtime assertions covering: algorithms, JSON round-trips,
+- 170 test groups, 33460 runtime assertions covering: algorithms, JSON round-trips,
   file I/O, input validation, multi-profile round-trip, atomic write, IPC JSON,
   config error paths, LUT sort, int overflow guard, NaN/Inf remainder guard,
   accel_args sanitize, fuzz tests, extreme speeds, EMA stability, subpixel
@@ -202,7 +202,7 @@ daemon, CLI, and GUI at build time) and must be mirrored in `CMakeLists.txt` →
 | `gui/widgets_sync.inl` | Widget ↔ profile sync, GTK callbacks |
 | `gui/profile_mgr.inl` | Profile CRUD dialogs |
 | `gui/ui_builder.inl` | Layout helpers, build_ui(), window-close, on_activate() |
-| `tests/test_accel.cpp` | Unit + integration tests (21627 assertions, 132 groups) |
+| `tests/test_accel.cpp` | Unit + integration tests (33460 assertions, 170 groups) |
 | `tests/fuzz_config.cpp` | libFuzzer harness — config JSON parsing |
 | `tests/fuzz_accel.cpp` | libFuzzer harness — acceleration pipeline |
 | `tests/run_fuzz.sh` | Fuzz test runner (both harnesses) |
@@ -270,7 +270,7 @@ compute sample staleness). Design keeps the hot path lock-free:
 - **Pre-computed dpi_factor**: `mouse_device::dpi_factor` is computed once in `apply_profile()` instead of dividing on every mouse event — eliminates a floating-point division from the hot path
 - **Overflow-safe magnitude**: `magnitude()` uses `std::hypot(x,y)` instead of `sqrt(x*x+y*y)` — prevents intermediate overflow/underflow for extreme delta values
 - **Unified clock source**: both `now_ms()` and `now_ns()` use `CLOCK_MONOTONIC_RAW` — eliminates drift between timing sources and reduces the per-event `clock_gettime` read count from 3 to 2 (start + end; P100)
-- **P93 batched REL write**: `uinput_write_rel()` forwards REL_X+REL_Y in a SINGLE `write()` syscall (kernel uinput injects every `input_event` in the buffer), collapsing two per-event syscalls into one with a byte-identical event stream. Zero-valued axes are skipped (same as the old two conditional writes). Missed timestamps are untouched — `flush_motion` still reads start/end (2 × `clock_gettime`) plus the one batched write = 3 hot-path syscalls per motion event.
+- **P93 batched REL write**: `uinput_write_rel()` forwards REL_X+REL_Y in a SINGLE `write()` syscall (kernel uinput injects every `input_event` in the buffer), collapsing two per-event syscalls into one with a byte-identical event stream. Zero-valued axes are skipped (same as the old two conditional writes). Missed timestamps are untouched — `flush_motion` still reads start/end (2 × `clock_gettime`) plus the one batched write = 3 hot-path syscalls per motion event (canonical: hot-path syscall = 3, i.e. 2×`clock_gettime` + 1 batched write).
 - **Y-axis unlinked field sync**: when X/Y axes are unlinked, fields without dedicated Y widgets (cap_mode, exponent_power, decay_rate, scale, output_offset, motivity, gamma, smooth, sync_speed) are copied from X to prevent stale values
 - **Widget sensitivity refactor**: raw passthrough grey-out logic extracted to `update_raw_sensitivity()` — single source of truth for 18 widget enable/disable calls
 - **GUI language resolution**: header-bar dropdown persists `auto`/`en`/`tr` to `<config_dir>/gui_lang`; an explicit preference wins (`load_lang_override`), otherwise `LANG`/`setlocale` decides (`sys_locale_is_turkish`). `tr()` returns the Turkish rendering only when the resolved language is Turkish — English is the dictionary key itself, so missing entries degrade to the source string. `refresh_language()` re-applies every registered widget in place on switch.
