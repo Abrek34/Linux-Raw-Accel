@@ -6,7 +6,7 @@
 namespace rawaccel {
 
 /// Single source of truth for the version number — read by GUI and daemon.
-inline constexpr const char* RAWACCEL_VERSION = "0.4.0";
+inline constexpr const char* RAWACCEL_VERSION = "0.5.0";
 
 using milliseconds = double;
 

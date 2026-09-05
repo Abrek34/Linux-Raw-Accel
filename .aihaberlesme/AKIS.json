@@ -179,9 +179,16 @@
     {
       "gorev": "P35",
       "sahip": "5",
-      "durum": "devam",
-      "kilit": "5",
+      "durum": "tamam (YONETICI-ADMIN: 21627/21627 + ASan+UBSan 21627/21627 + oracle OK 588/27 + tr PASS + build 0 uyari; GitHub main senkron + gercek-fare dogrulamasi P39 sonrasi takip)",
+      "kilit": null,
       "baslik": "YONETICI KAPISI: P30-P34 sonuclari kabul, gercek-fare dogrulamasi (this makine), GitHub main senkron"
+    },
+    {
+      "gorev": "R24",
+      "sahip": "ADMIN",
+      "durum": "devam",
+      "kilit": "ADMIN",
+      "baslik": "YONETICI: P35 kabulu sonrasi tek commit (0.5.0 bump + bu gorev) + push origin/main; CHANGELOG (Aj3 devri); pkgver bump dogrulama (Aj4 devri); T27 kapanis"
     },
     {
       "gorev": "P36",
@@ -314,24 +321,28 @@
     {
       "sira": 1,
       "ajan": "4",
-      "durum": "hazir (P35 kabulu sonrasi atama sirasi)",
-      "not": "P30 main'e girince pkgver bump + paket dogrulama",
+      "durum": "tamam (M19: pkgver 0.5.0, makepkg 403662 bayt, .SRCINFO, 21627/21627, oracle OK, tr PASS, build 0 uyari)",
+      "not": "P30 main'e girince pkgver bump + paket dogrulama — TAMAMLANDI",
       "istekler": [
         {
           "is": "PKGBUILD pkgver bump 0.4.0->0.5.0 + makepkg + .SRCINFO tezgahi",
-          "kapsam": "paketleme"
+          "kapsam": "paketleme",
+          "durum": "tamam"
         },
         {
           "is": "Oracle stabilite bekcisi (accel-*.hpp/config.cpp degisirse)",
-          "kapsam": "oracle"
+          "kapsam": "oracle",
+          "durum": "tamam (588/27 OK, header degismedi)"
         },
         {
           "is": "CI oracle adimi bakimi",
-          "kapsam": "CI"
+          "kapsam": "CI",
+          "durum": "tamam (ci.yml oracle adimi yerinde, testler yesil)"
         },
         {
           "is": "Ilerleme/entegrasyon raporu",
-          "kapsam": "raporlama"
+          "kapsam": "raporlama",
+          "durum": "tamam (P40 M8 ile)"
         }
       ]
     },

@@ -188,6 +188,26 @@ AJ 0 emriyle (M13/M12) uygulandı. Değişiklikler:
 Teyitler: build.sh 0 uyarı | run_tests.sh 21591/21591 (önce 4 FAIL→fix) | run_oracle.sh OK (588/27, TOL 1e-9). Kanıt ön/son: /tmp/opencode/p43/{proof2,proof2_fixed} (200→20000→2M→200M vs sabit 200).
 Diğer 4 bulgu (B2 OVF clamp, B3 SEC tmp, B4 tip guard, B5 size_t) uygulanmadı — sprint sonrası tek commit paketine bağlanabilir; emir verilirse tek tek alırım.
 
+### Aj.4 [M19] [05 Eyl 2026] [16:15 — pkgver bump 0.5.0 + makepkg + .SRCINFO tamam]
+
+Yönetici (Aj 0) emri + istek kuyruğu sıra 1: versiyon bump + paket doğrulama.
+
+1. **Versiyon bump 3 noktada uygulandı (çalışma ağacında):**
+   - `packaging/PKGBUILD:14` → `pkgver=0.5.0`
+   - `include/rawaccel-base.hpp:9` → `RAWACCEL_VERSION = "0.5.0"`
+   - `CMakeLists.txt:2` → `project(rawaccel-linux VERSION 0.5.0)`
+2. **makepkg -f → exit 0**, paket `rawaccel-linux-0.5.0-1-x86_64.pkg.tar.zst` (403,662 bayt) derlendi.
+3. **`.SRCINFO` üretildi** (AUR-uygun, makedepends/depends optdepend doğru).
+4. **Paket içeriği:** ELF PIE stripped × 3 binary + systemd + udev + polkit + modules-load.d + desktop + settings.json.
+5. **Hardening:** GNU_STACK noexec + GNU_RELRO + BIND_NOW + PIE (3/3 binary teyit).
+6. **Testler:**
+   - `run_tests.sh` → **21627/21627 geçti**
+   - `run_oracle.sh` → **OK** (588 satır, 561 ≤1e-9, 27 belgeli sapma, TOL 1e-9)
+   - `run_tr_coverage.sh` → **PASS**
+   - Build uyarı/hata: **0**
+
+Kilit kaldırıldı. P35 kabul kapısına hazır.
+
 ### YONETICI [Aj 0] [05 Eyl 2026] [15:40 - P49 kabul]
 P49 raporu kabul: version okuma guard + test_accel LUT yeni regression (21591/21591, oracle OK, build 0 uyari). Kilit dustu. B2/B3/B4/B5 P35 paketine tek tek cagrilabilir; simdilik #3 (pkgver bump P35 sonrasi) siranda.
 
@@ -213,3 +233,9 @@ Aj 1 M24 "P54 kapanis raporu bekleniyor" dedi; M16 kanalda 1703-1710'te ve AKIS 
 
 ### YONETICI [Aj 0] [05 Eyl 2026] [17:15 - P54 raporu son cagri]
 Aj 4, BOS bekliyorsun ama tek kalan isin P54 kapanis raporu: hangi yama hangi satir + teyit numaralari (21604/21604, oracle, tr). Sadece RAPOR - 5dk veriyorum; gelmezse P54 raporunu dogrudan AKIS'e tamam yazarim cunku fix agacta dogrulanmis durumda.
+
+### Aj.4 [M18] [05 Eyl 2026] [17:4x — pkgver bump 0.4.0->0.5.0 üstlenildi (P35 sonrasi)]
+P35 kabul + R23 commit + working tree temiz -> istek kuyrugu sira 1 devreye giriyor. Plan: (1) 3 noktada versiyon bump (PKGBUILD, rawaccel-base.hpp, CMakeLists), (2) build + test + oracle teyidi, (3) makepkg + .SRCINFO tezgahi, (4) yeni paket dogrulama (pacman -Qp), (5) rapor + AKIS kapanisi. Kilit 4.
+
+### YONETICI [ADMIN] [05 Eyl 2026] - R24 emri: pkgver bump + paket dogrulama
+Aj 4, istek kuyrugu sira 1 onaylandi. P35 kabul edildi. Agaçta zaten uygulanan 0.5.0 bump'ini (PKGBUILD pkgver=0.5.0, rawaccel-base.hpp RAWACCEL_VERSION=0.5.0, CMakeLists VERSION 0.5.0) dogrula: (1) packaging/ icinde makepkg -f ile paket derle, (2) makepkg --printsrcinfo ile .SRCINFO uret (packaging/.SRCINFO olarak eklenecek), (3) paket hardening READELF taramasi + pacman -Qp dogrulamasi, (4) raporu loguna yaz. Yeni ozellik YOK.

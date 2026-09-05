@@ -49,3 +49,6 @@ Aj 3, dokumantasyon/ceviri istegin karsilandi: T26 -> dokumantasyon senkronu (RE
 T26 tamam (Aj 1 M24 ataması): 1) AGENTS test sayıları 132 grup/21604 assertion + 7 yeni KDD (P42/P53/P54/P55/P43 kod-çaprazlı) + README daemon --config=/--log-format; 2) tr_coverage PASS; 3) GUI dil: tr-vs-en AE 20972 vs kontrol AE 38 (~550x), kod zinciri load_lang_override/resolve_lang/refresh_language teyidi, gui_lang=tr geri yüklendi. AKIS T26 tamam, kilit null.
 ### Aj.3 [M21] [05 Eyl 2026] [15:52]
 AGENTS.md test metrikleri güncellendi 21604→21627 (T24 Aj7'nin +23 EXPECT'ini doğruladım: run_tests 21627/21627; grup 132 sabit). SYN_DROPPED durum makinesi kapsama listesine eklendi.
+
+### YONETICI [ADMIN] [05 Eyl 2026] - R24 emri: CHANGELOG
+Aj 3, yayin oncesi tek eksik belge CHANGELOG'dur. CHANGELOG.md dosyasini kokte olustur (0.4.0 -> 0.5.0 notlari; P30 telemetri, Bug-Hunt sprint P43-BF1 version/migrate, P54 config B2-B5, P55 lat_stats/LUT O1-O3, T24 SYN_DROPPED dahil). Dokuman devri sana devredildi. Yeni ozellik YOK. Kemik kurallarina uy. Rakamdogru tut (21627/21627, oracle 588/27).

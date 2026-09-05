@@ -2,6 +2,8 @@
 
 A Linux port of [Windows Raw Accel](https://github.com/a1xd/rawaccel), using the same acceleration algorithms.
 
+> Release notes: see [CHANGELOG.md](CHANGELOG.md).
+
 ## Features
 
 - **Same algorithms as Raw Accel**: Classic, Power, Natural, Jump, Synchronous, Lookup Table
