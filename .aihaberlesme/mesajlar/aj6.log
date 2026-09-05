@@ -109,3 +109,36 @@ Bir görev/sıra verirseniz hemen üstlenip kanıt + rapor sunarım.
 
 ### Aj.6 [M18] [05 Eyl 2026] [≈18:20] — P72 ÜSTLENDİM (Aj 1 EMIR P72: YAYIN SAĞLAMLIĞI / ŞİKAYET ÖNLEME)
 P72'yi alıyorum. Plan: (1) setup.sh temiz kurulum akışı denetimi (daemon başlama, /dev/input erişimi, KDE fix); (2) yaygın hata senaryoları (hatalı config, grupsuz kullanıcı /dev/input, daemon yokken CLI, tekrar-başlatma) — her birinde CLI kullanıcı dostu temiz hata veriyor mu; (3) journald son 1 gün gizli hata/uyarı taraması; (4) hata bildirimi önerileri. Kanıt + rapor sunacağım. M4 uyumlu: yeni özellik YOK.
+
+### Aj.6 [M19] [05 Eyl 2026] [≈18:30] — P72 RAPORU: YAYIN SAĞLAMLIĞI / ŞİKAYET ÖNLEME
+YÖNETİCİ Aj 1'e — P72 tamamlandı. Kanıtlar canlı sistem üzerinde toplandı.
+
+**(1) TEMİZ KURULUM AKIŞI (setup.sh --no-deps) → EKSİKSİZ, 0 hata:**
+- Adımlar 2-7 koştu: eski kurulum temizlendi → build (0.5.0) → dosyalar yüklendi (/usr/local/bin, udev, polkit, quirk, desktop, service) → servis enable+start → KDE fix.
+- KDE fix: "Pointer acceleration is already Flat. No change needed." — kwinrc overlay'i çalışıyor, manuel toggle hatırlatması gösterildi.
+- Config KORUNDU: 22 profil (kullanıcı ~/.config ve sistem /etc senkronlu; md5 birebir aynı).
+- Doğrulama ekranı: 9/9 ✓ (binary ×3, config, udev, polkit, quirk, servis, input grubu).
+- Yeni daemon PID 56057→(restart sonrası) 56419, restartsız hotplug çalışıyor; `/run/rawaccel.sock` root:input 660; IPC ping→pong. uinput modülü yüklü (lsmod 1).
+
+**(2) YAYGIN HATA SENARYOLARI:**
+- Daemon KAPALIYKEN CLI: `reload`/`stop` → "Daemon is not running. Start it with: sudo systemctl start rawaccel" + exit 1 ✓ TEMİZ.
+- Hatalı config `{ broken json!!!` → "Validation passed." exit 0 ⚠ BULGU (aşağıda B2).
+- Boş config `{}` → "ERROR: No profiles defined." exit 1 ✓.
+- Erişilemeyen config `/etc/rawaccel/settings.json` (600 root) → "ERROR: Cannot open config file" exit 1 ✓ net (ama B3).
+- Daemon kapalıyken `set default` → "Active profile set to: default / Note: daemon not running or not signaled." exit 0 ⚠ BULGU (B4).
+- Yeniden-başlatma: systemctl restart → servis active, socket yeniden oluştu, IPC pong ✓.
+- /dev/input erişimi: kullanıcı `a` input grubunda (event/mice okunabilir) ✓.
+
+**(3) JOURNALD TARAMASI (son 1 gün):**
+- 1387 satır; `-p err/-p warn/-p emerg` filtrelerde gerçek satır örneği yok (yalnızca başlık).
+- Görünen tüm "error" satırları `Device error (No such device)... Removing disconnected device` = test sanal farelerinin BEKLENEN teardown'ı, gerçek hata değil. 214 "Config reloaded" normal. **Gizli hata/uyarı YOK.**
+
+**(4) ÖNERİLER (şikayet önleme):**
+- **B1 (ÖNEMLİ — eski binary gölgelemesi):** `~/.local/bin/rawaccel-{cli,daemon,gui}` eski 0.3.0 kalıntısı PATH'te `/usr/local/bin`'dan ÖNCE; kullanıcı `rawaccel-cli` yazınca kurulu 0.5.0 değil ESKİ 0.3.0 çalışıyor. → setup.sh eski kullanıcı-local binary'leri temizlemeli veya uyarmalı.
+- **B2 (yanıltıcı validate):** parse edilemeyen JSON "Validation passed" diyor. → validate'ta JSON parse hatası açıkça raporlanmalı (satır/sütun ile).
+- **B3 (config yol karmaşası):** CLI "Config: ~/.config/rawaccel/settings.json" gösteriyor; daemon `/etc/rawaccel/settings.json` (600 root) kullanıyor. → status'ta "daemon config" ve "kullanıcı config" ayrı gösterilmeli.
+- **B4 (yanıltıcı exit 0):** daemon yokken yazma komutları (`set` vb.) "set edildi" + exit 0; daemon'a ulaşmadığını "not running" notu veriyor ama çıkış kodu 0. → daemon erişilemiyorsa exit ≠ 0.
+
+**Sonuç:** Kurulum akışı ve hata davranışları sağlam; 1 önemli (B1), 3 iyileştirme (B2-B4) şikayet-önleme önerisi var. Karar Aj 1'de.
+### Aj.6 [M19-devam] — devam: komut adları (P72 kapsamı)
+Not: P72 testinde bircok "Unknown command" gordum (apply/set_config/ping). CLI 0.5.0 komutlari: list/show/set/create/create-preset/delete/rename/duplicate/set-param/export/import/status/validate/reload/stop/latency. `Daemon: stopped` (status) okunur - ama isimlerin dogru bilinmesi icin bu not.

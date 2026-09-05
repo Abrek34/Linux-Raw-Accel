@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "guncelleme": "2026-09-05 19:1x +03 (Aj6 M16: P59 tamam, kilit dustu)",
+  "guncelleme": "2026-09-05 18:3x +03 (Aj6 M19: P72 tamam, kilit yok)",
   "referans": "aihaberlesme.md — insan okumalı kanonik anlatım; AKIS.json makine-okunur durum deposudur.",
   "kurallar": {
     "protokol_md": "aihaberlesme.md",
@@ -15,35 +15,35 @@
     },
     "2": {
       "rol": "Kod inceleme / test / QA / guvenlik - Aj 1 emriyle calisir",
-      "durum": "emir uygulayici"
+      "durum": "P68 tamam (M29: config senkron + stale kilit fix); P77 atandi - BUG HUNT CORE ALGO (rapor bekleniyor)"
     },
     "3": {
       "rol": "Ozellik / UX / dokumantasyon / ceviri - Aj 1 emriyle calisir",
-      "durum": "P60-B atandi - GUI UX preset + README uyum + tr denetimi (M25)"
+      "durum": "P78 tamam (M32: GUI+UX bug-hunt, BULGU-1 bellek yamasi unref x2, presets drift YOK)"
     },
     "4": {
       "rol": "Referans oracle / paketleme (PKGBUILD) / raporlama - Aj 1 emriyle calisir",
-      "durum": "P63 atandi - esport grid genisletme (M21)"
+      "durum": "P70 tamam (M25: release paket 0.5.0-1); P79 TAMAM (M27, kilit dustu) - emir bekliyor"
     },
     "5": {
       "rol": "Referans capraz-kontrol / bagimsiz dogrulama - Aj 1 emriyle calisir",
-      "durum": "P62 baslatildi - kabul paneli + gercek-fare oturum plani (M17)"
+      "durum": "P80 tamam (M21, kilit Aj.5 takdirde) - gorev bekliyor"
     },
     "6": {
       "rol": "Sistem dayanikliligi / IPC & guvenlik denetimi - Aj 1 emriyle calisir",
-      "durum": "P59 tamam (M16: uzun-session + IPC/guvenlik + hotplug; kabul kapisina hazir)"
+      "durum": "P72 tamam (M19: kurulum akisi + hata senaryolari + journald + oneriler; kabul kapisina hazir)"
     },
     "7": {
       "rol": "Performans / mikro-optimizasyon / kurulum-akis dogrulamasi - Aj 1 emriyle calisir",
-      "durum": "bos - emir bekliyor (M21 periyodik teyit, P64 tamam)"
+      "durum": "bos - emir bekliyor (M24, P73 tamam)"
     },
     "0": {
       "rol": "Haberlesme agi yoneticisi (kanal moderasyonu) - Aj 1 emriyle calisir",
-      "durum": "emir uygulayici"
+      "durum": "P67 tamam (M15); P75 kanal final icra edildi (M30)"
     },
     "8": {
       "rol": "Emir uygulayici - Aj 1 yonetici emirlerini uygular, dogrular, raporlar",
-      "durum": "aktif"
+      "durum": "P65 tamam (M5/M6); P74 TAMAM (M7, BULGU-1 LOW onerisi ADMIN kararina bagli) - emir bekliyor"
     }
   },
   "gorevler": [
@@ -246,15 +246,15 @@
     {
       "gorev": "P59",
       "sahip": "6",
-      "durum": "tamam (Aj6 M16: uzun-seans RSS sabit 7228kB, IPC/guvenlik probe temiz, hotplug 11/11, SYN_DROPPED 0, journald gercek hata 0)",
+      "durum": "tamam (Aj6)",
       "kilit": null,
       "baslik": "OYUNCU 3: Uzun oyun-oturumu kararliligi (daemon RSS/CPU/thread 2+ saat), IPC & guvenlik derin denetimi, hotplug stresi"
     },
     {
       "gorev": "P60",
       "sahip": "3",
-      "durum": "P60-A tamam (preset kod + kilavuz); P60-B atandi - GUI UX tasarim + uyum + tr",
-      "kilit": "3",
+      "durum": "tamam (P60-A M26: 8 preset + README oyuncu kilavuzu; P60-B M27: GUI UX tasarim + README uyum + tr denetim; kodlu preset secici P69'da islendi)",
+      "kilit": null,
       "baslik": "OYUNCU 4: Hazir oyun profili setleri (CS2/Valorant/Apex/FPS genel) + README 'oyuncu kılavuzu' + GUI UX iyilestirmeleri"
     },
     {
@@ -267,8 +267,8 @@
     {
       "gorev": "P62",
       "sahip": "5",
-      "durum": "baslatildi (yesil isik)",
-      "kilit": "5",
+      "durum": "tamam (M19: bagimsiz kabul paneli R37 yesil + CLI preset round-trip + gercek-fare hissiyati sean plani; KABUL onerisi ADMIN onayina bagli)",
+      "kilit": null,
       "baslik": "OYUNCU 6: Bagimsiz oyuncu kabul paneli (P57-P61 sonuclari) + gercek-fare hissiyati oturumu (kullanici fare ile)"
     },
     {
@@ -424,6 +424,104 @@
       "kilit": null,
       "durum": "tamam (M26: build 0 uyari, 21627/21627, ASan 21627/21627, oracle 768/31 OK, tr PASS, 4 preset oracle ile birebir)",
       "baslik": "Oyuncu turu bagimsiz QA kesisimi: build/run_tests/ASan/oracle/tr reposu R33-R35"
+    },
+    {
+      "gorev": "P70",
+      "sahip": "4",
+      "durum": "tamam (M25: makepkg 0.5.0-1 403717B, 3xPIE+RELRO+BIND_NOW, preset apex 0.9 dogru, CHANGELOG R30-R37 senkron, 21627/21627, oracle 768/31 OK, tr PASS)",
+      "kilit": null,
+      "baslik": "YAYIN: release paket hazirligi - PKGBUILD/.SRCINFO 0.5.0 dogrulama + makepkg temiz paket + icerik + CI uyumu + CHANGELOG R30-R37 senkron"
+    },
+    {
+      "gorev": "P65",
+      "sahip": "8",
+      "kilit": null,
+      "durum": "tamam (M5/M6: bagimsiz hata avi R30-R35; Bulgu-1 import arity fix R36, Bulgu-2 apex output_offset 0.9 R37, Bulgu-3/4 LEAVE; R37 sonrasi tam teyit yesil)",
+      "baslik": "OYUNCU TURU BAGIMSIZ HATA AVI: preset parametre mantigi + create-preset/show/export round-trip + oracle grid + arac/kod uyari ve bellek taramasi"
+    },
+    {
+      "gorev": "P67",
+      "sahip": "0",
+      "kilit": null,
+      "durum": "tamam (M15: /etc vs ~/.config kapsam denetimi - o an icerik esit, yalniz version 0.4.0/0.5.0 farki; P59 stale kilit tespiti; tek-yazar disiplini onerisi yoneticiye raporlandi)",
+      "baslik": "KANAL SENKRON + AYRISMA KONTROLU: iki config karsilastirma + log/AKIS senkron + tek-yazar onerisi (salt okunur)"
+    },
+    {
+      "gorev": "P68",
+      "sahip": "2",
+      "kilit": null,
+      "durum": "tamam (M29: /etc 0.5.0'a tasindi + SIGHUP reload + diff/md5 esit + P59 stale kilit temizlendi; UYARI: sonrasi /etc harici yaziciyla 0.4.0/3-profil'e geri dondu - P75 config ayrisim raporunda belgelendi)",
+      "baslik": "YAYIN TEMIZLIGI: config senkron + stale kilit fix (daemon /etc'yi 0.5.0'a tasi, reload, iki config esitlenssin)"
+    },
+    {
+      "gorev": "P69",
+      "sahip": "3",
+      "kilit": null,
+      "durum": "tamam (M29: make_preset -> include/presets.hpp tek-kaynak, GUI 'Yeni Profil' preset acilir-kutusu, tr.inl yeni anahtar, build 0 uyari, run_tests 21627/21627, CLI create-preset teyidi; GUI interaktif dogrulama headless icinde kosulamadi)",
+      "baslik": "YAYIN: GUI PRESET SECICI KOD (P60-B tasarimin koda dokumu + CLI/GUI tek kaynak + tr PASS)"
+    },
+    {
+      "gorev": "P71",
+      "sahip": "5",
+      "kilit": null,
+      "durum": "tamam (M20: docs/real_hardware_test.md A/B kiti + user_guide.md; degerler presets.hpp ve latency README ile birebir teyit, yayina hazir)",
+      "baslik": "YAYIN: GERCEK-FARE OTURUM KITI + KULLANICI REHBERI (default 1:1 dogrula -> preset 5-10dk -> latency p95 -> his sonuc)"
+    },
+    {
+      "gorev": "P72",
+      "sahip": "6",
+      "kilit": null,
+      "durum": "tamam (Aj6 M19: setup.sh eksiksiz, B1 eski ~/.local/bin 0.3.0 golgelemesi ONEMLI, B2-B4 iyilestirme onerileri)",
+      "baslik": "YAYIN: FIRST-RUN + KULLANICI SIKAYETI ONLEME (setup.sh temiz akis, /dev/input erisim, daemon kapali CLI, tekrar-baslatma)"
+    },
+    {
+      "gorev": "P73",
+      "sahip": "7",
+      "kilit": null,
+      "durum": "tamam (M24: GUI+CLI cagrilabilir, 4 oyun preset round-trip R30/R37 ile birebir, pan p50 2.25 / flick p50 3.75 P57 uyumlu, temizlendi aktif=default)",
+      "baslik": "YAYIN: GUI + CLI + CURVE CANLI DOGRULAMA (create-preset -> set -> status -> export, lat pan/flick, aktif=default(1:1) birak)"
+    },
+    {
+      "gorev": "P74",
+      "sahip": "8",
+      "kilit": null,
+      "durum": "tamam (M7: fuzz 90s+ 7.9M run cov 359/371 crash yok; CLI arity/boundary temiz; BULGU-1 LOW: >256-char ad sessiz truncate + yaniltici create anonsu, mini-yama onerisi ADMIN kararina bagli)",
+      "baslik": "YAYIN: FUZZ + HATA AVI KAPANISI (run_fuzz + hedefli boundary taramasi + mini-yama onerisi)"
+    },
+    {
+      "gorev": "P75",
+      "sahip": "0",
+      "kilit": null,
+      "durum": "tamam (M30: kanal final - AKIS gorevleri ajN.log'lar ile esitlendi, P60/P62 stale kilit dustu, P65-P69 kayitlari eklendi, P71-P74 atandi/rapor yok; config ayrisimi VETO edildi: /etc 0.4.0/3-profil vs ~/.config 0.5.0/13-profil; tek-kanon onerisi yoneticiye aj0.log'da)",
+      "baslik": "YAYIN ONCESI KANAL FINAL (P75): AKIS esitleme + config yetki karari onerisi + aj0.log raporu"
+    },
+    {
+      "gorev": "P77",
+      "sahip": "2",
+      "kilit": null,
+      "durum": "atandi (emir aj2.log'da, RAPOR YOK; derin algo bug-hunt: accel-*.hpp/motion_math/lat_stats NaN-Inf-sinir-LUT-EMA + oracle-bagimsiz mini C++ tarama)",
+      "baslik": "BUG HUNT: CORE ALGO - uc fazlari sınır kontrolu, sinir degerler, LUT lookup, EMA smoother; bulgu varsa mini-yama ONERISI (kod/yonetici)"
+    },
+    {
+      "gorev": "P78",
+      "sahip": "3",
+      "kilit": null,
+      "durum": "tamam (M32: BUG HUNT GUI+UX - BULGU-1 LOW bellek fix unref, CRIT yok, tr PASS, presets drift YOK, 21627/21627)",
+      "baslik": "BUG HUNT: GUI + UX - P69 preset secici ve tum GUI akisi denetimi; bulgu varsa mini-yama ONERISI"
+    },
+    {
+      "gorev": "P79",
+      "sahip": "4",
+      "kilit": null,
+      "durum": "tamam (M27: TOL 1e-9..1e-12 OK gizli drift yok; 8 preset round-trip birebir NaN/Inf 0; 0.4.0->0.5.0 aciliyor version damgali; paket==build-manual davranis ayni; 21627/21627 tr PASS)",
+      "baslik": "ORACLE + ROUND-TRIP DERIN KOSU - TOL duyarliligi, round-trip surprizleri, config schema ayrisima, paket ikilileri"
+    },
+    {
+      "gorev": "P80",
+      "sahip": "5",
+      "kilit": "Aj.5",
+      "durum": "tamam (M21: CLI+IPC+filesystem bug-hunt; kurulu 0.3.0/0.4.0 vs agac 0.5.0 sürüm drifti B1 YUKSEK; güvenlik testleri gecti; panel yesil)",
+      "baslik": "BUG HUNT: CLI + IPC + FILESYSTEM - komut yollari, IPC guvenligi, config/dosya sistemi; severity + mini-yama ONERISI"
     }
   ],
   "istekKuyrugu": [
