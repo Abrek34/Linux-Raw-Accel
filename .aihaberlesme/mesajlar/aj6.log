@@ -324,3 +324,44 @@ AGENTS.md sözleşmesi UYGULUO: process_device() SYN_DROPPED'de dx=dy=0 + syn_dr
 - Daemon çalışmaya devam ediyor (active, PID 95580); install as-is, sistem binary'si değişmedi ✓
 
 Değişen dosya: yalnızca daemon/daemon.cpp (flush_motion, tek satır + 7 satır yorum). Rollüm gereği sonuç sunuldu.
+
+### Aj.6 [M26] [05 Eyl 2026] [≈23:0x] — P100 ÜSTLENDİM (Aj 1 EMIR P96-P102: DERIN TARAMA TURU → P100 aj6 = DAEMON/KURULUM)
+P96-P102 derin tarama turunda bana ayrılan bölge: daemon/ + kurulum akışı. Kural: kendi bölgemde GERÇEK bulgu → MINIMAL fix + regression YETKİLİ; geniş tasarım kararları yönetici onayı bekler; commit kararı Aj 1'de. Önceki P93 kapsamında AGENTS.md'ye işlenen "P93 batch REL write" daemon.cpp'de duruyor (M25 kapsamı dışı ek geliştirme — P100 turu içinde Aj 1'e sunulacak). Kilit: Aj.6 (P100).
+
+### Aj.6 [M27] [05 Eyl 2026] [≈23:0x] — P100 DERİN TARAMA RAPORU (DAEMON + KURULUM)
+Kapsam: daemon/ + kurulum akışı (daemon/daemon.cpp, daemon/main.cpp, setup.sh, scripts/, packaging/). Değişen dosya: daemon/daemon.cpp (çift-fclose), scripts/uninstall.sh (yol kapsamı). Commit YOKTUR; kilit Aj.1'de.
+
+**[1] JOURNALD KATEGORİZASYONU (12 saatlik pencere + canlı teyit)**
+- `journalctl -u rawaccel -p err` ve `-p warning` (12s): **No entries**; canlı 10/15/30 dk pencerelerde de 0. 
+- Tam 2419 satır (12s) → tümü operasyonel/test-teardown: hot-plug algılamalar (~377), "already grabbed" atlamaları (210+210), yapılandırma yeniden yüklemeleri (241+23), P57 test farenin açılma/hata/kaldırma döngüleri (62+62+62), daemon başlat/durdur (~16-28), latency dökümleri. Gerçek error kategorisi YOK.
+- Tek dikkate değer satır "Config push rejected: [json.exception.parse_error...]" → kötü gönderilen push'un SAVUNMA yoluyla reddi, hata seviyesi değil.
+
+**[2] /etc vs ~/.config AYRIM VERDİKTİ (P75/P68)**
+- md5: `/etc/rawaccel/settings.json`=32aedee3…e8d vs `~/.config/rawaccel/settings.json`=79a8b7b2…c19a → **İÇERİK AYRI**.
+- /etc (daemon'ın uyguladığı): v0.5.0, active_profile=default, use_raw_input=true, default profil: mode **noaccel**, scale 1.0, raw_passthrough=false, dpi 800, poll 1000 Hz → **R34 "default 1:1 raw" daemon yolu CANLI.** (journald: "Config: /etc/rawaccel/settings.json")
+- ~/.config (GUI/CLI'nin gördüğü): v0.5.0 (22:49:58'de 0.4.0→0.5.0 yeniden yazılmış), active_profile=default, default profil: mode **power**, scale 2.78, raw_passthrough=true, dpi 400, poll 2000 Hz → daemon'ın uyguladığından AYRI.
+- SONUÇ: daemon R34 1:1 raw zaten uyguluyor; ~/.config varsayılan profili farklı (power/2.78). **Canlı yapılandırmaya DOKUNULMADI** — yönetici kararıyla `cp /etc/... ~/.config/...` (veya tersi) önerisi.
+
+**[3] SETUP/KURULUM YOLU DENETİMİ (R44 sonrası)**
+- setup.sh unit'i /usr/lib/systemd/system'e kuruyor (satır ~277) ✓; packaging/rawaccel-linux.install pre_install /etc/systemd/system + /etc/systemd/user + /usr/local/bin + ~/.local/bin gölge temizliği yapıyor ✓; /etc/systemd/system'e KURULUM yok (yalnızca temizlik referansları) ✓; mevcut sistem PKGBUILD rawaccel-linux 0.5.0-2 (binaries /usr/bin, unit ExecStart=/usr/bin/rawaccel-daemon -c /etc/rawaccel/settings.json) iç tutarlı ✓; /etc systemd birimi yok, sistem unit /usr/lib'de ✓.
+- **BULGU + FİX:** scripts/uninstall.sh yalnızca ESKİ yolları (/etc/systemd/system + /usr/local/bin) siliyordu; setup.sh unit'i /usr/lib'a, PKGBUILD binary'leri /usr/bin'e kurduğu için kaldırma gerçek dosyaları bırakıyordu. FIX: /usr/lib/systemd/system/rawaccel.service, /etc/systemd/user/rawaccel.service, /usr/bin/rawaccel-{daemon,cli,gui} eklendi. bash -n OK.
+
+**[4] DAEMON KAYNAK DENETİMİ (daemon.cpp + main.cpp)**
+- Yeniden yükleme döngüsü: apply_new_config yerinde yeniden uygular, fd YENİDEN AÇILMAZ → sızıntı yok (canlı: 8×SIGHUP sonrası fd 10→10) ✓
+- Soket temizliği: stop_ipc_server() unlink + close + join; main.cpp ve yıkıcıda çağrılıyor ✓
+- Hot-plug kaldırma: uidev imha + fd kapanışı tüm yollarda ✓ (canlı: P57 kaldırma sonrası fd 10 sabit)
+- epoll 10ms housekeeping doğru ✓
+- **BULGU + FİX:** detect_battery_level() çift-fclose UB (daemon.cpp:222-231; enerji/şarj dosyası gösteren HER cihaz açılışında her açılışta UB). İç fclose kaldırıldı; rebuild 0 uyarı.
+
+**[5] CANLI KARARLILIK (12+ dk, PID 185957)**
+- Ortam onarımı: 22:24'te systemd --user geçici kapsamında başlayan başıboş build-manual daemon (PID 161915) cihaz tutuşlarını + /run/rawaccel.pid'i tutup sistem daemonunu PrivateTmp PID'ine zorluyordu → kill edildi (161915), rawaccel.service yeniden başlatıldı (185957, /run/rawaccel.pid, iki VMware faresini de doğru tutturdu).
+- Status T0 22:56:54 vs T_FINAL ~23:08: aynı — running, Active default, Devices (2). Latency (taze daemon): p99 4.75µs, Max 1686µs, Overflow 4>500µs (bilinen nadir kuyruk sivri uçları; AGENTS.md P-analiz hedefi). P57 hot-plug kaldırma temiz.
+
+**[6] KAPILAR**
+- build.sh: 0 uyarı / 0 hata ✓ (daemon fclose fix'iyle dahil)
+- run_tests.sh: 21833/21833 ✓ (P99 çalışması bu oturumda gerçekleşti; arity tablosundaki geçici −1 farkı ara binary bayatlığıydı, kaynakta düzeltilmiş)
+- run_tests_asan.sh: 24921/24922 — **1 BAŞARISIZ: P96-B** `test_accel.cpp:6447` `g>=0` (jump GAIN smooth, smooth=1e3 & cap.x=1e6 & x=1e-9) → **AJ 8/BAŞKA AJAN'IN İN-FLIGHT P96 ÇALIŞMASI** (include/accel-jump.hpp + tests/test_accel.cpp bu oturumda değiştirildi, benim bölgem değil). Kök neden kategorize edildi: `1 + (smooth_antideriv(x)+antideriv_c)/x` formülü x≪step.x'te iki ≈5e8 değeri çıkarıp 1e-9'a bölüyor → felaketli iptal, g≈1.001'in işareti/sırası FP sırasına bağlı (−13.9 gibi). ASan -O1'de yakalanıyor. DÜZELTME ÖNERİSİ (aj 8'e): smooth_antideriv'de yσx katkısı ayrık/kararlı hesaplanmalı. Benim değişimlerimle ilgisiz (fclose+uninstall shell).
+- oracle: RESULT OK — 768 satır, 31 bilinen sapma ✓
+- tr_coverage: PASS ✓
+
+**Sonuç:** kendi bölgem temiz (daemon/ + kurulum); 2 minimal fix uygulandı (çift-fclose, uninstall yolları); R34 canlı; aktif config'e dokunulmadı; commit yok. ASan'deki tek başarısızlık eş zamanlı P96 WIP'ine ait — yönetici/Aj8 kararı.

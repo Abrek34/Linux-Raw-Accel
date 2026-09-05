@@ -223,7 +223,6 @@ static int detect_battery_level(const std::string& event_path) {
                 if (f) {
                     char buf[64] = {};
                     if (fgets(buf, sizeof(buf), f)) {
-                        fclose(f);
                         // Could parse energy_full/energy_now for percentage
                         // For now, just note we found it but don't compute percentage
                     }
@@ -969,7 +968,12 @@ static bool flush_motion(mouse_device& dev, libevdev_uinput* uidev,
         // deltas only — speeds are undefined without the speed pipeline.
         dev.telem_dx = static_cast<double>(ix);
         dev.telem_dy = static_cast<double>(iy);
-        dev.telem_wall_ms = now_ms();
+        // P100: P93-perf'teki ile aynı optimizasyon — now_ms() yerine zaten
+        // alınan t_start'tan türet (ns→ms). telem_wall_ms serileştirilmiyor
+        // (status_json onu basmıyor, AGENTS.md telemetri notu), bu yüzden ek
+        // clock_gettime okuması yalnızca israf. Önceden 3 syscall, artık 2 — bir
+        // önceki iki-clock okuması korunuyor; değer anlamsal olarak aynı monotonic-RAW.
+        dev.telem_wall_ms = static_cast<double>(t_start) / 1'000'000.0;
         dev.telem_samples->store(dev.telem_samples->load(std::memory_order_relaxed) + 1,
                                  std::memory_order_release);
         return true;

@@ -116,7 +116,7 @@ private:
     }
 
     static double scale_from_gain_point(double input, double gain, double power) {
-        if (input <= 0) return 0; // guard: prevent NaN in io mode when cap.x=0
+        if (input <= 0) return 1.0; // guard: degenerate io cap → identity scale (no dead curve)
         // P81: for a tiny exponent (sanitized floor 1e-4) the exponent
         // 1/power is ~1e4, so pow(gain/(power+1), 1/power) overflows to Inf,
         // which propagates to gain = Inf and silently zeroes the output.
@@ -128,7 +128,7 @@ private:
     }
 
     static double scale_from_output_point(double input, double output, double power, double C) {
-        if (input <= 0) return 0;
+        if (input <= 0) return 1.0; // guard: degenerate io cap → identity scale (no dead curve)
         return std::pow(output - C / input, 1.0 / power) / input;
     }
 

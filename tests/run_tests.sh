@@ -63,5 +63,42 @@ PY
         exit 1
     fi
     echo "CLI create-preset ad kapısı: 256 OK, 257 red ✓ (P83)"
-    rm -f "$TMPCFG" "$TMPN255" "$TMPN256"
+    rm -f "$TMPCFG" "$TMPN256" "$TMPN257"
+
+    # ── P99: arity + -c "" kapıları ───────────────────────────────────────────
+    # Ekstra argümanlar sessizce yutulmuyor; hepsi rc=1 + usage. "-c ''" reel
+    # config'e düşüp onu değiştirmemeli (P74 BULGU-2 sınıfı).
+    TMPA=$(mktemp)
+    rm -f "$TMPA"
+    set +e
+    OUT=$("$CLI" -c "$TMPA" --no-daemon create pro >/dev/null 2>&1; "$CLI" -c "$TMPA" --no-daemon set pro BONUS 2>&1)
+    RC=$?
+    set -e
+    if [ $RC -eq 0 ] || ! echo "$OUT" | grep -q "takes at most"; then
+        echo "FAIL: P99 extra-arg set rejected (rc=$RC): $OUT"
+        exit 1
+    fi
+    ACTIVE=$("$CLI" -c "$TMPA" --no-daemon list | sed -n 's/^Active profile: //p')
+    if [ "$ACTIVE" != "default" ]; then
+        echo "FAIL: P99 extra-arg set mutated config (active=$ACTIVE)"
+        exit 1
+    fi
+    set +e
+    OUT=$("$CLI" -c "$TMPA" --no-daemon create-preset cs2 a b c 2>&1)
+    RC=$?
+    set -e
+    if [ $RC -eq 0 ] || ! echo "$OUT" | grep -q "takes at most"; then
+        echo "FAIL: P99 extra-arg create-preset rejected (rc=$RC): $OUT"
+        exit 1
+    fi
+    set +e
+    OUT=$("$CLI" -c "" --no-daemon status 2>&1)
+    RC=$?
+    set -e
+    if [ $RC -eq 0 ] || ! echo "$OUT" | grep -q "non-empty path"; then
+        echo "FAIL: P99 -c '' not rejected (rc=$RC): $OUT"
+        exit 1
+    fi
+    echo "CLI P99 arity/-c\"\" kapısı: ekstra-arg red + -c\"\" red ✓"
+    rm -f "$TMPA"
 fi

@@ -155,6 +155,19 @@ int main(int argc, char* argv[]) {
         state.config.profiles.push_back(dp);
     }
 
+    // Open the GUI on the persisted active profile instead of always the first
+    // one, so the header-bar selection, the loaded widget values, and the
+    // daemon's active profile all agree at startup (P97-D1).
+    state.current_profile_idx = 0;
+    if (!state.config.active_profile.empty()) {
+        for (int i = 0; i < (int)state.config.profiles.size(); ++i) {
+            if (state.config.profiles[i].name == state.config.active_profile) {
+                state.current_profile_idx = i;
+                break;
+            }
+        }
+    }
+
     GtkApplication* app = gtk_application_new(
         "io.github.rawaccel", G_APPLICATION_DEFAULT_FLAGS);
     // Pass &state as user_data — on_activate receives it via gpointer.

@@ -13,10 +13,12 @@
 | **(A)** classic `exponent_classic ≤ 1` "linear path" — all speeds | 23 | **KEEP** — intentional port convention, unreachable in production (sanitize/GUI clamp exp to [1,10]); reference value is an out-of-domain artifact |
 | **(B1)** power / synchronous at speed 0 | 7 | **KEEP** — uniform `x ≤ 0 → 1` guard; speed 0 is non-physical, reference artefacts (0 / 1/motivity) are meaningless |
 | **(B2)** game_apex_power at speed 0 | 1 | **KEEP** — semantically matchable (ref = 0.9 offset floor) but not worth breaking the uniform guard; nil practical benefit |
-| **Total** | **31** | KEEP × 31 |
+| **Total (active)** | **31** | KEEP × 31 |
+| **(P102, prospective)** synchronous GAIN N=4 → +69; float→double → +21 | 0 (not applied) | **D: no change today** — sub-perceptual; see §P102 + precision.md §7 |
 
-No deviation is recommended for reversal. The two classes are different in
-kind: A is a **deliberate algorithmic convention**; B is a **domain guard**.
+No deviation is recommended for reversal. The two active classes are different
+in kind: A is a **deliberate algorithmic convention**; B is a **domain guard**.
+The P102 class is prospective only (precision-enhancement), and is not applied.
 
 ---
 
@@ -181,3 +183,71 @@ expression of the classic/power base functions to reduce intermediate rounding
 (see precision.md), and (b) increasing the synchronous LUT sample density (2
 trapezoid partitions per cell and `float` storage are the dominant accuracy
 limits of that mode) — neither touches the documented deviations.
+
+---
+
+## P102 (Aj 8) — prospective precision-enhancement drift class (not active)
+
+This is **not** a current deviation. It documents what *would* happen to the
+oracle if the synchronous GAIN LUT local-side accuracy were improved (N=2→4
+partitions, or `float`→`double` storage) while the vendored official reference
+(tests/oracle/ref/, verbatim, commit 53a7213, N=2 + float) stays untouched.
+Keep this section until a coordinated decision is made (see precision.md §7).
+
+### N=4 partitions — measured drift: **69 rows across the 3 sync GAIN cases**
+
+Grid cases affected: `sync_gain_p2`, `sync_gain_p1`, `sync_gain_p07`
+(`oracle_cases.hpp:115-117`) — all three share identical parameters (synchronous
+GAIN ignores `exponent_classic`, so the LUT is identical), so they drift in lock
+step. **23 of the 24 grid speeds** exceed TOL 1e-9 (all except speed 0, which is
+already a documented deviation): 0.001 … 100000. Measured maximum relative
+N2-vs-N4 delta: **5.68e-3** (0.57%) at 7.5 ips (the steepest sigmoid knee).
+
+| speed band | N2-vs-N4 rel delta | note |
+|------------|--------------------|------|
+| 0.001–0.01 | 2e-9 (just over tol) | LUT nearly flat → both ≈ 1/1.5 |
+| 0.1–1     | 8e-8 … 2.3e-6 | transition to knee rising |
+| 3–50      | 6.2e-4 … 5.7e-3 | **sigmoid knee — the accuracy win lives here** |
+| 100–100000| 3.5e-7 … 3.7e-4 | high-speed decay |
+
+Per-case row count = 23; total = 3 × 23 = **69**. The deviation list would grow
+31 → 100 rows.
+
+Significance: N=4 is a strictly better approximation to the exact integral
+(measurement in precision.md §2.3.1 — error halves everywhere), so these 69 rows
+would be a *precision-enhancement* class, all of one kind, of the same
+"documented port convention" family as `classic_gain_exp_le1` — **but with a
+different root cause**: those 23 rows are an intentional safety convention,
+these would be an intentional accuracy upgrade.
+
+Assessment as a deviation class:
+- **Acceptability (Option C):** mechanically trivial — one comment class + the
+  row list. Maintains a green oracle (TOL 1e-9) while local becomes the *more
+  accurate* side. Risk: the class is *large* (69 rows), the divergence is *new*
+  (reference no longer represents the local product's behavior — one more step
+  toward "the oracle verifies a fork", currently documented as verbatim),
+  and the benefit is **imperceptible** (0.57% → 0.29% knee error, below hand
+  resolution).
+- **Option B** (keep N=2, document the *potential* delta): pointless — documents
+  a nonexistent deficit with no benefit; not recommended.
+- **Option A** (N=4 on BOTH local and ref): oracle stays green AND the deviation
+  list stays at 31, but the vendored ref is no longer verbatim MIT upstream —
+  a `git clone` refresh (LICENSE "Refresh procedure") silently reverts it to N=2
+  and re-introduces 69 rows of *unknown* drift (CI failure — loud, good) unless
+  someone pre-adds them (silent, bad). Requires a "forked reference" stamp and a
+  refresh guard. See precision.md §7 for the ranking and recommendation.
+
+### float→double storage — measured drift: **21 rows (≥1 float ULP each)**
+
+Even with N=2 kept on both sides, a local `double data[]` (ABI analysis in
+precision.md §2.3.2) differs from the float-storing reference by ≤1 float ULP
+per LUT cell → applied gain drifts up to **5.0e-8** (50× TOL) on 21/23 grid
+speeds (all but 0.001/0.005, which round identically). This route is *also* not
+oracle-free. Benefit of double storage is ≤1 ULP of rounding noise — the
+smallest acceptable gain change on the board. Not recommended independently of
+Option A.
+
+**Verdict:** do nothing today (Option D). If a change is ever justified
+(perceptible-mode regression call, or parity with a hypothetical enhanced
+Windows build), the only clean path is Option A with an explicit "forked
+reference" contract. Details and table: precision.md §7.

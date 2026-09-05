@@ -8,8 +8,8 @@
 | Doc | What you'll find |
 |-----|------------------|
 | [formulas.md](formulas.md) | Every mode's exact formula (classic/natural/power/synchronous/jump/lookup/noaccel), the GAIN vs LEGACY distinction, all three cap-mode branches, edge cases, and `include/accel-*.hpp` cross-references. **Start here.** |
-| [deviations.md](deviations.md) | Root-cause of the 31 oracle rows (views: `tests/oracle/known_deviations.txt`), per-class KEEP/FIXABLE verdicts, reference values vs local, and why none should be "fixed". |
-| [precision.md](precision.md) | float vs double, where ULP is lost in the hot path, `pow` argument-reduction error, the only `float` (synchronous LUT), `-ffast-math` analysis, accuracy recommendations. |
+| [deviations.md](deviations.md) | Root-cause of the 31 oracle rows (views: `tests/oracle/known_deviations.txt`), per-class KEEP/FIXABLE verdicts, reference values vs local, and why none should be "fixed". Plus the **P102 prospective** precision-enhancement drift class (N=2→4 / float→double), not applied. |
+| [precision.md](precision.md) | float vs double, where ULP is lost in the hot path, `pow` argument-reduction error, the only `float` (synchronous LUT), measured N=2 vs N=4 vs exact-integral table, float→double ABI truth, `-ffast-math` analysis, accuracy recommendations + P102 ranked roadmap. |
 | [learning.md](learning.md) | The RawAccel model origins (InterAccel, Quake/Source heritage), log-space sigmoid rationale, cap theory, and the literature + sources for education. |
 
 ## One-line summary of findings
@@ -23,6 +23,12 @@
 - The two real accuracy ceilings are algorithmic, not precision:
   (1) synchronous GAIN LUT — 2-partition trapezoids + `float` storage;
   (2) nothing else — libm `pow/exp/log` are already 0.5–1 ULP on glibc.
+- (P102) The synchronous LUT N=2 error is sub-perceptual: worst 1.15% at the
+  sigmoid knee (5–15 ips), ≤0.074% above 100 ips; N=4 halves it. float→double
+  would save only ≤1 ULP. Neither is oracle-free (N=4 → 69 drift rows, double →
+  21 rows), so the recommendation is **D (no change)**; if ever wanted, only
+  Option A (N=4 on both local and ref, with an explicit "forked reference"
+  contract) is clean. See precision.md §7 and deviations.md §P102.
 
 ## Verification (current tree)
 
@@ -32,8 +38,11 @@ bash tests/oracle/run_oracle.sh   → 768 rows, 31 known, RESULT OK (rel 1e-9)
 
 ## Research agenda (open ideas, no commitments)
 
-1. Measure synchronous GAIN LUT accuracy (trapezoid vs exact integral) at 2 / 4
-   / 8 partitions; quantify vs `float32`/`float64` storage.
+1. ~~Measure synchronous GAIN LUT accuracy (trapezoid vs exact integral) at 2 / 4
+   / 8 partitions; quantify vs `float32`/`float64` storage.~~ **DONE (P102)**
+   → knee error 1.15% (N=2) / 0.58% (N=4), halved everywhere; float storage
+   ≤1 ULP; float→double is ABI-safe but not oracle-free. Ranked roadmap
+   (A/B/C/D → recommend D, later A) in precision.md §7.
 2. Compare glibc `pow` vs Intel/windows `pow` for the exact same formula —
    reproducibility across the Windows and Linux builds.
 3. Document the classic `exp≤1` linear path in the CLI help text so raw-API

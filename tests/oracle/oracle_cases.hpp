@@ -143,11 +143,36 @@ inline std::vector<Case> cases() {
     c.push_back(mkpow("power_gain_p1",  true,  1.0, 1.0));
     c.push_back(mkpow("power_legacy_p1",false, 1.0, 1.0));
 
+    // ── Regression sweep (P98): >100x gain-magnitude swing ──────────────────
+    // Stress the relative-tolerance comparator across many orders of magnitude.
+    // Custom speed lists EXCLUDE 0 on purpose: every power/synchronous row at
+    // speed 0 is a documented "s(0) identity" deviation, and these cases exist
+    // purely to hammer the inter-speed swing, so they must not add new rows.
+    auto mkswing = [&](const std::string& n, bool gain, double exp,
+                       double cx, double cy, int cm) {
+        Case x;
+        x.name = n; x.mode = "power"; x.gain = gain;
+        x.scale = 1; x.exponent_power = exp;
+        x.cap_x = cx; x.cap_y = cy; x.cap_mode = cm;
+        x.speeds = { 1e-5, 1e-4, 1e-3, 0.01, 0.1, 0.3, 0.5, 0.7, 0.75, 0.8,
+                     1, 3, 10, 100, 1000, 10000, 100000 };
+        return x;
+    };
+    // exp=5, cap out {30,1.5}: cap.x = gain_inverse(1.5,5,1) ≈ 0.758, so rows
+    // sweep 1e-25 → 1.5 (≈1.5e25 swing) and straddle the cap tail (0.75/0.8).
+    c.push_back(mkswing("swing_power_gain_exp5_cap",    true,  5.0, 30, 1.5, 2));
+    // exp=5, no cap (cap_y=0 → legacy_cap stays DBL_MAX): 1e-25 → 1e25 (1e50 swing).
+    c.push_back(mkswing("swing_power_legacy_exp5_nocap",false, 5.0, 0,  0,   2));
+    // exp=10, cap out {50,1.5}: cap.x ≈ 0.819, rows sweep 1e-50 → 1.5 (≈1.5e50 swing).
+    c.push_back(mkswing("swing_power_gain_exp10_cap",   true, 10.0, 50, 1.5, 2));
+
     // ── Game profiles (R29 oyuncu turu — P60/P61 oracle kapsamı) ──────────
     // MIRRORS the shipped `rawaccel-cli create-preset` game sets (cs2, valorant,
-    // apex, fps) with EXACT parameter values, so the differential oracle
-    // validates precisely what P60 ships. If a preset changes or a new preset
-    // is added, mirror it here and in run_oracle.
+    // apex, fps) AND the general sets (gaming, office, precision, disable) with
+    // EXACT parameter values from include/presets.hpp (single source of truth
+    // shared by CLI create-preset and the GUI preset dropdown), so the
+    // differential oracle validates precisely what P60 ships. If a preset
+    // changes or a new preset is added, mirror it here and in run_oracle.
     {
         Case x; // cs2
         x.name = "game_cs2_classic"; x.mode = "classic"; x.gain = true;
@@ -179,6 +204,36 @@ inline std::vector<Case> cases() {
         x.acceleration = 0.005; x.exponent_classic = 2.0; x.limit = 1.8;
         x.input_offset = 0.01; x.cap_x = 20; x.cap_y = 1.8; x.cap_mode = 2;
         x.sync_speed = 5; x.speeds = S;
+        c.push_back(x);
+    }
+    {
+        Case x; // gaming (presets.hpp) — classic, default cap {15,1.5} out
+        x.name = "game_gaming_classic"; x.mode = "classic"; x.gain = true;
+        x.acceleration = 0.005; x.exponent_classic = 2.0; x.limit = 1.8;
+        x.input_offset = 0; x.cap_x = 15; x.cap_y = 1.5; x.cap_mode = 2;
+        x.sync_speed = 5; x.speeds = S;
+        c.push_back(x);
+    }
+    {
+        Case x; // office (presets.hpp) — natural, default cap {15,1.5} out
+        x.name = "game_office_natural"; x.mode = "natural"; x.gain = true;
+        x.limit = 1.3; x.decay_rate = 0.08; x.motivity = 1.2;
+        x.input_offset = 0; x.cap_x = 15; x.cap_y = 1.5; x.cap_mode = 2;
+        x.speeds = S;
+        c.push_back(x);
+    }
+    {
+        Case x; // precision (presets.hpp) — classic exp 1.5 (the only shipped
+        x.name = "game_precision_classic"; x.mode = "classic"; x.gain = true;
+        x.acceleration = 0.002; x.exponent_classic = 1.5; x.limit = 1.2;
+        x.input_offset = 0; x.cap_x = 15; x.cap_y = 1.5; x.cap_mode = 2;
+        x.sync_speed = 5; x.speeds = S;
+        c.push_back(x);
+    }
+    {
+        Case x; // disable (presets.hpp) — raw passthrough → noaccel, gain 1 everywhere
+        x.name = "game_disable_noaccel"; x.mode = "noaccel"; x.gain = true;
+        x.speeds = S;
         c.push_back(x);
     }
 

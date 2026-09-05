@@ -107,6 +107,7 @@ int main(int argc, char** argv) {
     long t0 = now_us();
     long end = t0 + duration * 1000000L;
     int pan_sign = 1;
+    long emit_time = t0; /* precision: next count's scheduled deadline */
     long next_click = t0 + 200000; /* first click 200 ms in */
 
     while (1) {
@@ -128,13 +129,26 @@ int main(int argc, char** argv) {
              * 800 DPI) and back, crossing the esport grid landmarks
              * 2000/3000/4000 ips (1600/2400/3200 cnt/s at 800 DPI) every
              * sweep. Slow end emits one count per tick, so the precision band
-             * (120–900 cnt/s) injects real micro-motion instead of idling. */
-            double ramp = ((now - t0) % 1000000L) / 1000000.0; /* 0..1 sawtooth */
-            double rate = 120.0 + (4000.0 - 120.0) * ramp;     /* cnt/s */
-            long tick_us = (long)(1000000.0 / rate);           /* 1-count tick */
-            if (tick_us < 250) tick_us = 250;                  /* floor, keep comfy */
-            emit_rel(fd, 1);
-            sleep_us(tick_us);
+             * (120–900 cnt/s) injects real micro-motion instead of idling.
+             *
+             * Deadline-driven (P101 fix): every count has a scheduled deadline
+             * emit_time, advanced by 1e6/rate(emit_time) so the injected count
+             * density tracks the intended sawtooth rate(t) = 120 + 3880·phase
+             * EXACTLY. If this loop wakes late (loaded VM, scheduler jitter) it
+             * catches up by emitting the counts whose deadlines have passed.
+             * The previous "emit 1, then sleep 1e6/rate" scheme under-delivered
+             * the high end (measured ~2400 cnt/s instead of 4000 under load)
+             * because per-iteration overhead stacked on every sleep. */
+            int burst = 0;
+            while (emit_time <= now) {
+                double phase = (double)((emit_time - t0) % 1000000L) / 1000000.0;
+                double rate  = 120.0 + 3880.0 * phase;   /* cnt/s at this deadline */
+                if (rate > 4000.0) rate = 4000.0;        /* clamp sawtooth top */
+                emit_rel(fd, 1);
+                emit_time += (long)(1000000.0 / rate);   /* next count deadline */
+                if (++burst > 16) break;                 /* safety bound per wake */
+            }
+            sleep_us(500);
         } else { /* mix */
             /* heavy flick burst then slow precise micro-moves */
             emit_rel(fd, 20);

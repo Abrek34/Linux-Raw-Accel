@@ -179,3 +179,33 @@ P90 ustlenildi ve tamamlandi (gui/ bolgesi). Kanit:
 [2] LATENCY ISTATISTIK: mevcut aday yapi dogrulandi - status_hbox icinde read-only latency_lbl + 'Performance' butonu; on_perf_clicked daemon_comm daemon_ipc_query("status") ile lat_samples/lat_avg_us/lat_p50/lat_p95/lat_p99/lat_max_us alani (daemon.cpp status_json 1304-1308 ile oredisilir); 'no samples' ve daemon-down yollari; non-blocking (1s soket timeout). Emir '(daemon_comm'den signal)' karsilandi.
 [3] DIL: yeni teller tr/en birlikte eklendi (tr.inl: Latency/preview token'lari mode,gain,exp,cap,scale,limit,no-accel,%s→%s). tr_coverage PASS.
 [4] KAPSAM DAR: yalniz gui/ statik; interaktif GUI kosumu yok. Kapilar: build 0 uyari, tr PASS, tests 21754/21754 EXIT=0 (P83 CLI kapisi Aj4 fix'i sonrasi yesil). Yeni ozellik limitsiz; AKIS P90 kilit null, durum tamam.
+
+### Aj.3 [M34] [05 Eyl 2026] - P97 TAMAMLANDI: DERIN TARAMA (GUI) — P90 DOGRULAMA + 2 FIX
+P97 ustlenildi. P90 degisiklikleri (preset onizleme + latency gorunumu) satir satir dogrulandi; tum gui/ dosyalari (widgets_sync/profile_mgr/devices/daemon_comm/graph/ui_builder/tr/main) derleme + TR kapsam + kod incelemesiyle tarandi. Sonuc: P90 kodu temiz; ayrica 2 gercek bug bulundu ve minimal fix'lendi (yalnizca gui/).
+
+=== P90 GUNCELLERI DOGRULAMASI ===
+- preset_preview_text() + notify::selected: null-widget yok (preset_info diyalog omruyle yasiyor), g_object refcount dogru (GtkDropDown modeli kendi ref'ini tutar; g_object_unref(sl) tek bizlik ref'i dusurur), idx 1..PRESET_COUNT siniri var. make_preset tek-kaynagi kullanir.
+- on_perf_clicked: latency_lbl build_ui'de butondan once kurulur (null riski yok). daemon_json_field: ayrac (=,}) siniri + strtod + isfinite; ilk eslesme semantigi cok-cihazli status'ta ilk cihazin degerini gosterir (CLI ile tutarli, belgeli). UI thread'i bloklamaz: daemon_ipc_send_raw 1s SO_RCVTIMEO/SO_SNDTIMEO tasir (daemon_comm.inl:122-124); en kotu durum ping+status ~2s sinirli.
+- tr.inl anahtar collison: YOK. Yeni kisa tokenlar (mode/gain/exp/limit/scale/cap/%s → %s/no acceleration... ) mevcut sozlukle cakisip yutulmuyor; tekrarli anahtar yok (script dogrulandi). Gecerli ust-bosluk kirilma dokunmadi.
+- tr_coverage: 171 benzersiz cagri / 193 dict anahtari — MISSING: none, Result: PASS. 22 orphan ONERI pre-existing dinamik girislerdir (makine, ax/y, LUT aciklamalari vb.).
+
+=== BULUNAN GERCEK BUGLAR + FIX'LER ===
+[D1] GUI baslangici active_profile'i yok sayiyordu — her acilista HER ZAMAN profiles[0]'i gosteriyor/duzenliyordu; config active_profile baska bir profili isaret ederken (orn. "cs2") kullanicinin Apply/Save yapmasi sessizce aktif profili profiles[0]'a kaydiriyordu (basi sonu tutarsiz: daemon active_profile'i uygularken GUI 0'inciyi gosteriyor). Fix: gui/main.cpp:158-169 (aktif profil adindan index cozumle) + gui/ui_builder.inl:86-91 (header-bar combo'su current_profile_idx ile secilir, notify::selected baglantisindan ONCE — yari kurulu UI'da callback tetiklemez). Kapak: atama oncesi aktif-ad eslesme yoksa 0.
+[D2] gui/daemon_comm.inl:280 battery token'i std::atoi ile cozulmustu — tasma (int disi) UB; dosyanin kendi felsefesi (ayni dosyada kwinrc icin strtol/strtod + errno sertlestirmesi, BUG-6/BUG-16) ile celisiyordu. Ayrica bos/yarim token atoi("")=0 → yanlis "Pil: %0 (Dusuk!)" cikiyordu. Fix: gui/daemon_comm.inl:278-288 — strtol + errno + tam-token (*e=='\0') + 0..100 aralik kapi; hatali token -1 kalir → "bilinmiyor".
+
+=== INCELEMEDE DOGRULANAN TEMIZLER (degisiklik YOK) ===
+- gtk_entry_get_text() hic kullanilmiyor (hep gtk_editable_get_text). gtk_drop_down_* sekmes/zincir kullanimi dogru; model degisimlerinde secim geri yukleniyor.
+- GCssProvider: gtk_style_context_add_provider_for_display() provider'i display omru boyunca ref'ler — on_activate icin css ve KDE warn_css leak DEGIL.
+- Read-before-init: tum combolar model doldurulup, sinyaller baglanmadan once secilir (profil/lang/mode/cap/dist/device); build_ui init'inde profile_to_widgets grafik/status dahil tum widget'lar kurulduktan sonra doner.
+- Dil degisimi: latency_lbl trlbl, perf_btn trbtn+trtip ile kayitli → refresh_language ikisini de gunceller; onizleme diyalogu gecici (her acilista tr() ile uretilir).
+- İsaret/tamir refcount: pkexec_systemctl_async/on_daemon_start/on_kde_open_settings `new pid_t` ↔ g_timeout lambda delete dengeli.
+- Derleyici uyarilari (-Wall -Wextra): 0 (olmeyen kod/yazi yok).
+
+=== KAPILAR (HEADLESS) ===
+- build: bash scripts/build.sh → 0 uyari / 0 hata (3 binary)
+- tr: bash tests/run_tr_coverage.sh → Result: PASS
+- test: bash tests/run_tests.sh → Sonuc: 21801/21801 gecti
+- oracle fuzz ASan dokunulmadi (gui/ haric kaynak degisikligi yok; davranis degisikligi core'da yok).
+
+=== HEADLESS SINIRLAMASI ===
+VM'de ekran yok: GUI acilis/render/event etkilesimi calistirilamadi — D1'in combo secim davranisi ve D2'nin IPC battery parse zinciri derleme + statik analizle dogrulandi; gercek ekranda dogrulama gerektiren tek onemli nokta: aktif profil seciminin gorunur vurgusu. Commit YAPILMADI (emir geregi). Dosyalar: gui/main.cpp, gui/ui_builder.inl, gui/daemon_comm.inl.

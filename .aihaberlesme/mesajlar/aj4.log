@@ -447,3 +447,83 @@ M29 kaydındaki kanıt sayıları yeniden ölçüldü ve netleştirildi:
 - `test_natural_extreme_high_speed` (7. bölüm olarak eklendi; "3 P91 bölümü" ifadesi güncellendi: 4 + 2 = 6 SECTION).
 - Yeniden doğrulama: run_tests **21754/21754**, ASan **21754/21754 temiz**, oracle 768 satır / 31 sapma DEĞİŞMEDİ (RESULT OK, 1e-9), oracle bilgilendirici **TOL 1e-14 → hâlâ 0 ek satır farklı** (ULP seviyesinde sapma yok), `scripts/build.sh` 0 warning.
 - Değişiklik yalnız `tests/test_accel.cpp`. Kilit 4 kaldırıldı (korunur).
+
+### Aj.4 [P98] [05 Eyl 2026] [22:55] — DERİN TARAMA: ORACLE + TEST ALTYAPI (Aj 1 görevi)
+
+Görev P98 (test/oracle uzmanı): oracle + test iskeleti "hava geçirmez" denetimi.
+Kapsam: tests/oracle/, tests/run_tests.sh, tests/run_tests_asan.sh, regression sweep, kapılar.
+
+## 1) ORACLE YEREL-VS-REFERANS DENETİMİ (local.cpp vs reference.cpp)
+
+- Ortak grid: iki taraf da `oracle_cases.hpp` `oracle::Case` yapısını birebir tüketiyor;
+  alan eşleme (build_args) 1:1 — cap_mode lokalde `cap_mode_val`, referansta `cap_mode`
+  (isim farkı port konvansiyonu; değer `k.cap_mode` int'ten aynı cast). cap_mode default
+  her iki accel_args'ta da `out` (2). LUT `length`+`data[]` doldurma sınırları aynı
+  (LUT_RAW_DATA_CAPACITY). Kopyala-yapıştır sapması YOK: 915 satırın 884'ü rel err 0 veya
+  <1e-12, 31'i yalnız belgeli sapma.
+- Parametre yapıları (ref/rawaccel-base.hpp vs include/rawaccel-base.hpp) default'larıyla
+  aynı: mode, gain=true, acceleration 0.005, exponent_power 0.05, cap {15,1.5}, cap_mode out.
+- Grid kapsam denetimi: default_speeds 0'dan 100000'e 24 hız (0, 0.001 … 100000) —
+  hız 0 (s(0) sınırı) ve derin düşük hız mevcut. DPI uçları oracle grid kavramı DEĞİL
+  (grid salt gain-vs-speed; DPI dönüşümü modifier/dpi_factor katmanında — birim testlerde
+  kapsanıyor). Eksik preset sınırları bulundu ve eklendi (aşağıda).
+- known_deviations.txt: 31 satırın HEPSİ gerçek sapmaya karşılık geliyor (otomatik
+  çapraz tarama: 31 mismatch = 31 belgeli ∩ 0 belgesiz ∩ 0 "belgeli ama sapmıyor").
+  En yakın belgesiz satır rel err 0.000e+00. TOL=1e-12'de de 0 ek sapma.
+- run_oracle.sh TOL iletimi: `TOL` env → argv[3] → float — doğru; çıkış kodu RESULT OK=0 /
+  DRIFT=1 + set uyumsuzluğu/malformed → 1 (doğrulandı).
+
+## 2) HARNESS BUG (bulundu + düzeltildi) — run_oracle.sh
+
+- **Bug-1 (oturumu gizleyen):** belgeli sapma artık SAPMAYINCA (fix düşerse) script yine
+  OK basıyor, yalnız sayı 31'den düşüyordu — belgesiz drift'i maskeleyebilir. DÜZELTİLDİ:
+  `stale = known - deviating` → boş değilse "ERROR: documented deviation(s) are NO LONGER
+  deviations" + exit 1 (does not report OK while doc lies). Negatif test: enjekte edilen
+  sahte satır RC=1 döndürdü (doğrulandı).
+- **Bug-2 (belge yazım hatası):** known_deviations.txt'te olmayan/silinmiş bir satır adı
+  (typo) fark edilmiyordu. EKLENDİ: grid'de üretilmeyen belgeli satır → "missing" + exit 1.
+  Negatif test RC=1 (doğrulandı).
+- **Bug-3 (kırılgan parser):** `<case>\t<spd>` bekleyen satır ayrıştırıcı, son satırda
+  sonundaki yeni satırın eksik olmasıyla birleşen satırı ayıklayamayıp ham traceback
+  düşürüyordu (CI'da maskelenebilir). Robus hale getirildi: satır-no, net hata + exit 1.
+- **Bug-4 (belge dosyası):** known_deviations.txt son satırda satır-sonu yeni satırı
+  YOKTU (wc -l 50) — append'in son kayıtla birleşmesine açık. Yeni satır sonu eklendi
+  (51 satır), içerik değişmedi.
+- **Bug-5 (run_tests.sh temizlik):** satır 66 `rm -f "$TMPCFG" "$TMPN255" "$TMPN256"` —
+  `TMPN255` hiç tanımlanmamış; 257-char temp dosya geride kalıyordu. `"$TMPN257"` olarak
+  düzeltildi. (Kapı etkisi yok; hijyen düzeltmesi.)
+
+## 3) SAYIM / ÇIKIŞ KODU (test_accel.cpp + run_tests.sh/asan)
+
+- Sayım invariantı: her EXPECT/EXPECT_NEAR `g_tests++` sonra tek dal
+  `g_passed++`/`g_failed++`; satır 729 manuel sayım da dengeli (g_tests++ + g_passed++).
+  → N/N'de off-by-one YOK (21801/21801).
+- Başarısızlık çıkış kodu: main yalnız `return g_failed ? 1 : 0;` (--list istisnası) —
+  tek bir FAIL çıkışı 1'e çevirir; `set -e`'li run_tests.sh hata verince durur.
+- ASan/UBSan `halt_on_error=1` + `abort_on_error=1`: bulgu → nonzero abort.
+
+## 4) REGRESSION SWEEP (yeni oracle case'leri — oracle_cases.hpp)
+
+- Eklendi: 3 swing case (power, `mkswing`, 0 HARİÇ özel hız listesi → yeni sapma ÜRETMEZ):
+  - swing_power_gain_exp5_cap        : 1e-25 → 1.5  (cap tail 0.75/0.8 straddle) ~1.5e25
+  - swing_power_legacy_exp5_nocap    : 1e-25 → 1e25  (1e50 swing, capız legacy)
+  - swing_power_gain_exp10_cap       : 1e-50 → 1.5  (~1.5e50 swing, cap.x≈0.819)
+  → 3'ü de TOL 1e-9 VE 1e-12'de RESULT OK (rel-tolerans karşılaştırıcısı 50 dekad
+  üzerinde tutuyor; harness hatası yok).
+- Eksik preset kapsamı eklendi (presets.hpp tek kaynak — cs2/valorant/apex/fps zaten
+  vardı): game_gaming_classic, game_office_natural, game_precision_classic (tek exp=1.5
+  preset!), game_disable_noaccel. HİÇBİRİ sapma eklemedi (31 belgeli sabit kaldı).
+- Grid: 768 → 915 satır (7 case = 4×24 + 3×17). Bilinen sapma seti DEĞİŞMEDİ (31).
+
+## 5) KAPILAR (P98 sonrası)
+
+- bash tests/oracle/run_oracle.sh → 915 satır, **31 documented = 31 seen, RESULT OK, RC=0**
+  (öncesi 768 satır / 31 sapma; eklemeler yeni sapma getirmedi).
+- bash tests/run_tests.sh --quiet → **21801/21801 geçti**, RC=0 (P83 CLI kapısı dahil).
+- bash tests/run_tests_asan.sh --quiet → **21801/21801**, ASan+UBSan temiz (leak/UB yok).
+- bash scripts/build.sh → **0 warning** (grep warning:/error: boş).
+- Negatif sınamalar: stale / missing / malformed belge satırı → her biri ERROR+RC=1.
+
+Değişen dosyalar: tests/oracle/oracle_cases.hpp (yeni case'ler), tests/oracle/run_oracle.sh
+(harness sertleştirme), tests/oracle/known_deviations.txt (yalnız son satır satır sonu),
+tests/run_tests.sh (temp temizlik). COMMIT YAPILMADI (görev şartı). Kilit yok.

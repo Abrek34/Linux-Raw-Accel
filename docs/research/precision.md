@@ -71,8 +71,88 @@ double r = ar * p / x;                                              // :166
 - `data[idx]` is read back as `double` for lerp (`:158-159`); a `double` LUT
   would remove the quantization term but **not** the trapezoid term, so it
   would buy almost nothing while increasing memory traffic on the hottest array.
-  Recommendation (optional, later): raise partitions to 4 and/or store `double`
-  — only if the GUI "Z"-smoothness at `smooth≈0` ever matters.
+
+### 2.3.1 Measured N=2 vs N=4 vs exact integral (P102, Aj 8)
+
+Reference params `sync_speed=5, smooth=0.5, motivity=1.5, gamma=1`, faithful
+`fill_lut` reproduction (cross-checked against the real header — bit-equal to all
+printed digits). "Exact" = 400k-point trapezoid of ∫ sigmoid over [0,x], i.e.
+the ideal average-sensitivity the LUT approximates. `flt-ULP` = the gain error
+expressed in float32 ULPs of the exact gain (float32 ULP at gain g = 2^(ilogb(g)−23)).
+
+| ips | N=2 err% | N=4 err% | N=2 flt-ULP | N=4 flt-ULP | N2/N4 |
+|-----|----------|----------|-------------|-------------|-------|
+| 0.5 | 4.5e-05  | 4.5e-05  | 5           | 5           | 1.0   |
+| 1   | 3.9e-04  | 1.7e-04  | 44          | 18          | 2.4   |
+| 3   | 1.2e-01  | 6.0e-02  | 1.4e4       | 6.8e3       | 2.0   |
+| 5   | 8.8e-01  | 4.4e-01  | 1.1e5       | 5.4e4       | 2.0   |
+| 7.5 | 1.15     | 0.58     | 1.7e5       | 8.6e4       | 2.0   |
+| 10  | 9.5e-01  | 4.8e-01  | 8.1e4       | 4.1e4       | 2.0   |
+| 15  | 5.9e-01  | 3.0e-01  | 5.9e4       | 3.0e4       | 2.0   |
+| 30  | 2.7e-01  | 1.3e-01  | 3.0e4       | 1.5e4       | 2.0   |
+| 50  | 1.5e-01  | 7.7e-02  | 1.8e4       | 9.1e3       | 2.0   |
+| 100 | 7.4e-02  | 3.7e-02  | 9.0e3       | 4.5e3       | 2.0   |
+| 250 | 2.9e-02  | 1.5e-02  | 3.6e3       | 1.8e3       | 2.0   |
+| 500 | 1.4e-02  | 7.2e-03  | 1.8e3       | 9.0e2       | 2.0   |
+| 1e3 | 7.1e-03  | 3.5e-03  | 8.9e2       | 4.5e2       | 2.0   |
+| 2e3 | 3.6e-03  | 1.8e-03  | 4.5e2       | 2.3e2       | 2.0   |
+| 4e3 | 1.8e-03  | 9.3e-04  | 2.3e2       | 1.2e2       | 1.9   |
+
+Readings:
+- **The greedy ruler is % error, not ULP.** Discretization error (trapezoid vs
+  exact) is a *bias*, not a rounding artefact: 10⁴–10⁵ float32 ULPs at the knee
+  correspond to only 0.9–1.15% relative gain error. Float32 storage itself
+  contributes ≤1 ULP (≤5.96e-8) per cell — invisible next to the trapezoid term.
+- **Worst N=2 error is ~1.15% and only in the 5–15 ips knee** (sigmoid steepest,
+  straddles `sync_speed`). Above ~250 ips (typical flick/track) it is <0.03%.
+- **N=4 halves the error everywhere** (N2/N4 ≈ 2.0), i.e. one less halving of the
+  `O(interval²)` trapezoid term. At 0.5 ips both are ~equal (5 ULP) because the
+  cell is already flat there.
+- Second-order nuance (measured, smooth=4/sync=0.05 test): when the operating
+  speed is *far* from `sync_speed`, N=2 and N=4 converge (the curve is flat and
+  the trapezoid is exact there); the halving is concentrated in the ips band near
+  `sync_speed`, which is exactly where a synchronous user points their cursor.
+
+### 2.3.2 float→double feasibility (P102) — what `data[514]` actually is
+
+`accel_args::data` (`rawaccel-base.hpp:59`, `mutable float data[514]`, same in
+the vendored ref `ref/rawaccel-base.hpp:65`) is consumed in three ways:
+
+1. **Lookup mode (user-edited LUT):** GUI LUT editor `lut_get_points` /
+   `lut_set_points` (`gui/graph.inl:307-343`) read/write `data[i]` directly and
+   serialize `lut_data` to config JSON, **but only when `mode == lookup`**
+   (`src/config.cpp:84`, gate `:84-90`, load `:124-150`). Lookup editor UI is
+   hidden for synchronous mode (`update_lut_visibility`, graph.inl).
+2. **Synchronous GAIN (internal LUT):** `fill_lut` overwrites `data` at
+   construction from the params; `gain_apply` reads `data[idx]` per event. This
+   is a *scratch buffer* — rebuilt on every `init_settings()` /
+   `accel_union::init()` (SIGHUP reload, IPC push), **never persisted** (the
+   `mode==lookup` gate above excludes it).
+3. **Oracle/tests:** `const float*` reads in both lookup and synchronous paths;
+   unit tests `memcpy` float arrays into `args.data`
+   (`tests/test_accel.cpp:388,412,424,603`); the vendored reference reads it as
+   `reinterpret_cast<const vec2<float>*>` (`ref/accel-lookup.hpp:57`).
+
+ABI verdict:
+- **There is no cross-process binary ABI.** All IPC is text JSON
+  (`app_config_to_json`), and the struct is never memcpy'd/serialized by size
+  across a boundary. `sizeof(accel_args)` growth (float 2056 B → double 4112 B)
+  would not break any daemon/GUI/CLI channel.
+- **There IS a source-level contract.** Every in-tree consumer assumes `float`
+  elements; changing to `double` touches `accel-synchronous.hpp`,
+  `accel-lookup.hpp`, `gui/graph.inl`, `src/config.cpp` (load casts to float),
+  the tests listed above, and the oracle's ref-side `vec2<float>` cast. It is a
+  mechanical ~7-file change, not a one-line edit.
+- **It would break the oracle even at N=2.** Local double-storage vs ref
+  float-storage makes LUT cells differ by up to 1 float ULP → applied gain
+  drifts up to 5.0e-8 relative (measured, 21/23 grid speeds > TOL 1e-9). Same
+  "drift-by-divergence" problem as N=4, at 50× smaller magnitude and ~zero
+  perceptible benefit (≤1 ULP is rounding noise, already invisible).
+- Config JSON: only lookup mode serializes `data`; a double array would dump
+  more digits for lookup users but loads back as float today (`:148`), so the
+  on-disk schema is unchanged. No version bump needed for the format — but the
+  round-trip quieting that `LUT_EPSILON=1e-5` was tuned around
+  (`rawaccel-base.hpp:66`) belongs to the float world; don't change it.
 
 ### 2.4 Construction-time solves (once per config load, not hot)
 - `accel-classic.hpp:76-77,82,119`: `pow(a, exp−1)` — same argument-reduction
@@ -164,8 +244,57 @@ No `sin/cos` in the hot path except GUI graph/rotation setup
    as `double` (`:138`, `rawaccel-base.hpp:59`). Both are internal to the GAIN
    LUT and are *not oracle rows* (the LUT content is computed, not compared
    row-by-row) — they change no documented deviation.
+   **P102 update:** (a) halves the error from 1.15% → 0.58% worst-case (knee) —
+   below the ~1% perceptual threshold even before the change; (b) removes only
+   ≤1 ULP of float noise. But neither is oracle-free: measured drift-vs-ref is
+   69 rows/23 speeds (N=4, up to 5.7e-3 rel) and 21 rows/23 speeds (double
+   storage, up to 5.0e-8 rel). Execute only with a coordinated plan (Options
+   A/C/D below; see deviations.md §P102).
 3. Keep `-ffast-math` off; document it in CMake for future contributors.
 4. If maximizer-level accuracy is ever needed for classic/power tails, the
    highest-leverage change is `pow(x,exp)·...` → `exp(exp·log(x))` with a
    compensated product — but measured benefit is ~1e-15 on a gain the mouse
    truncates to integers; not actionable today.
+
+## 7. P102 decision — ranked roadmap for the synchronous GAIN LUT
+
+Problem restated: the LUT uses 2-partition trapezoids (matches the vendored
+official reference exactly); going local-only to N=4 feeds 69 drift rows to the
+oracle; float→double is not oracle-free either (21 rows). This ranks the escape
+routes by risk ÷ benefit.
+
+| Option | Change | Oracle impact | UX gain | Risk | Verdict |
+|--------|--------|---------------|---------|------|---------|
+| **D. no change** | none | green (31 known devs) | none (current truth) | none | **Recommended today** |
+| **C. N=4 + documented deviation class** | local only, 2→4 | +69 known rows → ~100 total | knee err 1.15→0.58% | new deviation class to maintain; ref divergence grows over time; "what is the oracle verifying?" | viable, deferred |
+| **A. N=4 on BOTH local + ref** | 2→4 in both | green; but **ref is no longer verbatim** | knee err 1.15→0.58% | loses the "matches the official reference" property; next `git clone` refresh silently reverts ref→N=2 and re-drifts 69 rows | viable only with a stamped "forked reference" marker + refresh guard |
+| **B. keep N=2 + deviation rows** | none (list grows 31→~100) | green | none | deviation list balloons to ~100 rows with zero product benefit | worst option for zero gain |
+| float→double | (independent of N) | +21 rows (5e-8 each, ≈0 UX benefit) | ≤1 ULP, imperceptible | touches ~7 files + tests for nothing | **not worth it**; see §2.3.2 |
+
+Decision logic:
+1. **The error is sub-perceptual in every config.** Worst N=2 knee error 1.15%
+   (relative gain); above 100 ips it is ≤0.074%; the mouse truncates to integer
+   counts. Both N=2 and N=4 are far inside what a hand can resolve (sub-1% gain
+   deltas are not adjustable in the GUI — spinners step 0.01 in gain, 1 free);
+   the *shipped* Windows reference behaves exactly like N=2 today, so no user
+   can perceive a "fix".
+2. **Option D is therefore the honest recommendation:** no code change; document
+   the measured surface so a future need (GUI Z-smoothness at smooth≈0, or a
+   bug report requesting 1:1 parity with a hypothetical N=4 Windows build) has a
+   ready plan.
+3. **If/when a change is wanted, Option A is the cleanest** — but ONLY under a
+   coordinated, explicit decision that the oracle's contract changes from
+   "matches RawAccelOfficial/rawaccel" to "matches a precision-enhanced,
+   MIT-forked reference". That requires a visible stamp (header note + LICENSE
+   refresh caveat + CI guard that a `git clone` refresh fails loudly rather than
+   silently re-drifting). N=4 was measured to halve the knee error to 0.58% —
+   a genuine but imperceptible win.
+4. **float→double is a dead end** until Option A lands: it carries 21 rows of
+   drift for ≤1 ULP of benefit, and the moment local stores double, the oracle
+   cannot compare against a float-storing reference at all.
+5. **B is never worth it**: growing the known-deviations list by 69 rows to
+   document a change that produces zero perceivable difference.
+
+Recommended eventual action, if any: **A** (with a `ref` "fork stamp"), executed
+with `double`-storage folded in **only if** the ABI source-contract ramification
+is accepted at the same time. Until then, **D**.

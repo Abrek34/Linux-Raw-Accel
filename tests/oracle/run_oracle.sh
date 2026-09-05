@@ -61,11 +61,24 @@ if r.keys() != l.keys():
 
 worst = []   # (rel_err, name, spd, ref, loc)
 known = set()
-for line in open(known_file):
-    line = line.strip()
-    if line and not line.startswith("#"):
-        case, spd = line.split("\t")
-        known.add((case, spd))
+for lineno, raw in enumerate(open(known_file), 1):
+    line = raw.strip()
+    if not line or line.startswith("#"):
+        continue
+    fields = line.split("\t")
+    if len(fields) != 2:
+        print(f"ERROR: {known_file}:{lineno}: expected '<case>\\t<speed>', "
+              f"got {len(fields)} field(s): {line!r}")
+        sys.exit(1)
+    known.add((fields[0], fields[1]))
+
+if known - r.keys():  # a documented row that the grid never produces
+    missing_docs = sorted(known - r.keys())
+    print(f"ERROR: {len(missing_docs)} documented deviation(s) do not exist in the grid:")
+    for x in missing_docs[:20]: print("  missing  %s\t%s" % x)
+    print("  These rows are never generated; fix known_deviations.txt (typo/case/name")
+    print("  drift silently inflates the documented count and hides real drift).")
+    sys.exit(1)
 
 for (name, spd) in r:
     rv, lv = r[(name, spd)], l[(name, spd)]
@@ -77,11 +90,23 @@ for (name, spd) in r:
 unknown = [w for w in worst if not w[-1]]
 known_cnt = sum(1 for w in worst if w[-1])
 
+deviating = {(w[1], w[2]) for w in worst}
+stale = sorted(known - deviating)
+
 print(f"total rows compared : {len(r)}")
-print(f"known deviations    : {known_cnt} (documented, see known_deviations.txt)")
+print(f"documented deviations: {len(known)} (known_deviations.txt)")
+print(f"known deviations seen: {known_cnt} (actually drifting beyond tolerance)")
+
+if stale:
+    print(f"ERROR: {len(stale)} documented deviation(s) are NO LONGER deviations:")
+    for x in stale[:20]: print("  stale  %s\t%s" % x)
+    print("  Update known_deviations.txt — a stale entry is masking a fix (or a")
+    print("  typo) and the run must not report OK while the doc lies.")
+    sys.exit(1)
+
 if not unknown:
     print(f"RESULT: OK — local port matches official reference (rel tol {tol:g}) "
-          f"on every row outside the documented deviations.")
+          f"on every row outside the documented deviations ({len(known)} rows).")
     sys.exit(0)
 
 unknown.sort(reverse=True)

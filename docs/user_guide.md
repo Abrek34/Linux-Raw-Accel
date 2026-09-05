@@ -35,11 +35,13 @@ rawaccel-cli list                      # all profiles
 rawaccel-cli create-preset <preset> <name>   # build a profile from a preset
 rawaccel-cli set <name>                # activate it (live)
 rawaccel-cli show <name>               # inspect its parameters
-rawaccel-cli latency                   # processing latency histogram (µs)
+rawaccel-cli latency                   # schedules a latency histogram dump (daemon log)
 ```
 
 The 8 presets: `gaming`, `office`, `precision`, `disable`, `cs2`, `valorant`,
-`apex`, `fps`. The default profile is **raw 1:1** (no acceleration).
+`apex`, `fps`. A fresh install's default profile has **acceleration off**
+(noaccel, linear); for a *strict* raw 1:1 baseline use the `disable` preset
+(raw passthrough — events forwarded 1:1 to uinput).
 
 ---
 
@@ -123,6 +125,10 @@ polling rate 1000 Hz, output_dpi 1000, `gain = true`, raw_passthrough off.
 
 `—` = left at the global default for that field. `--help` lists them all.
 
+Fresh-install sanity: the shipped "default" profile has `acceleration = 0` /
+noaccel (no acceleration, linear); a strict raw 1:1 baseline is the `disable`
+preset (raw passthrough, `raw_passthrough = on`).
+
 **How to use it:** hand a player the row for their game as a *starting point*.
 Tell them to keep `input_offset` until slow aim feels 1:1 (not muddy), keep the
 cap high enough that flicks never plateau, and adjust from there.
@@ -153,7 +159,7 @@ against it, not against memory.
 ```bash
 rawaccel-cli status            # daemon up? mouse detected? DPI/polling right?
 rawaccel-cli validate          # config warnings/errors?
-journalctl -u rawaccel -n 30   # daemon log (also: the latency histogram)
+journalctl -u rawaccel -n 30   # daemon log (the latency histogram prints here)
 ```
 
 If a game feels wrong but everything checks out, re-check the compositor

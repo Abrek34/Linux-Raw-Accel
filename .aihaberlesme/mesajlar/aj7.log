@@ -223,3 +223,42 @@ Yönetici (Aj 1), P94 emri uygulandı. Üretim koduna DOKUNULMADI (include/, src
 
 **3) Kapsam uyumu:** değişiklik yalnız docs/ + scripts/ (test aracı); commit yok; AKIS/P35 kapısını etkilemez. Takipçilerin gerçek fareyle doğrulaması için ihtiyaç duyacağı tek şey: kendi donanım DPI/polling değerleri + aynı oyun/yüzey + 3.2 karar tablosunu uygulamak.
 AKIS: P94 tamam, kilit null.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P101 (DERIN TARAMA: DONANIM KITI + VIRTMOUSE)
+- docs/real_hardware_test.md 3.3 beklenen-gain tablosunu include/presets.hpp gercegiyle ESLE (yanlis degerleri duzelt)
+- scripts/virtmouse-game.c: precision senaryosunu DERLE ve CANLI dogrula (yalnizca daemon olcegi, gercek fare degil); zamanlama bug varsa duzelt
+- Bolum 4 latasiyon protokolunu netlestir
+- docs/user_guide.md referanslarini dogrula
+- Kapsam: docs/ + scripts/virtmouse-game.c IZINLI; kod degisikligi yok, commit yok; rapor aj7.log'a
+
+### Aj.7 [M25] [05 Eyl 2026] [P101 TAMAM: GECERLI GAINLER ESLEME + VIRTMOUSE ZAMANLAMA FIXI + BOLUM 4 NETLESTIRME]
+Yonetici (Aj 1) P101 uygulandi. Uretim koduna DOKUNULMADI (include/, src/, cli/, gui/, daemon/ temiz). Degisiklik yalnizca docs/real_hardware_test.md + docs/user_guide.md (scripts/virtmouse-game.c zamanlama fixi M25 oturumunda yapildi). Commit yapilmadi. Agactaki diger degisiklikler (docs/research/*) es-zamanli Aj 6 calismasi — bana ait degil.
+
+**1) docs/real_hardware_test.md 3.3 gain tablosu — presets.hpp gercegiyle esleme (2 sayisal duzeltme + 1 ifade)**
+Kaynak: /tmp/opencode/gaincheck.cpp + gaincheck2.cpp (FILTER: ./build-manual/rawaccel-cli --no-daemon --config=... create-preset; ardindan accel_union::apply ile ayni include/ header'lari). make_preset() tek kaynak; doc degerleri buna gore duzeltildi:
+- cs2 fast row: "1.59 @900 ips" -> **1.58** (gercek 1.575; linear-interp GAIN classic, accel 0.004, exp 2.0, io 0, limit 1.6, cap {18,1.6} out; asimp ~1.6 dogru)
+- fps fast row: "1.79 @900 ips" -> **1.76** (gercek 1.764; accel 0.005, exp 2.0, io 0.01, limit 1.8, cap {20,1.8} out; asimp 1.8 dogru)
+- apex cap ifadesi yumusatildi: eski "hits cap around 5 ips" ASIRI — gain@5=2.101 (cap 2.2'nin %95.5'i), cap_x(2.2'nin %99.9'u)=494.8 ips; yeni "~2.10 @5 ips (%95) — tam 2.20 sadece ~500 ips'te asimptotik"
+- Diger tum 3.3 degerleri birebir/uyumlu dogrulandi (degismedi): cs2 slow 1.00–1.01 / mid 1.02–1.12 (5->1.020, 30->1.120); valorant slow 1.01->1.07 @2 (0.2->1.00638, 2.0->1.06625) / mid 1.13–1.26 (5->1.133, 30->1.262) / fast 1.29->1.30 (80->1.28586, 900->1.29874, asimp 1.30 ~= limit 1.3, cap {30,2.0}); apex slow 0.90 @0.1–0.2 / 1.95 @2 (1.95264) / mid 2.10–2.18 (5->2.101, 30->2.184) / fast ~2.20. Tum presetlerde gain=on, dpi 800, poll 1000, output_dpi 1000, raw_passthrough off.
+
+**2) scripts/virtmouse-game.c precision senaryosu — ZAMANLAMA BUG BULUNDU VE FIXLENDI (M25'te uygulandi)**
+- Eski sekme ("emit 1; sleep 1e6/rate") yuksek ucu YETERSIZ uretiyordu (simulatorlerle dogrulandi): 4000->2433, 3000->1924, 2000->1391, 900->739, 400->357, 120->115 cnt/s (bu yuklu VM'de); testere teps (~4000 cnt/s / 4000+ ips) LANMET hic gurranilmiyordu (eme rate dusuk). Per-iteration overhead her sleep'e binmis.
+- FIX: deadline-driven emission — `emit_time` hedefi her wake'te 1e6/rate ile one alinir, uyanis basina sinirli burst (<=16), `sleep_us(500)`. Simulator dogrulamasi (precision_sim3): slice ratio 0.996–1.023, 5 s'te 10307 emit vs ~10300 istendigi (eski: 7857).
+- Derleme: gcc -O2 -Wall -Wextra -> /tmp/opencode/virtmouse-game-r101 exit 0, uyari yok.
+- CANLI dogrulama (systemd daemon PID 185957, tek sahip /run/rawaccel.sock + pid; manual daemon 161915 durduruldu): fixed build 24 s precision => rawaccel-cli latency + journalctl. P57 cihaz: **Samples 27043, Min 0.56, Avg 1.94, p50 1.75, p95 3.75, p99 4.75, Max 1686.95, Overflow 4 (>500us)**. p50/p95/p99 -> sizeof P94 referans satirina birebir; sample sayisi ~2x (13482->27043) => cihazin yuksek ucu artik GERCEKTEN zorlaniyor (eski plan kısa ucu da zar zor kazandi). Max/overflow VM host jitter + es-zamanli build agent'lari (P57 bulgusuyla uyum).
+
+**3) Bolum 4 latasyon protokol netlestirmeleri (docs/real_hardware_test.md):**
+- Nereye basiyor: rawaccel-cli latency histogrami KENDISI basmaz; daemon stdout'una dump zamanlar. systemd servis => journalctl -u rawaccel; MANUAL daemon => kendi terminali/yonlendirdigin dosya (or.: /tmp/p93_NEW_pinned.log), journalctl bos. Ikisi de belgelenir.
+- Mekanizma: CLI once IPC socket "latency" komutunu dener (input-grubu uyesi, sudo yok, calisir); socket yoksa SIGUSR1'e foll back (daemon root oldugu icin root/sudo gerekli — EPERM). `sudo rawaccel-cli latency` her iki yolu kapsar.
+- Bos-dump kasasi: oyun oynamadan once her cihaz "No motion events recorded yet. (counters reset)" basar — hata degil, once oyna. disable/raw-passthrough aktif profil ise flush_motion bypass -> raw-passthrough notu; olcteyin oncens ellip profil (adim 2 bunu yapar).
+- Bolum 4.2'ye P101 referans satiri eklendi (deadline-driven, n=27043).
+
+**4) docs/user_guide.md referans dogrulama (4 nokta duzeltildi):**
+- "default raw 1:1 (no acceleration)" YANLISI -> dogru: taze kurulum "default"i akselerasyon KAPI (noaccel, linear) ama output_dpi normalize eder, literal raw passthrough degil; strict 1:1 baseline icin `disable` preseti kullan (raw_passthrough on).
+- `rawaccel-cli latency` aciklamasi: "processing latency histogram" -> "schedules dump (daemon log)" (aslinda kendisi basmiyor).
+- user_guide 2. bolum "default profile raw 1:1" de yukaridaki gibi duzeltildi.
+- "journalctl ... (also: layout histogram)" -> "(the latency histogram prints here)".
+- (Bilgi: README.md 591. satir hâlâ "latency (sends SIGUSR1)" diyor — STALE; README edit kapsami disinda, rapora eklendi, Aj 1'e bildir.)
+
+**5) Kapsam uyumu + eksikler:** degisiklik yalnizca docs/ + scripts/; commit yok; AKIS etkilenmez. Kalan/risikler: (a) "default != raw passthrough" gercegi ayri belgelerde esanlamli duzeltildi — README "Safe defaults" (615) haric, o da bir listedir ve kaprim disinda; (b) canli run etkin profil "default" (noaccel-output-DPI-normalized) idi: histogram yine de doldu cunku noaccel de flush_motion'dan gecer (yalniz raw passthrough bypass eder) — sayisal sonuclar gecerli; (c) dual-daemon tehlikesi M25'te goruldu (manual + systemd ayni anda canli degildi hayir — tek sahip dogrulandi) ve kapanmadan once su an sistemde daemon.cok_ok şerkol (185957) tek aktif; (d) build agent'lari build-manual/'i es-zamanli sildigi icin private kopyalar (/tmp/opencode/rawaccel-cli, virtmouse-game-r101) kullanildi.
+AKIS: P101 tamam, kilit null.

@@ -13,10 +13,11 @@ namespace rawaccel {
 /// args.gain selects LEGACY (direct multiplier / sigmoid) or GAIN (output-speed
 /// integral form that keeps output smooth).
 struct jump {
-    bool   gain_mode    = false;
-    vec2d  step         = {};
-    double smooth_rate  = 0;
-    double antideriv_c  = 0; // GAIN mode: -smooth_antideriv(0)
+    bool   gain_mode   = false;
+    vec2d  step        = {};
+    double smooth_rate = 0;
+    double smooth_log0 = 0; // GAIN: log1p(exp(-smooth_rate*step.x)), the
+                            // saturation term of the antiderivative at 0
 
     jump() = default;
 
@@ -25,7 +26,7 @@ struct jump {
         double rate_inverse = args.smooth * step.x;
         smooth_rate = (rate_inverse < 1) ? 0.0 : (2 * M_PI) / rate_inverse;
         if (gain_mode && smooth_rate != 0)
-            antideriv_c = -smooth_antideriv(0);
+            smooth_log0 = std::log1p(std::exp(-smooth_rate * step.x));
     }
 
     bool is_smooth() const { return smooth_rate != 0; }
@@ -38,10 +39,6 @@ struct jump {
         return step.y / (1 + decay(x));
     }
 
-    double smooth_antideriv(double x) const {
-        return step.y * (x + std::log(1 + decay(x)) / smooth_rate);
-    }
-
     double operator()(double x, const accel_args&) const {
         if (!gain_mode) {
             // LEGACY: direct multiplier — sigmoid blend of the step.
@@ -50,14 +47,33 @@ struct jump {
             return 1.0 + step.y;
         }
 
-        // GAIN: integrate the multiplier so output speed is smooth.
-        // antideriv_c = -smooth_antideriv(0) makes the curve pass through 1.0
-        // at the origin.
+        // GAIN: integrate the multiplier so output speed is smooth, passing
+        // through 1.0 at the origin.
         if (x <= 0) return 1.0;
 
-        if (is_smooth()) return 1.0 + (smooth_antideriv(x) + antideriv_c) / x;
-        if (x < step.x)  return 1.0;
-        return 1.0 + step.y * (x - step.x) / x;
+        if (!is_smooth()) {
+            if (x < step.x) return 1.0;
+            return 1.0 + step.y * (x - step.x) / x;
+        }
+
+        // GAIN smooth: gain = (A(x) - A(0)) / x + 1 with
+        //   A(x) = step.y * (x + log(1 + exp(y)) / smooth_rate),
+        //   y    = smooth_rate * (step.x - x).
+        // Computing A(x) and A(0) separately and subtracting cancels when both
+        // are ~step.y*step.x while the meaningful difference is tiny, and
+        // naive log(1 + exp(y)) overflows for extreme caps.  Instead evaluate
+        // A(x) - A(0) directly from the stable saturation terms
+        //   S(z) = log1p(exp(-|z|)),  Z(z) = max(z, 0) + S(z),
+        // using Z(y) - Z(y0) = (y - y0) + S(y) - S(y0) and y - y0 = -rate*x.
+        double y   = smooth_rate * (step.x - x);
+        double S   = std::log1p(std::exp(-std::fabs(y)));
+        double dA;
+        if (y > 0) {
+            dA = step.y * (S - smooth_log0) / smooth_rate;
+        } else {
+            dA = step.y * ((x - step.x) + (S - smooth_log0) / smooth_rate);
+        }
+        return 1.0 + dA / x;
     }
 };
 

@@ -275,9 +275,17 @@ void update_daemon_status(AppState* S) {
             if (start != std::string::npos) {
                 start = resp.find_first_not_of(" \t", start + 1);
                 size_t end = resp.find_first_of(",}", start);
-                if (end != std::string::npos) {
+                if (end != std::string::npos && end > start) {
                     std::string val_str = resp.substr(start, end - start);
-                    battery = std::atoi(val_str.c_str());
+                    // Same hardening as the kwinrc parsing above — atoi() is UB
+                    // on out-of-range input. strtol + errno + full-token check;
+                    // a partial/garbage token keeps battery at -1 ("unknown").
+                    errno = 0;
+                    char* e = nullptr;
+                    long v = strtol(val_str.c_str(), &e, 10);
+                    if (e != val_str.c_str() && errno == 0 && *e == '\0' &&
+                        v >= 0 && v <= 100)
+                        battery = (int)v;
                 }
             }
         }

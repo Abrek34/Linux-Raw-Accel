@@ -50,12 +50,15 @@ sudo bash setup.sh
 systemctl status rawaccel
 # expect: active (running)
 
-# 3. Default profile is raw 1:1 (raw passthrough, no acceleration)
+# 3. Note the default / active profile — a fresh install's "default" is a
+#    noaccel (linear, no acceleration) profile; it is NOT raw passthrough.
 rawaccel-cli list          # note the default / active profile
 rawaccel-cli status        # confirm daemon sees your real mouse (DPI/polling)
 
-# 4. Confirm your mouse's actual DPI + polling rate and that the
-#    default profile uses raw 1:1 (raw_passthrough, noaccel).
+# 4. Confirm your mouse's actual DPI + polling rate and that the *baseline*
+#    we use below is strict raw 1:1 (the `disable` preset IS raw passthrough —
+#    events forwarded 1:1). The fresh `default` profile is noaccel but still
+#    runs output_DPI normalization, so it is linear, not literally passthrough.
 #    If DPI/polling shown by `status` differ from your mouse's real numbers,
 #    correct them — ips math is only accurate when they are right.
 ```
@@ -178,10 +181,10 @@ Common to all game presets: `gain = true`, DPI 800, polling 1000 Hz,
 
 | Preset | mode | tuned params (presets.hpp) | Slow register (micro-aim / gentle micro-adjust, ~0.2–2 ips) | Mid register (tracking, ~5–30 ips) | Fast register (flick / 180°, ≥80–900 ips) | Cap plateau check |
 |--------|------|----------------------------|--------------------------------------------------------------|------------------------------------|---------------------------------------------|-------------------|
-| `cs2` | classic | accel 0.004, exp 2.0, input_offset 0, limit 1.6, cap {18.0, 1.6} out | near 1:1 — gain 1.00–1.01 (micro-corrections do NOT accelerate) | gentle rise 1.02→1.12 | 1.32 @80 ips → 1.59 @900 ips (asymptote ~1.6) | no plateau before ~1.6; ends just under limit |
+| `cs2` | classic | accel 0.004, exp 2.0, input_offset 0, limit 1.6, cap {18.0, 1.6} out | near 1:1 — gain 1.00–1.01 (micro-corrections do NOT accelerate) | gentle rise 1.02→1.12 | 1.32 @80 ips → 1.58 @900 ips (asymptote ~1.6) | no plateau before ~1.6; ends just under limit |
 | `valorant` | natural | limit 1.3, decay 0.08, motivity 1.2, input_offset 0.02, cap {30.0, 2.0} out | 1.01 → 1.07 @2 ips (soft entry) | smooth 1.13→1.26 | 1.29 @80 → 1.30 (gently saturates at ~1.3) | very flat ceiling ~1.3 — cap 2.0 effectively unused |
-| `apex` | power | scale 2.2, exp_power 0.8, input_offset 0.02, output_offset 0.9, cap {28.0, 2.2} out | ~0.90 floor at the very slowest, → 1.95 @2 ips (fastest kick-in) | 2.10–2.18 | ~2.20 (reaches cap early, holds) | **early** plateau: hits cap around 5 ips — deliberate for 180° speed |
-| `fps` | classic | accel 0.005, exp 2.0, input_offset 0.01, limit 1.8, cap {20.0, 1.8} out | 1.00–1.01 | 1.02→1.15 | 1.40 @80 → 1.79 @900 ips (asymptote 1.8) | gentle climb to 1.8 — least aggressive plateau |
+| `apex` | power | scale 2.2, exp_power 0.8, input_offset 0.02, output_offset 0.9, cap {28.0, 2.2} out | ~0.90 floor at the very slowest, → 1.95 @2 ips (fastest kick-in) | 2.10–2.18 | ~2.20 (reaches cap early, holds) | **early** plateau: ~2.10 @5 ips (95% of cap) — full 2.20 only asymptotically (~500 ips); deliberate for 180° speed |
+| `fps` | classic | accel 0.005, exp 2.0, input_offset 0.01, limit 1.8, cap {20.0, 1.8} out | 1.00–1.01 | 1.02→1.15 | 1.40 @80 → 1.76 @900 ips (asymptote 1.8) | gentle climb to 1.8 — least aggressive plateau |
 
 **How to read a row while playing:**
 
@@ -270,7 +273,7 @@ rawaccel-cli set p71-<preset>
 # 3. Launch your game / aim trainer and play at real speed for ~30–60 s.
 #    The histogram only fills while motion events flow, so play, don't idle.
 
-# 4. Snapshot the live histogram (SIGUSR1 → snapshot_and_reset)
+# 4. Snapshot the live histogram (tries the IPC socket first, SIGUSR1 falls back)
 rawaccel-cli latency
 
 # 5. Read it — the dump lands in the daemon log
@@ -281,6 +284,28 @@ journalctl -u rawaccel -n 30
 #     Min / Avg / p50 / p95 / p99 / Max  (µs)
 #     Overflow : k samples > 500 µs
 ```
+
+**Where the numbers print.** `rawaccel-cli latency` does **not** print the
+histogram itself — it only *schedules* a dump that is printed from the daemon's
+own stdout. With the `setup.sh` install the daemon is a systemd service, so the
+dump lands in `journalctl -u rawaccel`. If you launched the daemon manually
+(`sudo ./build-manual/rawaccel-daemon …`), read the terminal it runs in (or the
+file you redirected its stdout to) — `journalctl` shows nothing in that case.
+
+**Mechanism (no sudo confusion).** The CLI first asks the daemon for a latency
+snapshot over its **IPC socket** (`/run/rawaccel.sock`); any `input`-group user
+can do this, no sudo needed. If the socket is unavailable (older daemon/stale
+socket), it falls back to **SIGUSR1** to the PID in the pid file — that signal
+path needs root because the daemon itself runs as root, so run
+`sudo rawaccel-cli latency` to cover both paths.
+
+**"No motion events recorded yet."** If you dump before moving the mouse, each
+device prints `No motion events recorded yet. (counters reset)` — that is
+expected; play first, then dump. Also note that the histogram only fills on
+*accelerated* motion: if your active profile is `disable`/raw passthrough,
+events bypass `flush_motion()` entirely and the dump shows a raw-passthrough
+note instead of samples — **activate the accelerated profile under test before
+measuring** (step 2 does this).
 
 Repeat **3× while playing** and take the middle value of each percentile (the
 daemon resets counters on every dump, so each run is independent).
@@ -308,6 +333,7 @@ daemon resets counters on every dump, so each run is independent).
 | P31 synthetic hot-path (VM, n=2454) | 33 | 86 | 266 | VM host jitter heavy; older tooling |
 | P57 / P64 / P73 live daemon, pan~4000 cnt/s (VM) | 1.75–2.25 | 2.75–3.75 | 3.75–5.25 | uinput virtual mouse, consistent across runs |
 | P94 precision ramp (VM, n=19487) | 1.75 | 3.25–3.75 | 4.75 | new `precision` scenario, reproducible |
+| P101 precision ramp, deadline-driven harness (VM, n=27043) | 1.75 | 3.75 | 4.75 | fixed timing; ~2× P94 sample count (high end now truly exercised) |
 
 Your real-hardware numbers should be **in the low single digits at p50/p95**,
 matching the P57/P64/P94 ballpark (VM jitter disappears on real hardware). A
@@ -328,7 +354,9 @@ rawaccel-cli latency
 
 Scenarios: `flick` (fast bursts), `pan` (sustained 4000 cnt/s), `mix`
 (flick + micro-moves), `precision` (P94: 1 s sawtooth 120→4000 cnt/s,
-≈150→5000 ips at 800 DPI, crossing the esport grid 2000/3000/4000 ips). Then
+≈150→5000 ips at 800 DPI, crossing the esport grid 2000/3000/4000 ips). The
+harness writes to `/dev/uinput`; `sudo` always works, and any `input`-group
+member can run it without (only one daemon may hold the grab). Then
 do the real-mouse version (Section 4.1) while gaming — the two together give
 you the full split: *daemon processing* vs *HID + game*. Compare the Max/tail
 between them: on real hardware the harness Max should largely vanish, which

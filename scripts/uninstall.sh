@@ -27,20 +27,27 @@ pkill -KILL -x rawaccel-daemon 2>/dev/null || true
 # Clean up PID/socket artefacts
 rm -f /run/rawaccel.pid /run/rawaccel.sock /tmp/rawaccel.pid /tmp/rawaccel.sock 2>/dev/null || true
 
-# Remove service file
+# Remove service file (R44: setup.sh installs to /usr/lib; /etc + /etc/user
+# are legacy shadow locations cleaned for completeness)
 echo "[2/4] Removing service file..."
+rm -f /usr/lib/systemd/system/rawaccel.service
 rm -f /etc/systemd/system/rawaccel.service
+rm -f /etc/systemd/user/rawaccel.service
 systemctl daemon-reload
 
-# Remove binaries
+# Remove binaries (setup.sh → /usr/local/bin; PKGBUILD → /usr/bin)
 echo "[3/4] Removing binaries..."
 rm -f /usr/local/bin/rawaccel-daemon
 rm -f /usr/local/bin/rawaccel-cli
 rm -f /usr/local/bin/rawaccel-gui
+rm -f /usr/bin/rawaccel-daemon
+rm -f /usr/bin/rawaccel-cli
+rm -f /usr/bin/rawaccel-gui
 
 # Remove system files
 echo "[4/4] Removing system files..."
 rm -f /etc/udev/rules.d/99-rawaccel.rules
+rm -f /usr/lib/udev/rules.d/99-rawaccel.rules
 rm -f /etc/modules-load.d/rawaccel.conf
 rm -f /usr/share/applications/rawaccel.desktop
 rm -f /usr/share/polkit-1/actions/org.rawaccel.policy

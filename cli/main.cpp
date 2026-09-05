@@ -1021,7 +1021,58 @@ static bool daemon_running() {
     return false;
 }
 
+static int cmd_status_json(const std::string& config_path) {
+    nlohmann::json out;
+    bool running = daemon_running();
+    out["daemon"] = running ? "running" : "stopped";
+    out["config"] = config_path;
+    out["profiles"] = nlohmann::json::array();
+    try {
+        auto cfg = load_config(config_path);
+        out["active_profile"] = cfg.active_profile;
+        for (auto& p : cfg.profiles) {
+            nlohmann::json po;
+            po["name"]      = p.name;
+            po["active"]    = (p.name == cfg.active_profile);
+            po["device_id"] = p.device_id;
+            po["dpi"]       = p.dev_cfg.dpi;
+            po["polling_rate"] = p.dev_cfg.polling_rate;
+            const char* mode_s = "noaccel";
+            if (p.prof.raw_passthrough) {
+                mode_s = "raw";
+            } else {
+                switch (p.prof.accel_x.mode) {
+                case accel_mode::classic:     mode_s = "classic";     break;
+                case accel_mode::power:       mode_s = "power";       break;
+                case accel_mode::natural:     mode_s = "natural";     break;
+                case accel_mode::jump:        mode_s = "jump";        break;
+                case accel_mode::synchronous: mode_s = "synchronous"; break;
+                case accel_mode::lookup:      mode_s = "lookup";      break;
+                default: break;
+                }
+            }
+            po["mode"] = mode_s;
+            out["profiles"].push_back(po);
+        }
+        if (running) {
+            try {
+                auto resp = daemon_ipc_query("status");
+                nlohmann::json j = nlohmann::json::parse(resp);
+                if (j.contains("devices") && j["devices"].is_array())
+                    out["devices"] = j["devices"];
+            } catch (const std::exception& e) {
+                out["device_error"] = e.what();
+            }
+        }
+    } catch (...) {
+        out["config_error"] = true;
+    }
+    std::cout << out.dump(2) << "\n";
+    return running ? 0 : 1;
+}
+
 static int cmd_status(const std::string& config_path) {
+    if (g_json) return cmd_status_json(config_path);
     bool running = daemon_running();
     std::cout << "Daemon:  " << (running ? "running" : "stopped") << "\n";
     try {
@@ -1164,6 +1215,7 @@ Options:
   -c, --config PATH             Config file path
   -h, --help                    Show this help
   -V, --version                 Show version
+  --json                        Emit machine-readable JSON for list/show/status
   -n, --no-daemon, --dry-run    Save config changes locally only — do NOT push
                                 them to the running daemon (default: live-apply)
 
@@ -1240,6 +1292,7 @@ Examples:
 
 int main(int argc, char* argv[]) {
     std::string config_path;
+    bool config_path_explicit = false;  // set when the user passed -c/--config at all
     std::vector<std::string> args;
 
     for (int i = 1; i < argc; i++) {
@@ -1251,6 +1304,7 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             config_path = argv[++i];
+            config_path_explicit = true;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_help();
             return 0;
@@ -1270,7 +1324,82 @@ int main(int argc, char* argv[]) {
 
     if (args.empty()) { print_help(); return 0; }
 
-    if (config_path.empty()) config_path = find_config_path();
+    // P99: an explicit `-c ""` used to be indistinguishable from "no -c given"
+    // and silently fell back to find_config_path() — mutating the real
+    // ~/.config/rawaccel/settings.json (or /etc) when the user fat-fingered an
+    // empty path.  An explicit empty path is a user error: reject it.
+    if (config_path_explicit && config_path.empty()) {
+        std::cerr << "Option '-c/--config' requires a non-empty path (empty string "
+                     "would silently edit the default config).\n";
+        return 1;
+    }
+
+    // Targeted arity errors (P99): every subcommand has a min/max argument count.
+    // Too few → "missing N argument(s)", too many → "takes at most N" — both exit
+    // 1 with a clear message instead of silently ignoring the extras (previously
+    // `rawaccel-cli create foo bar` created "foo" and dropped "bar").
+    struct arity_spec { const char* cmd; int min; int max; };
+    static constexpr arity_spec arities[] = {
+        { "show",          1, 1 },
+        { "set",           1, 1 },
+        { "create",        1, 1 },
+        { "delete",        1, 1 },
+        { "rename",        2, 2 },
+        { "duplicate",     2, 2 },
+        { "create-preset", 2, 2 },
+        { "set-param",     3, 3 },
+        { "import",        1, 1 },
+        { "export",        0, 1 },
+        { "list",          0, 0 },
+        { "validate",      0, 0 },
+        { "status",        0, 0 },
+        { "reload",        0, 0 },
+        { "stop",          0, 0 },
+        { "latency",       0, 0 },
+    };
+    int min_args = -1, max_args = -1;
+    for (auto& a : arities) {
+        if (a.cmd == args[0]) { min_args = a.min; max_args = a.max; break; }
+    }
+    if (min_args >= 0) {
+        // `args` includes the command word itself; the table counts positional
+        // arguments only (matching the usage lines in --help).
+        const int nargs = static_cast<int>(args.size()) - 1;
+        if (nargs < min_args) {
+            std::cerr << "Command '" << args[0] << "' is missing "
+                      << (min_args - nargs) << " argument(s).\n";
+            std::cerr << "Usage: rawaccel-cli " << args[0];
+            if      (args[0] == "show" || args[0] == "set" ||
+                     args[0] == "create" || args[0] == "delete")
+                std::cerr << " <profile>";
+            else if (args[0] == "rename")          std::cerr << " <old> <new>";
+            else if (args[0] == "duplicate")       std::cerr << " <src> <dst>";
+            else if (args[0] == "create-preset")   std::cerr << " <preset> <name>";
+            else if (args[0] == "set-param")       std::cerr << " <profile> <key> <value>";
+            else if (args[0] == "import")          std::cerr << " <file.json>";
+            else if (args[0] == "export")          std::cerr << " [profile]";
+            std::cerr << "\n";
+            return 1;
+        }
+        if (nargs > max_args) {
+            std::cerr << "Command '" << args[0] << "' takes at most " << max_args
+                      << " argument(s), but got " << nargs << ".\n";
+            std::cerr << "Usage: rawaccel-cli " << args[0];
+            if      (args[0] == "set-param")       std::cerr << " <profile> <key> <value>";
+            else if (args[0] == "rename")          std::cerr << " <old> <new>";
+            else if (args[0] == "duplicate")       std::cerr << " <src> <dst>";
+            else if (args[0] == "create-preset")   std::cerr << " <preset> <name>";
+            else if (args[0] == "import")          std::cerr << " <file.json>";
+            else if (args[0] == "export")          std::cerr << " [profile]";
+            else if (args[0] == "show" || args[0] == "set" ||
+                     args[0] == "create" || args[0] == "delete")
+                std::cerr << " <profile>";
+            std::cerr << "\n";
+            return 1;
+        }
+    }
+
+    if (!config_path_explicit && config_path.empty()) config_path = find_config_path();
 
     // Commands that don't need config loaded
     if (args[0] == "reload") return cmd_reload();
@@ -1329,37 +1458,24 @@ int main(int argc, char* argv[]) {
 
     const std::string& cmd = args[0];
 
-    // Targeted arity errors instead of silently falling through to
-    // "Unknown command: X" (which is misleading when the command exists but
-    // just needs more arguments).
-    int state = 0;
-    if      (cmd == "show" || cmd == "set"   || cmd == "create" || cmd == "delete")
-        state = 2 - static_cast<int>(args.size());
-    else if (cmd == "rename" || cmd == "duplicate" || cmd == "create-preset")
-        state = 3 - static_cast<int>(args.size());
-    else if (cmd == "import")
-        state = 2 - static_cast<int>(args.size());
-    else if (cmd == "set-param")
-        state = 4 - static_cast<int>(args.size());
-    if (state > 0) {
-        std::cerr << "Command '" << cmd << "' is missing " << state << " argument(s).\n";
-        std::cerr << "Usage: rawaccel-cli " << cmd;
-        if      (cmd == "show" || cmd == "set" || cmd == "create" || cmd == "delete")
-            std::cerr << " <profile>";
-        else if (cmd == "rename")          std::cerr << " <old> <new>";
-        else if (cmd == "duplicate")       std::cerr << " <src> <dst>";
-        else if (cmd == "create-preset")   std::cerr << " <preset> <name>";
-        else if (cmd == "set-param")       std::cerr << " <profile> <key> <value>";
-        else if (cmd == "import")          std::cerr << " <file.json>";
-        std::cerr << "\n";
-        return 1;
-    }
-
     if (cmd == "list") {
         if (g_json) return cmd_list_json(cfg);
         return cmd_list(cfg);
     }
-    if (cmd == "show")   return cmd_show(cfg, args[1]);
+    if (cmd == "show") {
+        if (g_json) {
+            // P99: --json is a global flag — honor it for show too, not just list.
+            for (auto& dp : cfg.profiles) {
+                if (dp.name == args[1]) {
+                    std::cout << profile_to_json(dp) << "\n";
+                    return 0;
+                }
+            }
+            std::cerr << "Profile not found: " << args[1] << "\n";
+            return 1;
+        }
+        return cmd_show(cfg, args[1]);
+    }
     if (cmd == "set")    return cmd_set(cfg, config_path, args[1]);
     if (cmd == "create") return cmd_create(cfg, config_path, args[1]);
     if (cmd == "delete") return cmd_delete(cfg, config_path, args[1]);

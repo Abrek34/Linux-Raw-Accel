@@ -83,7 +83,10 @@ void build_ui(AppState* S, GtkApplication* gapp) {
         for (auto& p : S->config.profiles)
             gtk_string_list_append(sl, p.name.c_str());
         S->profile_combo = gtk_drop_down_new(G_LIST_MODEL(sl), nullptr);
-        gtk_drop_down_set_selected(GTK_DROP_DOWN(S->profile_combo), 0);
+        // Select the persisted active profile (set before the notify::selected
+        // handler is connected so no callback fires on a half-built UI).
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(S->profile_combo),
+                                   (guint)S->current_profile_idx);
         g_signal_connect(S->profile_combo, "notify::selected",
                          G_CALLBACK(on_profile_changed), S);
         gtk_header_bar_pack_start(GTK_HEADER_BAR(hbar), S->profile_combo);

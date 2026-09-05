@@ -113,15 +113,18 @@ static accel_args accel_args_from_json(const json& j) {
     if (j.contains("smooth"))           a.smooth           = j["smooth"].get<double>();
     if (j.contains("cap")) {
         auto& cap = j["cap"];
-        // O3: silently use default on missing element or wrong type instead of throwing
+        // O3: silently use default on missing element or wrong type instead of throwing.
+        // Element type-guards (P99): a hand-edited `"cap": ["a","b"]` must degrade
+        // to the default instead of throwing type_error and bricking the whole config.
         if (cap.is_array() && cap.size() >= 2) {
-            a.cap.x = cap[0].get<double>();
-            a.cap.y = cap[1].get<double>();
+            if (cap[0].is_number()) a.cap.x = cap[0].get<double>();
+            if (cap[1].is_number()) a.cap.y = cap[1].get<double>();
         }
     }
     if (j.contains("cap_mode") && j["cap_mode"].is_string())
         a.cap_mode_val = str_to_cap(j["cap_mode"].get<std::string>());
-    if (j.contains("lut_data") && j.contains("lut_length") &&
+    if (j.contains("lut_data") && j["lut_data"].is_array() &&
+        j.contains("lut_length") &&
         a.mode == accel_mode::lookup) {
         // BUG-5: nlohmann::json::get<int>() invokes UB when the JSON value
         // doesn't fit in `int` (libFuzzer + UBSan caught this with payloads
@@ -193,40 +196,58 @@ static profile profile_from_json_obj(const json& j) {
         // the caller passes a previously-populated profile.
         p.name[MAX_NAME_LEN - 1] = '\0';
     }
-    if (j.contains("raw_passthrough")) p.raw_passthrough = j["raw_passthrough"].get<bool>();
+    // P99: type-guard the remaining scalar fields so a single wrong-typed
+    // value (hand-edit, future schema drift) degrades to the default instead
+    // of throwing type_error and making the entire config unloadable (which
+    // would also leave the daemon falling back to defaults).
+    if (j.contains("raw_passthrough") && j["raw_passthrough"].is_boolean())
+        p.raw_passthrough = j["raw_passthrough"].get<bool>();
     if (j.contains("domain_weights")) {
         auto& dw = j["domain_weights"];
         if (dw.is_array() && dw.size() >= 2) {
-            p.domain_weights.x = dw[0].get<double>();
-            p.domain_weights.y = dw[1].get<double>();
+            if (dw[0].is_number()) p.domain_weights.x = dw[0].get<double>();
+            if (dw[1].is_number()) p.domain_weights.y = dw[1].get<double>();
         }
     }
     if (j.contains("range_weights")) {
         auto& rw = j["range_weights"];
         if (rw.is_array() && rw.size() >= 2) {
-            p.range_weights.x = rw[0].get<double>();
-            p.range_weights.y = rw[1].get<double>();
+            if (rw[0].is_number()) p.range_weights.x = rw[0].get<double>();
+            if (rw[1].is_number()) p.range_weights.y = rw[1].get<double>();
         }
     }
     if (j.contains("accel_x")) p.accel_x = accel_args_from_json(j["accel_x"]);
     if (j.contains("accel_y")) p.accel_y = accel_args_from_json(j["accel_y"]);
-    if (j.contains("output_dpi"))         p.output_dpi         = j["output_dpi"].get<double>();
-    if (j.contains("yx_output_dpi_ratio")) p.yx_output_dpi_ratio = j["yx_output_dpi_ratio"].get<double>();
-    if (j.contains("degrees_rotation"))   p.degrees_rotation   = j["degrees_rotation"].get<double>();
-    if (j.contains("degrees_snap"))       p.degrees_snap       = j["degrees_snap"].get<double>();
-    if (j.contains("speed_min"))          p.speed_min          = j["speed_min"].get<double>();
-    if (j.contains("speed_max"))          p.speed_max          = j["speed_max"].get<double>();
-    if (j.contains("lr_output_dpi_ratio")) p.lr_output_dpi_ratio = j["lr_output_dpi_ratio"].get<double>();
-    if (j.contains("ud_output_dpi_ratio")) p.ud_output_dpi_ratio = j["ud_output_dpi_ratio"].get<double>();
+    if (j.contains("output_dpi") && j["output_dpi"].is_number())
+        p.output_dpi = j["output_dpi"].get<double>();
+    if (j.contains("yx_output_dpi_ratio") && j["yx_output_dpi_ratio"].is_number())
+        p.yx_output_dpi_ratio = j["yx_output_dpi_ratio"].get<double>();
+    if (j.contains("degrees_rotation") && j["degrees_rotation"].is_number())
+        p.degrees_rotation = j["degrees_rotation"].get<double>();
+    if (j.contains("degrees_snap") && j["degrees_snap"].is_number())
+        p.degrees_snap = j["degrees_snap"].get<double>();
+    if (j.contains("speed_min") && j["speed_min"].is_number())
+        p.speed_min = j["speed_min"].get<double>();
+    if (j.contains("speed_max") && j["speed_max"].is_number())
+        p.speed_max = j["speed_max"].get<double>();
+    if (j.contains("lr_output_dpi_ratio") && j["lr_output_dpi_ratio"].is_number())
+        p.lr_output_dpi_ratio = j["lr_output_dpi_ratio"].get<double>();
+    if (j.contains("ud_output_dpi_ratio") && j["ud_output_dpi_ratio"].is_number())
+        p.ud_output_dpi_ratio = j["ud_output_dpi_ratio"].get<double>();
 
     if (j.contains("speed_processor")) {
         auto& sp_j = j["speed_processor"];
         auto& sp   = p.speed_processor_args;
-        if (sp_j.contains("whole"))                       sp.whole                        = sp_j["whole"].get<bool>();
-        if (sp_j.contains("lp_norm"))                     sp.lp_norm                      = sp_j["lp_norm"].get<double>();
-        if (sp_j.contains("input_speed_smooth_halflife")) sp.input_speed_smooth_halflife  = sp_j["input_speed_smooth_halflife"].get<double>();
-        if (sp_j.contains("scale_smooth_halflife"))       sp.scale_smooth_halflife        = sp_j["scale_smooth_halflife"].get<double>();
-        if (sp_j.contains("output_speed_smooth_halflife")) sp.output_speed_smooth_halflife = sp_j["output_speed_smooth_halflife"].get<double>();
+        if (sp_j.contains("whole") && sp_j["whole"].is_boolean())
+            sp.whole = sp_j["whole"].get<bool>();
+        if (sp_j.contains("lp_norm") && sp_j["lp_norm"].is_number())
+            sp.lp_norm = sp_j["lp_norm"].get<double>();
+        if (sp_j.contains("input_speed_smooth_halflife") && sp_j["input_speed_smooth_halflife"].is_number())
+            sp.input_speed_smooth_halflife = sp_j["input_speed_smooth_halflife"].get<double>();
+        if (sp_j.contains("scale_smooth_halflife") && sp_j["scale_smooth_halflife"].is_number())
+            sp.scale_smooth_halflife = sp_j["scale_smooth_halflife"].get<double>();
+        if (sp_j.contains("output_speed_smooth_halflife") && sp_j["output_speed_smooth_halflife"].is_number())
+            sp.output_speed_smooth_halflife = sp_j["output_speed_smooth_halflife"].get<double>();
     }
 
     return p;

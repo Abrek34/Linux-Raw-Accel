@@ -152,3 +152,10 @@ NOT: --no-daemon OPSIYONEL — varsayilan davranis hala live-apply; `-c /tmp/...
 
 ### Aj.5 [M24] [05 Eyl 2026] [22:14 — GÖREV TALEBİ]
 Boştayım, görev bekliyorum. Öneriler: (1) P93 (Aj 6) sonrası bağımsız kesişim teyidi; (2) P82 "--no-daemon opsiyonel clobber" notu kararı/uygulaması; (3) P92 list --json onayı + smoke tablosu; (4) R29 yayın/senkron (commit+push) yönetici onayı ile üstlenebilirim. Kilit null.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - KANAL TEMIZLIGI: R29 + P93 kilitleri kapatildi (R43-R45 / Aj6 M24 raporlari; tum ajanlar bos)
+### YONETICI [Aj 1] [05 Eyl 2026] - DERIN TARAMA TURU EMIRLERI P96-P102 (kullanici: "programi derinlemesine tarayip dogruluk iyilestirmeleri, hata/buglari temizle")
+P96 aj2 (include/accel dogruluk), P97 aj3 (gui), P98 aj4 (oracle/tests), P99 aj5 (cli/src/config), P100 aj6 (daemon/kurulum), P101 aj7 (donanim/virtmouse), P102 aj8 (arastirma N=4/ULP). Bolge ayrimi net; her ajan yakindigi bolgede GERCEK bulgu bulursa MINIMAL fix + regression YETKILIDIR; genis tasarim kararlari yonetici onayi bekler.
+
+### Aj.5 [M25] [05 Eyl 2026] [22:56 — P99 TARAMA RAPORU (kilit Aj.5)]
+cli/src/config derin tarama bitti; commit YOK (bulgular onay bekliyor). En değerli: **F1** — isimsiz `export` tek geçerli JSON üretmiyor (per-profil bloğu; `jq .` ilk dokumanı okur, 2+ profil kayıp; `import backup.json` geri yükleyemez). FIX ÖNERİSİ: isimsiz export'u tek array'e çevir + import array desteklesin — yönetici onayı ile üstlenebilirim. F2/F3 (name asimetrisi zararsız; --json yalnızca list) not. Panel: build 0 uyarı, 21801/21801, ASan 21801/21801, oracle 768/31 OK, tr PASS. Detay aj5.log M25.

@@ -582,3 +582,78 @@ Yönetici (Aj 1), gözetimde yeni geliştirme round'u (P88-P95) ve önemli durum
 **AKIS eşitlemesi:** P88/P90/P92/P87 kayıtları eksikti → eklendi (84 görev). YAYIN READY öncesi son çekirdek **R44** (kurulum çakışması fix: setup.sh shadow + backup + pre_install).
 
 **AÇIK:** P93 (Aj6) · P95 (Aj2, karar: referans N=4 ayrı P mi — Aj1). Gözlüyorum. Kilit null.
+
+### Aj.0 [M50] [05 Eyl 2026] [22:44 — KANAL GÖZETİM: P96-P102 DERİN TARAMA TURU BAŞLADI]
+
+Yönetici (Aj 1), gözetimde: **DERİN TARAMA TURU** (kullanıcı: "programı derinlemesine tarayıp doğruluk iyileştirmeleri, hata/bugları temizle"):
+- **P96** → Aj2 include/accel doğruluk · **P97** → Aj3 gui · **P98** → Aj4 oracle/tests · **P99** → Aj5 cli/src/config · **P100** → Aj6 daemon/kurulum · **P101** → Aj7 donanım/virtmouse · **P102** → Aj8 araştırma N=4/ULP.
+- Yetki: minimal fix + regression YETKİLİ; geniş tasarım kararları yönetici onayı bekler. Bölge ayrımı net.
+- R29 + P93 kilitleri kapatıldı (R43-R45 commits, tüm ajanlar boş).
+
+**AKIS:** P96-P102 kayıtları eklendi (91 görev, tümü DEVAM, kilit null — bölge ayrımı net olduğu için çakışma artışı). P95 BLOKE (oracle parity, karar Aj1'de), P93 tamam.
+Son çekirdek **R45** (doğruluk/geliştirme turu). Gözlüyorum. Kilit null.
+
+### Aj.0 [M51] [05 Eyl 2026] [22:53 — KANAL GÖZETİM: P102 TAMAM — ARAŞTIRMA KAPANDI (D KARARI)]
+
+Yönetici (Aj 1), gözetimde: **P102 (Aj8, N=4/ULP araştırma) TAMAM (M13):**
+- N=2 LUT diskretizasyon hatası **BİAS** (ULP değil): diz bandında max ~%1.15, 100 ips üstü ≤%0.074 → **sub-perceptual** (fare integer-count çıktı, GUI gain adımı 0.01). float32 depolama ≤1 ULP → ihmal edilebilir.
+- Orákla etkisi: local N=2→4 = 69 drift satırı; local float→double = 21 satır (>TOL 50×) → ikisi de oracle-kırıcı. float→double ABI'sı IPC text-JSON (binary ABI YOK) ama SOURCE-kontrat 7+ dosyada float varsayar; disk şeması değişmez.
+- **ÖNERİ: bugün D (değişiklik yok).** İleride tek temiz yol A=local+ref İKİSİ de N=4 + "fork stamp" (ref "precision-enhanced MIT fork"a dönüşür; LICENSE/refresh guard şart).
+- Değişen: docs/research/precision.md §2.3.1/2.3.2/§6/§7, deviations.md §P102, index.md. Kod YOK.
+
+**AKIS:** P102 TAMAM (kilit null). Açık: P96 (Aj2) · P97 (Aj3) · P98 (Aj4) · P99 (Aj5, çalışıyor) · P100 (Aj6) · P101 (Aj7). Gözlüyorum. Kilit null.
+
+### Aj.0 [M52] [05 Eyl 2026] [22:55 — KANAL GÖZETİM: P97 TAMAM — GUI DERİN TARAMA 2 GERÇEK BUG BULDU]
+
+Yönetici (Aj 1), gözetimde: **P97 (Aj3, GUI derin tarama) TAMAM (M35):**
+- P90 (preset önizleme + latency) satır satır doğrulandı — TEMİZ.
+- **D1:** GUI başlangıcı `active_profile`'i yok sayıyor, her açılışta profiles[0] gösterip sessizce taşıyordu → fix gui/main.cpp:158-169 + ui_builder.inl:86-91 (active adından index, combo notify öncesi seçim).
+- **D2:** gui/daemon_comm.inl:280 battery token `atoi` ile — overflow UB + boş token "Pil: %0 (Düşük!)" → strtol + errno + tam-token + 0..100 aralık kapısı (dosya felsefesiyle uyumlu).
+- Kapılar: build 0 uyarı, tr PASS, 21801/21801. Dosyalar: gui/main.cpp + ui_builder.inl + daemon_comm.inl. Commit YOK.
+
+**AKIS:** P97 TAMAM. Açık: P96 (Aj2) · P98 (Aj4) · P99 (Aj5) · P100 (Aj6) · P101 (Aj7). Gözlüyorum. Kilit null.
+
+### Aj.0 [M53] [05 Eyl 2026] [22:56 — KANAL GÖZETİM: P98 TAMAM — ORACLE HARNESS 4 BUG DÜZELTTİ]
+
+Yönetici (Aj 1), gözetimde: **P98 (Aj4, oracle/tests derin tarama) TAMAM:**
+- Oracle local-vs-ref denetimi: 915 satırın 884'ü rel err 0/<1e-12; 31 belgeli sapma = 31 görülen (0 belgesiz, 0 fazla); TOL 1e-12'de de 0 ek sapma.
+- **4 harness bug fix:** Bug-1 belgeli sapma sapmaz olduğunda script yine OK basıyordu (stale tespiti eklendi, negatif test RC=1); Bug-2 silinen/typo belgeli satır fark edilmiyordu (missing + exit 1); Bug-3 satır ayrıştırıcı kırılgan (traceback yerine satır-no + net hata); Bug-4 known_deviations.txt son satırda yeni-satır yoktu.
+- Grid 768→915 satır: eksik preset kapsamı (game_gaming_classic, game_office_natural, game_precision_classic, game_disable_noaccel) — HİÇBİRİ sapma eklemedi.
+- Kapılar: oracle 915 satır RESULT OK RC=0 · 21801/21801 · ASan temiz · build 0 uyarı. Komit YOK.
+
+**AKIS:** P98 TAMAM. Açık: P96 (Aj2) · P99 (Aj5) · P100 (Aj6) · P101 (Aj7). Gözlüyorum. Kilit null.
+
+### Aj.0 [M54] [05 Eyl 2026] [22:57 — KANAL GÖZETİM: P99 TAMAM — CLI DERİN TARAMA F1 BULGUSU]
+
+Yönetici (Aj 1), gözetimde: **P99 (Aj5, cli/src/config derin tarama) TAMAM (M25):**
+- **F1 (değerli):** isimsiz `export` tek geçerli JSON üretmiyor — per-profil blok; `jq .` ilk profili okur, 2+ profil kayıp; `import backup.json` GERİ YÜKLEYEMEZ. Fix önerisi: isimsiz export'u tek array'e çevir + import array desteklesin — yönetici onayıyla üstlenebilir.
+- F2/F3 not (name asimetrisi zararsız; --json yalnızca list).
+- Kapılar: build 0 uyarı, 21801/21801, ASan 21801/21801, oracle 768/31 OK, tr PASS. Commit YOK.
+
+**AKIS:** P99 TAMAM (kilit düştü). Açık: P96 (Aj2) · P100 (Aj6) · P101 (Aj7). Gözlüyorum. Kilit null.
+
+### Aj.0 [M55] [05 Eyl 2026] [23:09 — KANAL GÖZETİM: P100 TAMAM + AKTİF ÇAKIŞMA UYARISI]
+
+Yönetici (Aj 1), gözetimde: **P100 (Aj6, daemon/kurulum derin tarama) TAMAM (M27):**
+- **Fix1:** daemon.cpp:222-231 detect_battery_level çift-fclose UB (her cihaz açılışında) → iç fclose kaldırıldı.
+- **Fix2:** scripts/uninstall.sh yalnızca eski yolları siliyordu → /usr/lib/systemd/system + /etc/systemd/user + /usr/bin binary'leri eklendi.
+- Journald 12s: 0 error; kaynak denetimi temiz (fd leak yok — SIGHUP 8x fd 10→10); canlı daemon 12dk sabit (PID 185957), p99 4.75µs.
+- **/etc vs ~/.config YİNE AYRI:** /etc (daemon'ın uyguladığı) mode=noaccel R34 "1:1 raw" CANLI; ~/.config (GUI/CLI gördüğü) power/2.78. Öneri: `cp /etc/... ~/.config/...` (veya tersi) — yönetici kararı.
+
+**⚠ ÇAKIŞMA/İŞ-BİRLİĞİ UYARISI (Aj8-KAYNAKLI):** run_tests_asan 24921/24922 — **1 BAŞARISIZ: P96-B**. Aj6'ya göre include/accel-jump.hpp + tests/test_accel.cpp bu oturumda başka ajanın (Aj8) in-flight P96 çalışmasıyla değişti ve `g>=0` guard'ını kırıyor: x≪step.x'te smooth_antideriv'de felaketli iptal (iki ≈5e8 değer çıkarımı → 1e-9'a bölüm), g≈1.001 FP sırasına bağlı (−13.9). Aj6 düzeltme önerisi sunmuş (yσx ayrık/kararlı hesap). **Karar: Aj8 soldurmalı — benim bölgem, rapor bekliyorum; Aj6 değişiklikleri bundan bağımsız.**
+
+**AKIS:** P100 TAMAM. Açık: **P96 (Aj2, include/accel)** · **P101 (Aj7, donanım)**. P96-B nedeniyle ASan kapısı şu an KIRMIZI — detay aj6.log M27. Gözlüyorum. Kilit null.
+
+### Aj.0 [M56] [05 Eyl 2026] [23:10 — DÜZELTME: P96-B SAHİPLİĞİ NETLEŞTİ]
+
+M55'teki "Aj8-kaynaklı" ibaresi için düzeltme: P96 resmi atama **Aj2 (include/accel doğruluk)** — admin emri bu yönde. Aj6 raporu "Aj8/başka ajan" dedi çünkü net değildi. Gerçek: accel-jump.hpp working-tree'de değişik (31+/15-), jokayı sürüyor; ancak aj2.log VE aj8.log'da şu an "P96" geçmiyor (ikisi de henüz üstlenme mesajı yazmamış). Yani in-flight değişikliğin sahibi kanıtlanamıyor — başıboş da olabilir. ASan kırmızısı gerçek ama kaynak belirsiz; yöneticinin Aj2/Aj8'den teyit isteyeceği bir konu. Doğrulama: bu durumu olduğu gibi raporladım; taraf olmuyorum. Kilit null.
+
+### Aj.0 [M57] [05 Eyl 2026] [23:12 — KANAL GÖZETİM: P101 TAMAM — DONANIM TARAMASI DOCS-ONLY]
+
+Yönetici (Aj 1), gözetimde: **P101 (Aj7, donanım/virtmouse derin tarama) TAMAM (M26):**
+- Üretim koduna DOKUNULMADI (include/src/cli/gui/daemon temiz); değişiklik yalnızca docs/real_hardware_test.md + docs/user_guide.md.
+- 4 belge düzeltmesi: (1) "default raw 1:1" YANLIŞ — taze kurulum default'u noaccel + output_dpi normalize (literral passthrough değil; strict 1:1 için `disable` preset); (2) `rawaccel-cli latency` kendi histogram basmaz — daemon log'a dump planlar; (3) user_guide bölüm 2 aynı düzeltme; (4) journalctl satırı düzeltildi.
+- **Bilgi:** README.md:591 hâlâ "latency (sends SIGUSR1)" diyor — **STALE** (Aj 1'e bildirildi; README kapsam dışı).
+- deadline-driven yöntem n=27043 kasa referans satırı eklendi.
+
+**AKIS:** P101 TAMAM. Kalan açık: **P96 (Aj2, include/accel)** — in-flight accel-jump değişikliği + ASan 24921/24922 P96-B kırmızısı, sahiplik belirsiz (aj2/aj8 ikisinde de üstlenme yazmıyor). Gözlüyorum. Kilit null.

@@ -150,3 +150,38 @@ Yönetici (Aj 1), M11 özetin tamamı; işte P88'in son kapsamlı çıktısı. K
 
 **Yöneticiye (Aj 1) doğruluk önerisi (deviation'lara dokunmadan):**
 1. (Asıl kazanç) synchronous GAIN LUT: trapezoid partition 2→4 (accel-synchronous.hpp:117) ve/veya LUT'u double'a çevir (:138, rawaccel-base.hpp:59) — oracle satırı DEĞİL (LUT içeriği karşılaştırılmıyor), hiçbir belgeli sapmayı değiştirmez. 2. classic/power base_fn'de ar·p/x → fma zincirine dönüşüm ≤1 ULP — kozmetik, ertelenebilir. 3. -ffast-math yasağını CMake'e dokümante et. Detaylar: docs/research/precision.md §4.1, §6; deviations.md sonuç bölümü.
+
+### Aj.8 [M13] [05 Eyl 2026] - P102 DERİN ARAŞTIRMA: N=4 + ULP SEVİYESİ (karar + yol haritası)
+
+Yönetici (Aj 1), P102'yi üstlendim. Kod değişikliği YOK (yalnız docs/ + kanal), commit YOK. Simülasyonlar /tmp/opencode/p102/'de (geçici, repo dışı). Hedef: N=2 vs N=4 trapezoid LUT hatalarını SAYILMAK, oracle etkisini ölçmek, float→double ABI gerçeğini doğrulamak, A/B/C/D yol haritası + tavsiye.
+
+**1) N=2 vs N=4 vs exact integral (gerçek header ile birebir doğrulandı, sync=5/smooth=0.5/mot=1.5/gamma=1):**
+| ips | N2 err% | N4 err% | N2 flt-ULP | N4 flt-ULP | N2/N4 |
+|-----|---------|---------|------------|------------|-------|
+| 0.5 | 4.5e-05 | 4.5e-05 | 5 | 5 | 1.0 |
+| 3 | 1.2e-01 | 6.0e-02 | 1.4e4 | 6.8e3 | 2.0 |
+| 7.5 | **1.15** | 0.58 | 1.7e5 | 8.6e4 | 2.0 |
+| 100 | 7.4e-02 | 3.7e-02 | 9.0e3 | 4.5e3 | 2.0 |
+| 1000 | 7.1e-03 | 3.5e-03 | 8.9e2 | 4.5e2 | 2.0 |
+| 4000 | 1.8e-03 | 9.3e-04 | 2.3e2 | 1.2e2 | 1.9 |
+
+OKUMA: Diskretizasyon hatası BİAS'tır, ULP değil; en kötü N=2 hatası sigmoid dizinde (5–15 ips) ~%1.15, 100 ips üstü ≤%0.074 → **sub-perceptual** (fare integer-count çıktı, GUI gain spinner adımı 0.01). N=4 her yerde yarıya indirir (~2.0). float32 depolama ≤1 ULP (~5.96e-8) → ihmal edilebilir.
+
+**2) Oracle etkisi (referans N=2+float tutulursa):**
+- Yalnız local N=2→4: 3 sync GAIN case (p2/p1/p07 aynı parametre) × 23/24 hız = **69 drift satırı** (diz bölgesi 3–50 ips'de rel 2.9e-4…5.7e-3; yüksek hızda sönüyor). Sapma listesi 31→100 olur.
+- Yalnız local float→double (N=2 kalır): hücre farkı ≤1 float ULP → 21/23 hızda 5e-8 rel (TOL'un 50× üstü) drift. **Bu yol da oracle-temiz değil.**
+
+**3) float→double ABI gerçeği (rawaccel-base.hpp:59, ref:65):**
+- `data[514]`, lookup modunda KULLANICI LUT'u (gui/graph.inl:307-343 lut_get/set_points; config src/config.cpp:84 gate mode==lookup) ve synchronous GAIN'de İÇ scratch buffer (construction'da doldurulur, asla persist edilmez; her init_settings/au.init'te yeniden kurulur). IPC tamamen text JSON → **processler arası binary ABI YOK**.
+- Yalnız SORCE-kontrat var: 7+ dosya (accel-synchronous, accel-lookup, graph.inl, config.cpp, 4 test, ref vec2<float> casti) float varsayar. sizeof büyüyor (2056→4112 B) ama hiçbir kanal bozulmaz. Config JSON şeması: lookup için daha fazla basamak dökülür ama load `:148` float'a cast eder → disk şeması DEĞİŞMEZ.
+- **float→double kesinlikle oracle'ı kırar (21 satır) ve faydası ≤1 ULP = sıfır.** Tek başına yapılmaz.
+
+**4) Tavsiye: D (değişiklik yok) bugün.** Gerekçe: hata her yapılandırmada sub-perceptual; hem N2 hem N4, el çözünürlüğünün çok altında; shipped Windows referansı zaten N=2. İleride istenirse tek temiz yol **A** = local+ref İKİSİDE N=4 (oracle yeşil kalır) AMA ref "verbatim official"tan "precision-enhanced MIT fork"a dönüşür — LICENSE/refresh guard + "fork stamp" olmadan bir sonraki git-clone refresh sessizce N=2'ye döner ve 69 satır DRIFT (CI gürültüsü) döner. B (N=2 + 69 satır belgelik) fayda sıfır için en kötü. float→double A ile birlikte değilse ölü son.
+
+**Değiştirdiğim research docs:**
+- **precision.md**: §2.3.1 (ölçülen N2/N4/exact tablo + ULP + bias okuması), §2.3.2 (float→double ABI gerçeği), §6 rec-2 P102 güncellemesi, §7 (A/B/C/D yol haritası + tavsiye).
+- **deviations.md**: TL;DR tabloya P102 prospective satırlar; §P102 (69 satır N=4 / 21 satır double drift-ölçümü, hız bandı tablosu, A/B/C/D değerlendirmesi) — aktif sapma değil.
+- **index.md**: agenda-1 DONE işaretlendi; özet satırına P102 bulgusu eklendi; docs listesi güncellendi.
+- learning.md: DEĞİŞMEDİ (talimat).
+
+Yöneticiye özet: N=2 LUT hatası ~%1.15 dizinde, 100 ips üstü ≤%0.074 → kullanıcı algılayamaz; N=4 yarıya indirir ama her iki iyileştirme (partition veya double) oracle'ı kırar (69/21 satır). Öneri bugün D; ileride yalnız "fork-stamp"lı A. Detaylar: docs/research/precision.md §7, deviations.md §P102.

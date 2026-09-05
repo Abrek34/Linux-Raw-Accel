@@ -6360,6 +6360,250 @@ static void test_p91_known_deviation_boundaries() {
 }
 
 
+// ── P96 — DERİN TARAMA: ACCEL DOĞRULUK (deep accuracy sweep) ────────────────
+// Deep accuracy pass over the whole accel math (see .aihaberlesme/mesajlar/aj2.log).
+// Two genuine numerical bugs were found and fixed:
+//   (A) power legacy+io with cap.x == 0 → scale 0 → every gain locked at 0
+//       (silent mouse death). scale_from_gain_point / scale_from_output_point
+//       now fall back to identity scale (1) for a degenerate io input cap.
+//   (B) jump GAIN smooth with extreme smooth*cap.x (decay(0) = Inf) → the
+//       antiderivative became NaN/±Inf → gains below the step were NaN/Inf.
+//       smooth_antideriv() now evaluates log(1+exp(y)) with an overflow-stable
+//       log1p form. decay()/smooth() (the LEGACY sigmoid path) are untouched.
+
+static void test_p96_power_io_degenerate_cap() {
+    SECTION("P96-A — power legacy io with cap.x=0: finite, movable gain (no silent kill)");
+    {
+        accel_args a = make_args(accel_mode::power);
+        a.gain = false;
+        a.cap = { 0.0, 1.8 };
+        a.cap_mode_val = cap_mode::io;
+        accel_union au;
+        au.init(a);
+        for (double x : { 0.0, 1e-9, 1.0, 5.0, 15.0, 100.0, 1e9 }) {
+            double g = au.apply(x, a);
+            EXPECT(std::isfinite(g));
+            EXPECT(g >= 0.0);
+        }
+        // Before the fix the whole curve was pinned at gain 0; now it must move
+        // and must not exceed the io cap (legacy_cap = cap.y).
+        double g_mid  = au.apply(5.0, a);
+        double g_high = au.apply(1e9, a);
+        EXPECT(g_mid > 0.0);
+        EXPECT(g_mid <= a.cap.y + 1e-9);
+        EXPECT(g_high <= a.cap.y + 1e-9);
+    }
+
+    SECTION("P96-A — power legacy io cap.x=0 across exponent extremes");
+    {
+        for (double ep : { 1e-4, 10.0 }) {
+            accel_args a = make_args(accel_mode::power);
+            a.gain = false;
+            a.exponent_power = ep;
+            a.cap = { 0.0, 1.8 };
+            a.cap_mode_val = cap_mode::io;
+            accel_union au;
+            au.init(a);
+            for (double x : { 1.0, 5.0, 1e6, 1e9 }) {
+                double g = au.apply(x, a);
+                EXPECT(std::isfinite(g));
+                EXPECT(g >= 0.0);
+            }
+        }
+    }
+
+    SECTION("P96-A — power GAIN io with cap.x=0 stays finite (flat gain = cap)");
+    {
+        for (double cy : { 0.0, 1.0, 1.8, 1e3 }) {
+            accel_args a = make_args(accel_mode::power);
+            a.gain = true;
+            a.cap = { 0.0, cy };
+            a.cap_mode_val = cap_mode::io;
+            accel_union au;
+            au.init(a);
+            for (double x : { 1e-9, 1.0, 5.0, 15.0, 1e6 }) {
+                double g = au.apply(x, a);
+                EXPECT(std::isfinite(g));
+                EXPECT(g >= 0.0);
+            }
+        }
+    }
+}
+
+static void test_p96_jump_smooth_extremes_finite() {
+    SECTION("P96-B — jump GAIN smooth: extreme smooth*cap.x → finite (no NaN/Inf)");
+    {
+        for (double smooth : { 1e-6, 0.005, 0.5, 1e3 }) {
+            accel_args a = make_args(accel_mode::jump);
+            a.gain = true;
+            a.smooth = smooth;
+            a.cap = { 1e6, 1.5 };
+            a.cap_mode_val = cap_mode::in;
+            accel_union au;
+            au.init(a);
+            for (double x : { 1e-9, 1.0, 1e3, 1e5, 5e5, 9.99e5, 1e6, 1.1e6, 1e9 }) {
+                double g = au.apply(x, a);
+                EXPECT(std::isfinite(g));      // used to be NaN / -Inf
+                EXPECT(g >= 0.0);
+                EXPECT(g <= a.cap.y + 1e-6);   // step capacity cap.y = 1.5
+            }
+        }
+    }
+
+    SECTION("P96-B — jump legacy smooth extreme stays finite (control, untouched path)");
+    {
+        for (double smooth : { 0.005, 1e3 }) {
+            accel_args a = make_args(accel_mode::jump);
+            a.gain = false;
+            a.smooth = smooth;
+            a.cap = { 1e6, 1.5 };
+            a.cap_mode_val = cap_mode::in;
+            accel_union au;
+            au.init(a);
+            for (double x : { 1.0, 1e3, 5e5, 1e6, 1.1e6, 1e9 }) {
+                double g = au.apply(x, a);
+                EXPECT(std::isfinite(g));
+                EXPECT(g >= 0.0);
+                EXPECT(g <= 1.0 + a.cap.y);    // step ramps 1 → 1.5
+            }
+        }
+    }
+}
+
+static void test_p96_param_extreme_sweep() {
+    SECTION("P96-C — param-extremes property sweep: every mode stays finite/non-negative");
+    {
+        // Sanitized ranges (src/config.cpp): acceleration 0..1e6, scale 0..1e6,
+        // exponent_classic 1..10, exponent_power 1e-4..10, cap [0..1e6, 0..1e3],
+        // offsets 0..1e3.
+        const double accels[]    = { 0.0, 1e6 };
+        const double scales[]    = { 0.0, 1e6 };
+        const double ecs[]       = { 1.0, 1.0001, 10.0 };
+        const double eps[]       = { 1e-4, 1.0, 10.0 };
+        const double cxs[]       = { 0.0, 1e6 };
+        const double cys[]       = { 0.0, 1e3 };
+        const double offs[]      = { 0.0, 1e3 };
+        const cap_mode cms[]     = { cap_mode::io, cap_mode::in, cap_mode::out };
+        const double speeds[]    = { 0.0, 1e-9, 1e-3, 1.0, 5.0, 100.0, 1e6, 1e9 };
+
+        static const char* mode_names[] = {
+            "classic", "jump", "natural", "synchronous", "power", "lookup", "noaccel"
+        };
+
+        int sweep_bad[2][7] = {};
+        accel_union au;
+        for (bool gain : { false, true }) {
+            for (int m = 0; m < 7; ++m) {
+                for (double accel : accels)
+                for (double scale : scales)
+                for (double ec : ecs)
+                for (double ep : eps)
+                for (double off : offs)
+                for (double cx : cxs)
+                for (double cy : cys)
+                for (cap_mode cm : cms) {
+                    accel_args a = make_args(static_cast<accel_mode>(m));
+                    a.gain = gain;
+                    a.acceleration     = accel;
+                    a.scale            = scale;
+                    a.exponent_classic = ec;
+                    a.exponent_power   = ep;
+                    a.input_offset     = off;
+                    a.output_offset    = off;
+                    a.cap              = { cx, cy };
+                    a.cap_mode_val     = cm;
+                    au.init(a);
+                    for (double s : speeds) {
+                        double g = au.apply(s, a);
+                        if (!std::isfinite(g) || g < -1e-6) {
+                            if (++sweep_bad[gain][m] <= 3)
+                                std::fprintf(stderr,
+                                    "P96-C sweep BAD mode=%s gain=%d cm=%d accel=%g scale=%g "
+                                    "ec=%g ep=%g cap=(%g,%g) off=%g speed=%g gain=%.17g\n",
+                                    mode_names[m], gain, (int)cm, accel, scale, ec, ep,
+                                    cx, cy, off, s, g);
+                        }
+                    }
+                }
+                if (gain) EXPECT(sweep_bad[1][m] == 0);
+                else      EXPECT(sweep_bad[0][m] == 0);
+            }
+        }
+    }
+
+    SECTION("P96-C — mode-specific extremes: natural limit/decay, sync params");
+    {
+        // natural: limit 0..1e3, decay_rate 1e-4..1e6, offsets 0..1e3.
+        for (bool gain : { false, true }) {
+            for (double limit : { 0.0, 1.0, 1.5, 1e3 }) {
+                for (double decay : { 1e-4, 0.1, 1e6 }) {
+                    accel_args a = make_args(accel_mode::natural);
+                    a.gain = gain;
+                    a.limit = limit;
+                    a.decay_rate = decay;
+                    a.input_offset = 1e3;
+                    accel_union au;
+                    au.init(a);
+                    for (double x : { 1e-9, 1e3, 5e3, 1e6, 1e9 }) {
+                        double g = au.apply(x, a);
+                        EXPECT(std::isfinite(g));
+                        EXPECT(g >= -1e-6);
+                    }
+                }
+            }
+        }
+        // synchronous: motivity/gamma/sync_speed/smooth extremes, gains and speeds.
+        for (bool gain : { false, true }) {
+            for (double mot : { 0.0, 1.0, 1e3 }) {
+                for (double gam : { 0.0, 1.0, 1e3 }) {
+                    for (double ss : { 1e-4, 5.0, 1e3 }) {
+                        for (double sm : { 0.0, 1e-6, 0.5, 1e3 }) {
+                            accel_args a = make_args(accel_mode::synchronous);
+                            a.gain = gain;
+                            a.motivity = mot;
+                            a.gamma = gam;
+                            a.sync_speed = ss;
+                            a.smooth = sm;
+                            accel_union au;
+                            au.init(a);
+                            for (double x : { 1e-9, 1e-3, 1.0, 1e2, 1e6, 1e9 }) {
+                                double g = au.apply(x, a);
+                                EXPECT(std::isfinite(g));
+                                EXPECT(g >= -1e-6);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    SECTION("P96-C — lookup with length-0 and full LUT stays finite");
+    {
+        // length 0 → identity; extreme LUT → binary search + lerp bounds.
+        for (bool gain : { false, true }) {
+            accel_args a = make_args(accel_mode::lookup);
+            a.gain = gain;
+            accel_union au;
+            au.init(a);
+            for (double x : { 0.0, 1e-9, 1.0, 1e6, 1e9 }) {
+                EXPECT(std::isfinite(au.apply(x, a)));
+            }
+            // a strict monotone table with extreme first point and end point.
+            a.length = 6;
+            a.data[0] = 1e-6f; a.data[1] = 1e-6f;
+            a.data[2] = 0.5f;  a.data[3] = 0.5f;
+            a.data[4] = 1e6f;  a.data[5] = 1e6f;
+            au.init(a);
+            for (double x : { 1e-9, 1e-3, 0.5, 1.0, 5.0, 1e5, 3e6, 1e9 }) {
+                double g = au.apply(x, a);
+                EXPECT(std::isfinite(g));
+            }
+        }
+    }
+}
+
+
 // ── main ─────────────────────────────────────────────────────────────────────
 
 static void print_usage(const char* argv0) {
@@ -6373,6 +6617,204 @@ static void print_usage(const char* argv0) {
         "  --quiet            PASS satırlarını bastırma; sadece FAIL ve özet göster\n"
         "  -h, --help         Bu yardım metnini göster\n",
         argv0);
+}
+
+// ── P99 — config-layer deep-scan regressions ─────────────────────────────────
+// Three guarantees were probed (Aj.5, .aihaberlesme/mesajlar/aj5.log):
+//   (A) round-trip byte-identity for names with control/quote/unicode chars
+//   (B) wrong-typed scalar fields degrade to defaults — config still loads,
+//       and a resave afterwards does NOT silently drop the user's profiles
+//   (C) .bak rotate: second save preserves the first config; a simulated
+//       write failure leaves target + .bak intact and target fully valid
+static void test_p99_config_guards() {
+    SECTION("P99-A — round-trip byte-identity for hostile profile names");
+    {
+        const std::string path = "/tmp/test_p99_a.json";
+        std::filesystem::remove(path);
+        app_config cfg;
+        cfg.active_profile = "main-\u2735";
+        device_profile dp;
+        dp.name = "line\nbreak";
+        cfg.profiles.push_back(dp);
+        dp.name = "quote\"backslash\\tab\tend";
+        cfg.profiles.push_back(dp);
+        dp.name = "\u00fc\u00f6\u00e7\u015f\u0131 \u65e5\u672c\u8a9e \U0001F3AF";
+        cfg.profiles.push_back(dp);
+        save_config(cfg, path);
+        const std::string s1 = [path]{
+            std::ifstream f(path, std::ios::binary);
+            return std::string((std::istreambuf_iterator<char>(f)),
+                               std::istreambuf_iterator<char>());
+        }();
+        // Second save must be byte-identical (stable, deterministic writer).
+        save_config(cfg, path);
+        const std::string s2 = [path]{
+            std::ifstream f(path, std::ios::binary);
+            return std::string((std::istreambuf_iterator<char>(f)),
+                               std::istreambuf_iterator<char>());
+        }();
+        EXPECT(s1.size() == s2.size());
+        EXPECT(s1 == s2);
+        // And the reloaded profiles survive with names intact.
+        app_config cfg2 = load_config(path);
+        EXPECT(cfg2.profiles.size() == 3);
+        if (cfg2.profiles.size() == 3) {
+            EXPECT(cfg2.profiles[0].name == "line\nbreak");
+            EXPECT(cfg2.profiles[1].name == "quote\"backslash\\tab\tend");
+            EXPECT(cfg2.profiles[2].name == "\u00fc\u00f6\u00e7\u015f\u0131 \u65e5\u672c\u8a9e \U0001F3AF");
+        }
+        std::filesystem::remove(path);
+    }
+
+    SECTION("P99-B — wrong-typed fields degrade, resave keeps all profiles");
+    {
+        // The six P54-guard gaps found in the deep scan: raw_passthrough,
+        // the speed_processor block, the profile-level doubles,
+        // cap element types, domain/range_weights element types, and
+        // lut_data as a non-array.  Before the fix these THREW on load,
+        // bricking the entire config (and the daemon fell back to defaults).
+        nlohmann::json j = {
+            {"version", 1},
+            {"active_profile", "main"},
+            {"profiles", nlohmann::json::array({{
+                {"name", "main"},
+                {"dpi", 1600},
+                {"profile", nlohmann::json{
+                    {"raw_passthrough", "yes"},
+                    {"output_dpi", "abc"},
+                    {"yx_output_dpi_ratio", "abc"},
+                    {"degrees_rotation", "abc"},
+                    {"degrees_snap", "abc"},
+                    {"speed_min", "abc"},
+                    {"speed_max", "abc"},
+                    {"lr_output_dpi_ratio", "abc"},
+                    {"ud_output_dpi_ratio", "abc"},
+                    {"domain_weights", nlohmann::json::array({"a","b"})},
+                    {"range_weights", nlohmann::json::array({"a","b"})},
+                    {"cap", nlohmann::json::array({"a","b"})},
+                    {"speed_processor", nlohmann::json{
+                        {"whole", "yes"},
+                        {"lp_norm", "abc"},
+                        {"input_speed_smooth_halflife", "abc"},
+                        {"scale_smooth_halflife", "abc"},
+                        {"output_speed_smooth_halflife", "abc"}}},
+                    {"accel_x", nlohmann::json{{"mode", "noaccel"}}},
+                    {"accel_y", nlohmann::json{{"mode", "noaccel"}}}
+                }}
+            }})}
+        };
+        const std::string path = "/tmp/test_p99_b.json";
+        std::filesystem::remove(path);
+        { std::ofstream f(path); f << j.dump(4); }
+        app_config cfg = load_config(path);   // must NOT throw (P99-B)
+        EXPECT(cfg.profiles.size() == 1);
+        if (cfg.profiles.size() == 1) {
+            auto& dpp = cfg.profiles[0];
+            EXPECT(dpp.name == "main");
+            EXPECT(dpp.dev_cfg.dpi == 1600);
+            EXPECT(dpp.prof.raw_passthrough == false);              // degraded
+            EXPECT_NEAR(dpp.prof.output_dpi, NORMALIZED_DPI, 1e-9); // sanitized default
+            EXPECT_NEAR(dpp.prof.yx_output_dpi_ratio, 1.0, 1e-9);
+            EXPECT_NEAR(dpp.prof.domain_weights.x, 1.0, 1e-9);      // defaults kept
+            EXPECT_NEAR(dpp.prof.domain_weights.y, 1.0, 1e-9);
+            EXPECT_NEAR(dpp.prof.range_weights.x, 1.0, 1e-9);
+            EXPECT_NEAR(dpp.prof.range_weights.y, 1.0, 1e-9);
+            EXPECT_NEAR(dpp.prof.accel_x.cap.x, 15.0, 1e-9);        // default cap
+            EXPECT(dpp.prof.speed_processor_args.whole == true);    // degraded default
+            EXPECT_NEAR(dpp.prof.speed_processor_args.lp_norm, 2.0, 1e-9);
+        }
+        // Golden rule: drafting a resave must NOT drop the user's profile
+        // (fix must be degrade-on-load, not drop-on-resave).
+        save_config(cfg, path);
+        app_config cfg2 = load_config(path);
+        EXPECT(cfg2.profiles.size() == 1);
+        if (cfg2.profiles.size() == 1) EXPECT(cfg2.profiles[0].name == "main");
+        std::filesystem::remove(path);
+
+        // lut_data as a non-array in lookup mode must not brick the config.
+        nlohmann::json jl = {
+            {"version", 1},
+            {"active_profile", "main"},
+            {"profiles", nlohmann::json::array({{
+                {"name", "main"},
+                {"profile", nlohmann::json{
+                    {"accel_x", nlohmann::json{{"mode", "lookup"},
+                                               {"lut_length", 2},
+                                               {"lut_data", "x"}}},
+                    {"accel_y", nlohmann::json{{"mode", "noaccel"}}}
+                }}
+            }})}
+        };
+        const std::string pathl = "/tmp/test_p99_b_lut.json";
+        std::filesystem::remove(pathl);
+        { std::ofstream f(pathl); f << jl.dump(4); }
+        app_config cfgl = load_config(pathl);   // must NOT throw
+        EXPECT(cfgl.profiles.size() == 1);
+        if (cfgl.profiles.size() == 1) {
+            EXPECT(cfgl.profiles[0].prof.accel_x.mode == accel_mode::lookup);
+            EXPECT(cfgl.profiles[0].prof.accel_x.data[0] == 0.0f);
+            EXPECT(cfgl.profiles[0].prof.accel_x.data[1] == 0.0f);
+        }
+        std::filesystem::remove(pathl);
+    }
+
+    SECTION("P99-C — .bak rotate + simulated write failure restores previous");
+    {
+        const std::string dir = "/tmp/test_p99_c_dir";
+        const std::string path = dir + "/settings.json";
+        std::filesystem::remove_all(dir);
+        std::filesystem::create_directories(dir);
+
+        app_config c1;
+        c1.active_profile = "first";
+        c1.profiles.push_back([]{ device_profile p; p.name = "first"; return p; }());
+        save_config(c1, path);
+        const std::string first_bytes = [&]{
+            std::ifstream f(path);
+            return std::string((std::istreambuf_iterator<char>(f)),
+                               std::istreambuf_iterator<char>());
+        }();
+
+        app_config c2;
+        c2.active_profile = "second";
+        c2.profiles.push_back([]{ device_profile p; p.name = "second"; return p; }());
+        save_config(c2, path);
+        EXPECT(std::filesystem::exists(path + ".bak"));
+        const std::string bak_bytes = [&path]{
+            std::ifstream f(path + ".bak");
+            return std::string((std::istreambuf_iterator<char>(f)),
+                               std::istreambuf_iterator<char>());
+        }();
+        EXPECT(bak_bytes == first_bytes);   // .bak preserves pre-second-save config
+
+        // Simulated write failure on the NEXT save: previous config must survive.
+        const bool euid_root = (::geteuid() == 0);
+        if (!euid_root) {
+            ::chmod(dir.c_str(), 0500);     // make temp creation fail in same user
+            bool threw = false;
+            try { save_config(c2, path); } catch (...) { threw = true; }
+            ::chmod(dir.c_str(), 0700);
+            EXPECT(threw);                                   // clean failure, no SIGABRT
+            EXPECT(std::filesystem::exists(path));           // target intact
+            EXPECT(std::filesystem::exists(path + ".bak"));  // .bak intact
+            const int rc = std::system(("python3 -m json.tool " + path + " > /dev/null 2>&1").c_str());
+            EXPECT(rc == 0);                                 // still complete valid JSON
+        } else {
+            // As root chmod is ineffective — simulate via an occupied
+            // directory component (file where a dir is needed).
+            const std::string d2 = "/tmp/test_p99_c_blocker";
+            const std::string path2 = d2 + "/settings.json";
+            std::filesystem::remove_all(d2);
+            { std::ofstream f(d2); f << "x"; }
+            bool threw = false;
+            try { save_config(c2, path2); } catch (...) { threw = true; }
+            EXPECT(threw);
+            std::filesystem::remove(d2);
+        }
+        // After the failed save the loader must still read the previous config.
+        EXPECT(load_config(path).active_profile == "second");
+        std::filesystem::remove_all(dir);
+    }
 }
 
 int main(int argc, char** argv) {
@@ -6553,6 +6995,14 @@ int main(int argc, char** argv) {
     // P91 — denormal/extreme-input hardening + known-deviation boundaries
     test_p91_denormal_extreme_inputs();
     test_p91_known_deviation_boundaries();
+
+    // P96 — DERİN TARAMA: accel accuracy sweep + power/jump fixes regression
+    test_p96_power_io_degenerate_cap();
+    test_p96_jump_smooth_extremes_finite();
+    test_p96_param_extreme_sweep();
+
+    // P99 — config-layer deep-scan regressions
+    test_p99_config_guards();
 
     if (g_list_only) return 0;
 
