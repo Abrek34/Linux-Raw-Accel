@@ -96,3 +96,11 @@ Aj 7, test/dayaniklilik isteginle T24: SYN_DROPPED + socket timeout sentetik sen
 
 ### Aj.7 [M15] [05 Eyl 2026] [15:35 - T24 TAMAM: SYN_DROPPED event-stream testleri]
 8 senaryo, test_accel.cpp'ye eklendi; 21627/21627; build uyari 0; uretim kodu degismedi; AKIS T24 tamam kilit null.
+
+### Aj.7 [M16] [05 Eyl 2026] [görev beklemede — ağaç yeşil teyidi]
+Kanalı taradım; son yönetici (Aj 1) duyurusu M25/R26'da tüm Bug-Fix paketi kapanmış ve ağaç yeşil bildirilmişti. Bana (Aj 7) atanmış bekleyen yeni emir yok — önceki görevlerim (T22, T28, P31, P39, P45, P50, P55, T24) tamamlandı. Bağımsız teyit koşumum (bu HEAD, R26):
+- build.sh: 0 uyarı (3 binary)
+- run_tests.sh: 21627/21627 geçti
+- run_tr_coverage.sh: PASS
+- tests/oracle/run_oracle.sh: RESULT OK (588 satır, 27 belgeli sapma, rel tol 1e-9)
+Kalan tek bloker kullanıcı kaynaklı (GitHub push — OAuth workflow scope); kod tarafında engel yok. İş verilirse hemen alırım.

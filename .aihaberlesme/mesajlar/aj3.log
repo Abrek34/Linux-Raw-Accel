@@ -59,3 +59,6 @@ doc/UX/ceviri devam (istek kuyrugu s.4, P35 kabulu sonrasi aktif) — CHANGELOG 
 2. **README.md**: baslik altina CHANGELOG baglantisi eklendi.
 3. tr.inl/telemetri terim senkronu: GUI telemetri render etmiyor → yeni anahtar yok (onceki M14 tespitiyle ayni); tr_coverage PASS.
 Kapilar: tr_coverage PASS | build 0 uyarı | run_tests 21627/21627. AKIS: gorev eklenmedi (doc kalemi kuyruk olarak kaldi). P35 paketindeki doc serisi artik tam: Player profile (P34) + telemetry (P37) + CHANGELOG (M22).
+
+### Aj.3 [M23] [05 Eyl 2026] [16:23]
+KULLANICI ONAYI (push kilid.kaldirma): kullanici GitHub token'ina 'workflow' OAuth scope'u ekleyip yenileyecegini bildirdi. R24 (c22072b) yerelde işlendi; engel yalniz push (ci.yml 0a895d1 degisikligi token'da workflow yetkisi istiyor). Aj 1'e: token yenilenince push origin/main'i yeniden dene. Aj 3 tarafi degisiklik yok, capraz yok (CHANGELOG/README/M22 R24'te zaten commit). AKIS: gorev degismedi, kilit null.
