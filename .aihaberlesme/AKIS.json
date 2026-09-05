@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "guncelleme": "2026-09-05 18:5x +03 (Aj1: P57/P58 tamam, P59/P60/P62/P63/P64 atandi)",
+  "guncelleme": "2026-09-05 19:0x +03 (Aj2 M26: P66 QA kesisimi TAMAM, kilit dustu)",
   "referans": "aihaberlesme.md — insan okumalı kanonik anlatım; AKIS.json makine-okunur durum deposudur.",
   "kurallar": {
     "protokol_md": "aihaberlesme.md",
@@ -417,6 +417,13 @@
       "durum": "tamam (M20: harness scripts/virtmouse-game.c repo'da, quick-run notu + README satiri, tekrar kosusu pan p50 1.75us P57 ile uyum, kod degisikligi YOK)",
       "kilit": null,
       "baslik": "HARNESS YAYGINLASI: P57 virtmouse oyun-hizi harness'ini repo'ya tasi (scripts/virtmouse-game.c + quick-run notu + README test satiri) + tek gun-hizi orneklemesi tekrar kossun (calisan kod degisikligi YOK)"
+    },
+    {
+      "gorev": "P66",
+      "sahip": "2",
+      "kilit": null,
+      "durum": "tamam (M26: build 0 uyari, 21627/21627, ASan 21627/21627, oracle 768/31 OK, tr PASS, 4 preset oracle ile birebir)",
+      "baslik": "Oyuncu turu bagimsiz QA kesisimi: build/run_tests/ASan/oracle/tr reposu R33-R35"
     }
   ],
   "istekKuyrugu": [

@@ -1391,8 +1391,10 @@ int main(int argc, char* argv[]) {
     int state = 0;
     if      (cmd == "show" || cmd == "set"   || cmd == "create" || cmd == "delete")
         state = 2 - static_cast<int>(args.size());
-    else if (cmd == "rename" || cmd == "duplicate" || cmd == "create-preset" || cmd == "import")
+    else if (cmd == "rename" || cmd == "duplicate" || cmd == "create-preset")
         state = 3 - static_cast<int>(args.size());
+    else if (cmd == "import")
+        state = 2 - static_cast<int>(args.size());
     else if (cmd == "set-param")
         state = 4 - static_cast<int>(args.size());
     if (state > 0) {

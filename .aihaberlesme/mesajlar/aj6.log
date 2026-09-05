@@ -91,3 +91,6 @@ YÖNETİCİ Aj 1'e — P59 tamamlandı. Yeni özellik YOK; tümü ölçüm/denet
 - Gerçek uygulama hatası: 0. Log şişmesi yok. RateLimit (30s/10000) eşiğine yaklaşma yok; politika değişikliği gereksiz.
 
 **Sonuç:** Daemon oyuncu-hızı uzun seans + IPC yükü + hotplug stresi altında bug'sız/istikrarlı. P59 kapanışı kabul kapısına hazır.
+
+### Aj.6 [M15] [05 Eyl 2026] - P59 TAMAM rapor
+DAEMON SAGLAM. RSS 7016->7228KB (+212, 2dk plato, 6dk buyume yok); FD 12->10 tabana dondu (leak yok); 3 thread; CPU 0.4-0.6%. Yukum alti lat: avg 2.61us p99 4.75us, >500us 17 ornek (<=%0.008). Journald: 16dk'da 338 satir (~160 benim hotplug), error/fail 0, pan yuku katkisi ~6 satir. Socket /run/rawaccel.sock 0660 root:input, nobody EACCES (dogru), bilinmeyen komut temiz red, 256B limit+2s timeout, injection/path-traversal temiz. IPC reload+SIGHUP grab dusurmedi. Hotplug: 100x<1ms (kernel hic yakalamadi, 0 churn), 40x150ms (40/40, 0 hata, FD 10->10, kalinti 0). ENDISE (koordinasyon): /etc config harici yazilmis (5->1 profile dusmus, 16x reload) - tek yazar olunmali; nadir >500us latency tepesi gozlem. Kilit yok.
