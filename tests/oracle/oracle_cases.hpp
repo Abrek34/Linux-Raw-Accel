@@ -40,9 +40,11 @@ struct Case {
 };
 
 // Default speed sweep covering every behavioural region of every algorithm.
+// P63 (esport grid genişletme): 2000/3000/4000 ips bands bridge the [1000,5000]
+// gap flagged by P58 — tournament-grade flick/track speeds.
 inline std::vector<double> default_speeds() {
     return { 0, 0.001, 0.005, 0.01, 0.1, 0.5, 1, 3, 5, 7.5, 10, 15, 30, 50,
-             100, 250, 500, 1000, 5000, 10000, 100000 };
+             100, 250, 500, 1000, 2000, 3000, 4000, 5000, 10000, 100000 };
 }
 
 inline std::vector<Case> cases() {
@@ -140,6 +142,45 @@ inline std::vector<Case> cases() {
     };
     c.push_back(mkpow("power_gain_p1",  true,  1.0, 1.0));
     c.push_back(mkpow("power_legacy_p1",false, 1.0, 1.0));
+
+    // ── Game profiles (R29 oyuncu turu — P60/P61 oracle kapsamı) ──────────
+    // MIRRORS the shipped `rawaccel-cli create-preset` game sets (cs2, valorant,
+    // apex, fps) with EXACT parameter values, so the differential oracle
+    // validates precisely what P60 ships. If a preset changes or a new preset
+    // is added, mirror it here and in run_oracle.
+    {
+        Case x; // cs2
+        x.name = "game_cs2_classic"; x.mode = "classic"; x.gain = true;
+        x.acceleration = 0.004; x.exponent_classic = 2.0; x.limit = 1.6;
+        x.input_offset = 0; x.cap_x = 18; x.cap_y = 1.6; x.cap_mode = 2;
+        x.sync_speed = 5; x.speeds = S;
+        c.push_back(x);
+    }
+    {
+        Case x; // valorant
+        x.name = "game_valorant_natural"; x.mode = "natural"; x.gain = true;
+        x.limit = 1.3; x.decay_rate = 0.08; x.motivity = 1.2;
+        x.input_offset = 0.02; x.cap_x = 30; x.cap_y = 2.0; x.cap_mode = 2;
+        x.speeds = S;
+        c.push_back(x);
+    }
+    {
+        Case x; // apex
+        x.name = "game_apex_power"; x.mode = "power"; x.gain = true;
+        x.scale = 2.2; x.exponent_power = 0.8;
+        x.input_offset = 0.02; x.output_offset = 0.2;
+        x.cap_x = 28; x.cap_y = 2.2; x.cap_mode = 2;
+        x.speeds = S;
+        c.push_back(x);
+    }
+    {
+        Case x; // fps
+        x.name = "game_fps_classic"; x.mode = "classic"; x.gain = true;
+        x.acceleration = 0.005; x.exponent_classic = 2.0; x.limit = 1.8;
+        x.input_offset = 0.01; x.cap_x = 20; x.cap_y = 1.8; x.cap_mode = 2;
+        x.sync_speed = 5; x.speeds = S;
+        c.push_back(x);
+    }
 
     return c;
 }

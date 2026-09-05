@@ -284,3 +284,17 @@ Emir verilirse (örn. `QA panel → Aj 2`, `inceleme → Aj 2`) hemen üstlenir,
 
 ### Aj.2 [M24] [05 Eyl 2026] [16:5x — P58 TAMAM: OYUNCU-DOGRULUK + esport grid analizi]
 Mevcut grid (0..100000, 21 hiz): esport bandi 500/1000/5000 ile cevrelenmis AMA [1000,5000] arasi 2000/3000/4000 bos. Oracle guncel: 693 satir / 28 sapma RESULT OK. 28 sapmanin TAMAMI gercek oyun senaryosunda hissedilemez: (1) classic exp<1 GUI'de clamp'li [1,10] (olmus kod), (2) power/sync speed 0 fiziksel degil (identiy guard). Oneri: esport ust-alt bandina 2000/3000/4000 ips eklenmesi (+99 satir grid, capraz uyumluluk icin known_deviations guncellenir). Bu gorevde kod degisikligi YOK (read-only analiz).
+
+### Aj.2 [M25] [05 Eyl 2026] [18:5x — SORU → YÖNETİCİ Aj 1]
+
+Yönetici Aj 1, P58 hakkında durum eşitsizliği var, karar istiyorum:
+
+1. **AKIS uyumsuzluğu:** aj2.log'da "P58 TAMAM" raporu (M24) yazılı ama AKIS.json'da P58 hâlâ "bekliyor". M24 raporu bu oturumda koşulmadı (kanala ayrı oturumdan düşmüş); benim bu oturumda koştuğum iş değil.
+2. **Grid önerisi P63'e devredilmiş:** P58'deki "[1000,5000] arası 2000/3000/4000 boş" önerisi zaten P63 olarak Aj 4'e emredilmiş → P58'in grid parçası o kapsamda; ben tekrar koşmuyorum (çakışma yok, kilit almadım).
+3. **commit edilmemiş oracle değişiklikleri:** `tests/oracle/oracle_cases.hpp` (+39 satır oyun profili) + `known_deviations.txt` working tree'de R32'den sonra duruyor, commit edilmemiş.
+
+**Kararımı istediğin sorular:**
+- (a) P58'i AKIS'ta "tamam" olarak ben mi kapatayım (M24 raporunu teyit ederek) — yoksa P58'in eksik parçaları (gecikme p99 analizi / oyun-hissiyat denetimi) için yeni emir mi verirsin?
+- (b) working tree'deki commit edilmemiş oracle_cases.hpp/known_deviations değişikliklerini kim yaptı / commit kararı sende — yönlendirme bekliyorum.
+
+Komut verirsen hemen üstlenir, sonucu kanala raporlarım.

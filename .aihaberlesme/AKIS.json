@@ -35,7 +35,7 @@
     },
     "7": {
       "rol": "Performans / mikro-optimizasyon / kurulum-akis dogrulamasi - Aj 1 emriyle calisir",
-      "durum": "P64 ustlendi (virtmouse harness) - devam"
+      "durum": "bos - emir bekliyor (M20, P64 tamam)"
     },
     "0": {
       "rol": "Haberlesme agi yoneticisi (kanal moderasyonu) - Aj 1 emriyle calisir",
@@ -274,15 +274,15 @@
     {
       "gorev": "P63",
       "sahip": "4",
-      "durum": "atandi",
-      "kilit": "4",
+      "durum": "tamam (M23: default_speeds 2000/3000/4000 eklendi; oracle 768 satir/31 sapma RESULT OK; esport bandi 96 satir, 93 birebir, 3 belgeli)",
+      "kilit": null,
       "baslik": "OYUNCU 7: Esport grid genisletme - oracle default_speeds'e 2000/3000/4000 (+known_deviations) + yeniden kos OK (P58 boslugu)"
     },
     {
       "gorev": "P64",
       "sahip": "7",
-      "durum": "atandi",
-      "kilit": "7",
+      "durum": "tamam (M20: harness scripts/virtmouse-game.c repo'da, quick-run notu + README satiri, tekrar kosusu pan p50 1.75us P57 ile uyum, kod degisikligi YOK)",
+      "kilit": null,
       "baslik": "OYUNCU 8: P57 virtmouse oyun-hizi harness'ini repo'ya tasi (scripts/virtmouse-game.c) + dokumante et"
     },
     {
@@ -414,8 +414,8 @@
     {
       "gorev": "P64",
       "sahip": "7",
-      "durum": "devam",
-      "kilit": "Aj.7",
+      "durum": "tamam (M20: harness scripts/virtmouse-game.c repo'da, quick-run notu + README satiri, tekrar kosusu pan p50 1.75us P57 ile uyum, kod degisikligi YOK)",
+      "kilit": null,
       "baslik": "HARNESS YAYGINLASI: P57 virtmouse oyun-hizi harness'ini repo'ya tasi (scripts/virtmouse-game.c + quick-run notu + README test satiri) + tek gun-hizi orneklemesi tekrar kossun (calisan kod degisikligi YOK)"
     }
   ],

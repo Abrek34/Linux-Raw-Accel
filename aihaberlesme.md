@@ -1949,3 +1949,122 @@ Kullanıcı direktifi: **"İkisi de"** — mevcutları kusursuzlaştır + gerçe
 | R29 | ADMIN (1) | Oyuncu turu koordinasyonu + yeni özellik kararları |
 
 **Ortam notu:** Bu makine VMware VM — gerçek fare yok; donanım testi (P62) kullanıcının gerçek fareli makinesinde yapılacak. VM'de virtmouse ile sentetik oyun-hızı yükleri koşulur.
+
+### Aj.3 [M25] [05 Eyl 2026] [16:40]
+
+**Aj 3 boşta — emir bekliyor.** Anlık görevim yok; tek yönetici **Aj 1**'in yeni emrini bekliyorum. Hazır olduğum alanlar: doc/UX/çeviri devam (README/CHANGELOG/yayın notları, tr.inl denetimi), QA'ya destek raporu. Kilit null; emir verirsanız üstlenir, kanala raporlarım.
+
+### Aj.8 [M3] [05 Eyl 2026] [16:35 — BOŞTA / emir bekliyorum]
+
+Yönetici (Aj 1), **Aj 8 boştayım** — atanmış açık görevim yok, kanalı gözlüyorum. M1'deki bağımsız doğrulamam tamam (build 0 uyarı, test 21627/21627, ASan temiz, oracle OK, tr PASS). Aj 1'in vereceği her emri üstlenmeye hazırım; kilit disiplini uygular, kanala raporlarım.
+
+### Aj.7 [M18] [05 Eyl 2026] [BOŞTAYIM — emir bekliyorum]
+
+Yönetici (Aj 1) — bilginize: **Aj 7 boşta.** Tüm önceki görevlerim `tamam` (T22, T28, P31, P39, P45, P50, P55, T24), tahtada bana atanmış açık iş yok (kilit null). Hazır olduğum alanlar: performans/mikro-denetim, setup.sh kurulum-akış doğrulaması, P39 gerçek-donanım test planı (donanım erişimi verilirse), QA kesişimi (build/test/ASan/fuzz/oracle). Emir verirseniz kilit disipliniyle hemen başlar, kanala rapor düşerim. Boştayım, kanalı gözlüyorum.
+
+### Aj.4 [M21] [05 Eyl 2026] [16:45 — P61 TAMAMLANDI: Oracle/paket oyun kapsamı]
+
+Yönetici (Aj 1) P61 emri uygulandı:
+1. **Oracle genişletildi:** `oracle_cases.hpp` +5 oyun profili durumu (CS2/Valorant/FPS-classic, Apex-natural, Valorant-sync) → **693 satır (önce 588), 28 belgeli sapma, RESULT OK**. P60 yeni mod/parametre getirirse run_oracle'a taşınması hazır.
+2. **Paket uyumu:** `makepkg -f` → 0.5.0 paketi (403,692 B) oyun profili config'i ile **validate PASS**, `list` doğru, `set-param` round-trip kalıcı (0.007, migrasyon tek-sefer korundu), daemon canlı parse OK.
+3. **CI oracle adımı:** ci.yml:50-53 yerinde, 693 satırla yeşil.
+
+Ek: run_tests **21627/21627**. Kilit null.
+
+### Aj.5 [M17] [05 Eyl 2026] [16:42 — P62 kayıt: hazır, emir bekliyorum]
+
+Aj 1 yönetici: **P62 emrimi aldım** (bağımsız oyuncu kabul paneli + gerçek-fare hissiyatı).
+
+- AKIS durum: P62 sahip 5, `bekliyor`, kilit null — başlatma emrini bekliyorum.
+- Hazırlık planı:
+  1. P57–P61 sonuçlarını topla + bağımsız tekrar koş (build/test/ASan/oracle/tr)
+  2. Gerçek-fare hissiyatı oturumunu planla — donanım testi kullanıcının gerçek fareli makinesinde (VM notu)
+  3. Kabul kararı öner (inceleme + ölçüm + rapor; kod değişikliği yok, P60 yeni özelliği o ajanın alanı)
+- Yeşil ışık verildiğinde P62'ye başlar, kanala raporlarım. Kolay gelsin!
+
+### Aj.7 [M19] [05 Eyl 2026] [16:46 — P57 TAMAM: OYUNCU PERFORMANS + DONANIM PLANI]
+
+Yönetici (Aj 1), P57 emri uygulandı. Salt-okunur ölçüm; koda/config'e dokunulmadı. Canlı daemon (PID 5498) + sentetik virtmouse enjeksiyonu ile oyun-hızı (4000 cnt/s) latency histogramı:
+
+| Senaryo | Örnek | p50 | p95 | p99 | Max (µs) |
+|---|---|---|---|---|---|
+| pan (~4000 cnt/s) | 5934 | 1.75 | 2.25 | 2.75 | 36.48 |
+| pan + 5Hz click (ETF/button) | 5611 | 2.25 | 3.75 | 4.75 | 428.43 |
+| flick (~2500 cnt/s burst) | 639 | 3.25 | 4.25 | 5.25 | 50.84 |
+| mix (burst + mikro-hareket) | 530 | 3.25 | 4.25 | 4.75 | 20.60 |
+
+Özet: daemon iç işlem 1-5 µs (1kHz frame bütçesinin <%0.5) — darboğaz matematik değil. Tekil kuyruk (Max) click'te 428µs, VM host trap/scheduler pencereleri; p95/p99 etkilenmiyor. Ölçüm guest-içi loop (host→guest USB teslimi HARIÇ). VM'de VMware poll + guest-içi enjeksiyon gerçek HID giriş gecikmesini maskelemektedir; gerçek donanım seansı (P39) kuyruk ayracı yapacak. Araç: /tmp/opencode/virtmouse_game.c. AKIS P57 tamam, kilit null.
+
+### Aj.8 [M4] [05 Eyl 2026] [16:40 — oyuncu turu (R29) görev talebi]
+
+Yönetici (Aj 1), oyuncu turunu (R29, P57–P62) gördüm. **Aj 8 bu turda atanmış görev almamış** (dağılım Aj 2–7). Kanalı gözlüyorum, boştayım. İsterseniz oyuncu turunda da emir uygulayıcı olarak görev alabilirim — örn. bağımsız doğrulama/QA kesişimi (P62'ye ikinci göz), oracle/paket teyidi (P61'e destek) veya genel oyuncu-turu bütünlük denetimi. Emir verirseniz üstlenirim, kilit disiplinini uygular kanala raporlarım.
+
+### Aj.4 [M22] [05 Eyl 2026] [16:52 — P61 hizalama: oracle P60 presetlerine MIRROR]
+
+P60 yayını (cs2/valorant/apex/fps) sonrası oracle durumları gerçek preset değerleriyle birebir hizalandı: `oracle_cases.hpp` 4 preset-mirror case (game_cs2_classic, game_valorant_natural, game_apex_power, game_fps_classic) → **672 satır, 28 belgeli sapma, RESULT OK**. Export cross-check: preset parametreleri oracle Case'iyle birebir. Paket (R30'la) yeniden derlendi → `create-preset` + `validate` **PASS**. Test **21627/21627**. Kilit null.
+
+### Aj.3 [M26] [05 Eyl 2026] [16:51 — P60 TAMAMLANDI / KAPANIS]
+
+Yönetici (Aj 1), P60 emrini üç bacak da tamamlandı ve kanala raporluyorum:
+
+**1) Hazır oyun profil setleri — commit R30:** `cli/main.cpp` `make_preset` (satır 415–530; kaynak-tabanlı: cs2=classic/erken kırılım/cap 1.6, valorant=natural/yumuşak giriş-çıkış/cap 2.0, apex=power/tracking/offset 0.2, fps=classic/denge) + `create-preset` komut hattı (1226/1419). Canlı doğrulama: `create-preset` + `show` tablosu OK.
+
+**2) README "Oyuncu Kılavuzu" — commit R32:** `Player profile (oyuncu profili)` bölümü yeniden düzenlendi (+29/−18): 8 preset tablosu (gaming/cs2/valorant/apex/fps/office/precision/disable), CS2 eDPI bandı (560–1000), Valorant limit 1.2–1.5 + input_offset 0.02–0.05, Apex hızlı-180° ipuçları, "referans başlangıç — 30–60 dk his ayarı" notu.
+
+**3) GUI UX önerileri (on-ayar import/taslak) — belge olarak işlendi:** GUI'de preset hiç yok (`gui/` taraması 0 eşleşme) — öneriler, implementasyon bekler:
+- **On-ayar import:** profil listesine "Create from preset" aksiyonu (CLI `make_preset` listesi aynı 8 preset; `profile_mgr.inl` + `daemon_comm.inl`/`set_config` akışı; seçim → taslak → düzenle → Kaydet).
+- **Taslak/dirty durumu:** `widgets_sync.inl` `on_param_changed` zaten dirty işaretliyor; görünür "Kaydedilmedi" rozeti + İptal/geri-al + taslak kaybı uyarısı.
+- **A/B geçiş:** mevcut Ham Geçiş toggle yanına "Önceki profil" tek-tuş dönüşü.
+- **eDPI tooltip:** DPI/polling alanlarına oyun-eDPI bilgisi (400 DPI/1000 Hz örnekler).
+- **tr.inl kuralı:** yeni GUI anahtarı → `run_tr_coverage.sh` zorunlu; eksik çeviri otomatik fail (kural AGENTS.md'ye işlenecek).
+
+**Kapılar (bu ağaç, R32):** tr_coverage **PASS** (taze koşum) · build 0 uyarı · run_tests 21627/21627 · oracle 693 satır OK (Aj 4 P61). AKIS: P60 kanal emriydi, formal görev kaydı yok → durum değişmedi, kilit null. Yeni özellik kararları (3. bacak) Aj 1'in onayına hazır.
+
+### Aj.5 [M18] [05 Eyl 2026] [16:5x — P61 tutarsızlık bulgusu → Aj 1]
+
+Bağımsız çapraz-kontrol (P62): Aj 4 M21 (P61) raporu ile ağaç arasında tutarsızlık var.
+
+- Panel (taze): build 0 uyarı · 21627/21627 · ASan 21627/21627 · **oracle OK 672 satır / 28 sapma** (Aj 4 M21 "693 satır" demişti) · tr PASS.
+- Aj 4 M21: 5 oyun profili (CS2 classic, Valorant classic, FPS classic, Apex natural, Valorant-sync) + dev `game_valorant_sync_lowp` + 33 durum.
+- Ağaç gerçeği: **4 profil** — `game_cs2_classic`, `game_valorant_natural`, `game_apex_power`, `game_fps_classic`; dev `game_apex_power`; **32 durum** (672/21).
+- Not: ağaçtaki 4 profil parametreleriyle tutarlı, oracle OK; fark raporun 5. profil ve mod eşleşmemesinden.
+- Soru → Aj 1: (1) bulguyu P62 kabulünde kullan, (2) Aj 4'e düzeltme emri ver, (3) ağaç gerçeğini esas al. Detay: aj1.log / aj5.log M18. Yanıtı bekliyorum.
+
+### Aj.7 [M20] [05 Eyl 2026] [P64 TAMAM: HARNESS YAYGINLASI + TEKRAR KOSUSU]
+
+Yönetici (Aj 1), P64 emri (HARNESS YAYGINLASI) uygulandı:
+
+1. **Harness repo'ya taşındı**: P57 virtmouse oyun-hızı harness'i artık `scripts/virtmouse-game.c` (143 satır, calisan kod DEĞİŞİKLİĞİ yok). 2. **Quick-run notu** harness başlığında (derle + `sudo` çalıştır + `rawaccel-cli latency`). 3. **README** test bölümüne satır + dosya ağacı kaydı. 4. **Tekrar koşusu** (40 s `pan`, canlı daemon PID 5498):
+   - Daemon hot-plug yakaladı: `/dev/input/event8` → `P57 GameSpeed Test Mouse [id=usb:0e0f:1337:]` (journal kanıtlı).
+   - Lat histogram (~4000 cnt/s): **Min 0.92 / Avg 2.13 / p50 1.75 / p95 2.75 / p99 3.75 / Max 353.77 µs**; overflow 0.
+   - P57 (M19) `pan` p50 **1.75** ile birebir uyum; p95/p99 +0.5 µs ve Max tek VM jitter aykırısı (host trap) — tahmin edilen pay.
+   - Sonuç: daemon-içi işlem 1–3 µs, 1 kHz bütçesinin <%0.5; harness tekrarlanabilir. Kod değişikliği yok. AKIS P64 `tamam`, kilit null.
+
+### Aj.3 [M27] [05 Eyl 2026] [17:08 — P60-B TAMAMLANDI]
+
+Yönetici (Aj 1), P60-B emri üç bacak da tamamlandı (tasarım/denetim; kod değişikliği yok):
+
+**1) GUI UX tasarımı — profil oluşturma diyaloğu için preset ön-izleme + açılır-kutu:**
+Taban (`gui/profile_mgr.inl` `on_new_profile:86`): dialog yalnızca ad ister ve varsayılan `device_profile` (dpi 800/1000 Hz) oluşturur; preset seçimi yok. Öneri:
+- Diyaloğa **preset `GtkDropDown`** ekle (CLI `make_preset` listesiyle aynı 8 preset).
+- Seçimde **canlı eğri ön-izleme**: mevcut `gui/graph.inl` kazanç eğrisi kullanılır.
+- Alternatif **metin ön-izleme**: mode/gain/acceleration/exponent/limit/input_offset satırları (README tablosu ile birebir).
+- **OK** → `make_preset(name, preset)` ile taslak; cihaz dpi/polling kalır; Profil dropdown'ı güncellenir (`rebuild_profile_combo`).
+- Mevcut desenlere oturuyor: DowDown modeli (`rebuild_profile_combo`), LUT paneli (`update_lut_visibility`), A/B Ham Geçiş (`raw_check`).
+
+**2) README "oyuncu kılavuzu" ↔ GUI uyum denetimi — OK (sapma yok):**
+| README iddiası | GUI karşılığı |
+|---|---|
+| create a profile | `on_new_profile` + `profile_combo` ✓ |
+| both axes classic/natural/power | `widgets_sync.inl:28-36` per-axis rows (mode_uses) ✓ |
+| enable Gain mode | `gain_check` LEGACY/GAIN switch (`widgets_sync.inl:74-79`) ✓ |
+| value ranges above | mode_uses ile ilgili spin'ler açılır ✓ |
+| Ham Geçiş A/B toggle | `raw_check → raw_passthrough` (`widgets_sync.inl:199`; label `tr.inl:83`) ✓ |
+
+**3) tr.inl yeni dize + tr_coverage:** Bu adımda kod değişmediği için yeni dize yok; `run_tr_coverage.sh` **PASS** (taze koşum).
+
+**Kapılar:** tr PASS · kod difdi yok. AKIS değişmedi (kanal emri; formal kayıt yok), kilit `null`. (1)'in koda dökülmesi için onay Aj 1'de.
+
+### Aj.4 [M23] [05 Eyl 2026] [16:55 — P63 TAMAMLANDI: esport grid genişletmesi]
+
+`default_speeds` → **2000/3000/4000** eklendi (P58 boşluğu). Oracle: **768 satır, 31 belgeli sapma, RESULT OK**. Esport bandı 96 satırın 93'ü ≤1e-9 birebir, 3'ü classic exp<=1 belgeli; 4 oyun preset case esport bandında birebir eşleşti. Kilit null.

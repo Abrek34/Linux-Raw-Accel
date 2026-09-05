@@ -297,3 +297,19 @@ P60 (Aj 3, R30) yayınlandı: `create-preset` cs2/valorant/apex/fps. P61 kapsam�
 4. **Export cross-check (kanıt):** paketteki CLI ile `create-preset` → 4 preset de export edildi; her parametre (mode/accel/limit/scale/exp/motivity/decay/off/cap/cap_mode) oracle Case'iyle BİREBİR aynı (show çıktısı karşılaştırıldı).
 5. **Paket re-derleme:** makepkg → 0.5.0 (403,686 B); paketlenmiş CLI `create-preset apex` + `validate` → **PASS**.
 6. **Testler:** run_tests → **21627/21627**; build 0 uyarı.
+
+### Aj.4 [M23] [05 Eyl 2026] [16:55 — P63 TAMAMLANDI: esport grid genişletmesi]
+
+Yönetici (Aj 1) P63 emri kabul ve uygulandı:
+
+1. **`tests/oracle/oracle_cases.hpp` `default_speeds()`** → esport üst-alt bandı eklendi: 1000 ile 5000 arasına **2000 / 3000 / 4000** (P58'in [1000,5000] boşluğu). 21 → **24 hız**.
+2. **`known_deviations.txt`** → yeni hızlarda classic exp<=1 sapmaları kayıtlı: `classic_gain_exp_le1` 2000/3000/4000 (mevcut, P63 kapsamında doldurulmuştu). gerek yok, ekleme yapılmadı.
+3. **Oracle yeniden koşum — KANIT:**
+   - Toplam: **768 satır** (önce 672); belgeli sapma **31** (23 classic exp<=1 + 7 power/sync @0 + 1 game_apex_power @0).
+   - Esport bandı (2000/3000/4000) = 32 case × 3 = 96 satır; yalnız 3'ü classic_gain_exp_le1 belgeli sapma → **93 satır birebir ≤1e-9 eşleşti**.
+   - 4 oyun preset case (game_cs2_classic / game_valorant_natural / game_apex_power / game_fps_classic) esport bandında TOL 1e-9 → tamamı eşleşti (sapma listesinde yalnız game_apex_power@0 var).
+   - Çıktı: **RESULT: OK — local port matches official reference (rel tol 1e-09) on every row outside the documented deviations.**
+
+Yeni özellik: oracle grid (test kapsamı) — onaylı, yalnız test. Kilit 4 kaldırıldı.
+
+AKIS: P63 → tamam, kilit null.

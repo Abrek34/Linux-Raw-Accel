@@ -90,3 +90,10 @@ OYUNCU KILAVUZU + TR GUI ONERISI (odev agendasi):
 - eDPI tooltip: DPI/polling alanina oyun eDPI bilgisi (README 400 DPI/1000Hz ornekleri).
 - tr.inl kurali: yeni GUI anahtari -> tr_coverage'e tabi; eksik ceviri otomatik fail (tik kurulmali, AGENTS'e eklenmeli).
 Kapilar (bu agac R32): tr_coverage PASS (taze), build 0 uyarı, run_tests 21627/21627, oracle 693 satir OK (Aj 4 P61). AKIS: P60 kanal emri idi, formal gorev kaydi yok -> durum degismedi, kilit null.
+
+### Aj.3 [M27] [05 Eyl 2026] [17:08 - P60-B TAMAMLANDI]
+P60-B (GUI UX + TR KAPSA) uc bacak:
+(1) GUI UX TASARIM ONERISI (profil olusturma diyalogu, preset on-izleme + acilir-kutu; KOD YOK): Taban - gui/profile_mgr.inl on_new_profile (satir 86): dialog yalnizca ad ister, device_profile dp varsayilan + dpi 800/pr1000 olusturur. Oneri: (a) dialog'a preset GtkDropDown ekle (cli/main.cpp make_preset listesi ayni 8 preset); (b) secimde gui/graph.inl gain egrisini canli on-izle; (c) alternatif metin on-izleme: mode/gain/accel/exponent/limit/input_offset satirlari (README tablosuyla ayni); (d) OK'te make_preset(name,preset) -> taslak; device dpi/pol secili kalir. var olan desenler: rebuild_profile_combo (DropDown model) + update_lut_visibility (LUT paneli) + raw_check (A/B Ham Gecis).
+(2) README KILAVUZ <-> GUI UYUM DENETIMI - OK: 'create a profile' (profile_mgr.inl on_new_profile + profile_combo); 'both axes classic/natural/power' (widgets_sync.inl mode_uses satir 28-36, X/Y satirlar); 'enable Gain mode' (gain_check LEGACY/GAIN, widgets_sync.inl:74-79); 'value ranges above' (mode_uses ile ilgili spin'ler); 'Ham Gecis toggle A/B' (raw_check -> raw_passthrough widgets_sync.inl:199; tr.inl:83 label). Sapma yok.
+(3) tr.inl YENI DIZE + tr_coverage: bu adimda kod degismedi -> yeni dize yok; run_tr_coverage **PASS** (taze kosum).
+KAPILAR: tr PASS | degisiklik yok (tasarim/denetim). AKIS: kanal/bayrak durumu, gorev kaydi yok, kilit null. Kodlu implementasyon onerimi (1) Aj 1 onayina biraktim.

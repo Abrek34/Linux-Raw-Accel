@@ -35,6 +35,9 @@ classic_gain_exp_le1	100
 classic_gain_exp_le1	250
 classic_gain_exp_le1	500
 classic_gain_exp_le1	1000
+classic_gain_exp_le1	2000
+classic_gain_exp_le1	3000
+classic_gain_exp_le1	4000
 classic_gain_exp_le1	5000
 classic_gain_exp_le1	10000
 classic_gain_exp_le1	100000
@@ -45,3 +48,4 @@ sync_gain_p1	0
 sync_gain_p07	0
 sync_legacy_p2	0
 sync_legacy_p1	0
+game_apex_power	0

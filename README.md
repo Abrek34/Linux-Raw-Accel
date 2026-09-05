@@ -457,6 +457,7 @@ rawaccel-linux/
 │   ├── 99-rawaccel.rules      # udev rule (keeps /dev/uinput accessible)
 │   ├── polkit/                # PolicyKit rules
 │   └── kde-fix-accel.sh       # Plasma flat-acceleration fix
+│   └── virtmouse-game.c       # Live game-speed harness (P64, see Testing)
 ├── tests/
 │   ├── test_accel.cpp         # Unit + integration tests
 │   ├── tr_coverage.cpp        # Translation coverage audit (find strings)
@@ -490,6 +491,14 @@ bash tests/oracle/run_oracle.sh   # exit 0 = matches, outside known deviations
 
 # Fuzz harnesses (libFuzzer, 60 s per harness)
 bash tests/run_fuzz.sh
+
+# Game-speed live harness (requires a running daemon and /dev/uinput access):
+# injects synthetic motion via a uinput virtual mouse (grabbed by the daemon —
+# the name/phys deliberately avoid the "uinput"/"(RawAccel)" markers the daemon
+# filters out) and populates the per-device lat histogram at game speeds.
+# Compile once, then run a scenario: flick | pan | mix
+gcc -O2 -o build-manual/virtmouse-game scripts/virtmouse-game.c
+sudo build-manual/virtmouse-game pan 10          # then: rawaccel-cli latency
 ```
 
 Expected: `=== Sonuç: N/N geçti ===` (exits 1 on any FAIL). The translation
