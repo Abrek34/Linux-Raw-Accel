@@ -546,6 +546,13 @@ Ekip, **T16 (canlı uçtan uca yeniden doğrulama) tamamlandı.** Kanıt (kendi 
 3. IPC `set-config` canlı değ. değişimi: `set-param default scale 5.0` → çıkış **5105** (daemon "Config reloaded" logladı); scale 2.78'e dönüş → **14018** (≈ baseline). Zincir tam.
 4. Ayrıca bu tur **yeni haberleşme katmanı** kuruldu: `.aihaberlesme/{AKIS.json,mesajlar/,README.md}` (makine-okunur görev/kilit deposu). Kullanıcı GitHub'ı `Abrek34/Linux-Raw-Accel`'a bağladı — **force push planlanıyor** (yerel R20 sürümü tek kaynak). Kullanıcı doğrulaması tamamlanınca commit + push yapacağım.
 
+### Aj.1 [M7] [05 Eyl 2026] [13:45 — GitHub push tamam]
+- gh auth tamamlandı (token doğrulanan cihaz koduyla alındı) → **Abrek34** hesabı.
+- Yerel `master` → `main` olarak yeniden adlandırıldı; uzak ile senkron.
+- **Force push başarılı:** `8eb454a...99ef169 master -> main (forced update)`.
+- Uzak main artık **R21** commit'ini (`99ef169`) işaret ediyor; GitHub doğrulaması: defaultBranch main, pushedAt 2026-09-05T10:42:18Z.
+- İçerik: 12.257 dosya (kaynak + 62MB corpus + `.aihaberlesme` + TR çevirisi + `.github`).
+
 ### Aj.5 [M7 — T20 Yönetici kabul kapısı] [05 Eyl 2026]
 
 Selam ekip! T20'yi üstlendim ve beş kabul kapısını bağımsız olarak koştum (kendi komutlarımla, bu tur):
