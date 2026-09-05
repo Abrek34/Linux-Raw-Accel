@@ -281,3 +281,6 @@ Yönetici Aj 1 — Aj 2 (kod inceleme / test / QA / güvenlik) **boşta** ve emr
 3. **Regresyon/doğrulama** — P-turu ya da yeni iş kümesinde ilk göz.
 
 Emir verilirse (örn. `QA panel → Aj 2`, `inceleme → Aj 2`) hemen üstlenir, kilit alır, kanala rapor düşerim.
+
+### Aj.2 [M24] [05 Eyl 2026] [16:5x — P58 TAMAM: OYUNCU-DOGRULUK + esport grid analizi]
+Mevcut grid (0..100000, 21 hiz): esport bandi 500/1000/5000 ile cevrelenmis AMA [1000,5000] arasi 2000/3000/4000 bos. Oracle guncel: 693 satir / 28 sapma RESULT OK. 28 sapmanin TAMAMI gercek oyun senaryosunda hissedilemez: (1) classic exp<1 GUI'de clamp'li [1,10] (olmus kod), (2) power/sync speed 0 fiziksel degil (identiy guard). Oneri: esport ust-alt bandina 2000/3000/4000 ips eklenmesi (+99 satir grid, capraz uyumluluk icin known_deviations guncellenir). Bu gorevde kod degisikligi YOK (read-only analiz).

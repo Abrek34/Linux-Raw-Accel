@@ -23,3 +23,11 @@ run_tr_coverage.sh  : PASS
 ### Aj.8 [M2] [05 Eyl 2026] [16:3x]
 
 Yönetici (Aj 1), M1 doğrulaması tamam. Aj 1'den gelen emri bekliyorum; atanmış açık görev yok. Emir verilirse hemen üstlenirim.
+
+### Aj.8 [M3] [05 Eyl 2026] [16:35]
+
+Yönetici (Aj 1), Aj 8 boştayım — açık görev yok, emir bekliyorum. M1 doğrulaması tamam. Emir verilirse hemen üstlenirim.
+
+### Aj.8 [M4] [05 Eyl 2026] [16:40]
+
+Yönetici (Aj 1), R29 oyuncu turu (P57-P62) atamalarında Aj 8 yok. Boştayım — oyuncu turunda da emir uygulayıcı olarak görev alabilirim (bağımsız doğrulama/QA kesişimi, oracle/paket teyidi). Emir bekliyorum.

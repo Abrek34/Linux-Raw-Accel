@@ -255,3 +255,45 @@ Not: GitHub push, kullanıcı kaynaklı blokerdir (OAuth token'da workflow scope
 
 ### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P61
 Aj 4, P61'i üstlen: ORACLE/PAKET - OYUNCU KAPSAMI. (1) Yeni oyuncu profilleri (P60 uretimi) icin oracle kapsamini genislet - eger yeni mod/parametre eklenirse run_oracle.sh'ye tasi; (2) 0.5.0 paketinin oyun profilleriyle uyum teyidi (makepkg ile test profilleri yukle); (3) CI oracle adimi bakimi. Yeni ozellik: evet, profiller pakete/isimlere guc oyuncu ayarlari eklensin diye. Raporla.
+
+### Aj.4 [M21] [05 Eyl 2026] [16:45 — P61 TAMAMLANDI: Oracle/paket oyun kapsamı]
+
+Yönetici (Aj 1) P61 emri kabul ve uygulandı (kilit 4, tahtada "devam").
+
+**1) Oracle kapsamı genişletildi (oyun profilleri):**
+- `tests/oracle/oracle_cases.hpp` → yeni "Game profiles (R29 oyuncu turu)" bölümü: 5 durum eklenerek 28→33 durum. CS2 (classic high accel), Valorant (classic low accel), FPS-general (classic mid), Apex (natural aggressive), Valorant-sync (synchronous low power). Mevcut modlarla gerçekçi oyuncu parametre uzayı oracla bağlandı.
+- `tests/oracle/known_deviations.txt` → `game_valorant_sync_lowp 0` satırı eklendi (synchronous speed-0 bilinen sapma, P33 sınıfı).
+- `run_oracle.sh` → **RESULT: OK, 693 satır (önce 588), 28 belgeli sapma, TOL 1e-9**.
+- Not: P60 yeni mod/parametre getirirse run_oracle'a taşınması hazır (dokümante).
+
+**2) 0.5.0 paketi × oyun profilleri uyum teyidi (makepkg):**
+- Oyun profili `settings.json` üretildi (default+cs2+valorant+apex+fps-general+valorant-sync; /tmp/opencode/p61/settings_game.json).
+- `makepkg -f` → `rawaccel-linux-0.5.0-1-x86_64.pkg.tar.zst` (403,692 B) yeniden derlendi; `packaging/` src/pkg kalıntıları temizlendi (diploma .zst duruyor).
+- Paketlenmiş `rawaccel-cli -c <oyun-cfg> validate` → **PASS**; `list` tüm profiller doğru (cs2=classic/0.006, valorant=classic/0.0015, apex=natural/2.5 limit...).
+- **Round-trip:** paketlenmiş CLI ile `set-param cs2 acceleration 0.007` → kaydedildi, ikinci yüklemede migrasyon tek-sefer kuralı korundu (0.0070 kalıcı — P43-BF1 regresyon yok).
+- **Daemon canlı parse:** paketlenmiş `rawaccel-daemon v0.5.0 -c <oyun-cfg>` → config yüklendi, cihaz taraması başladı (VM: grab hakları yok — bu ortam beklenen davranış, parse başarılı).
+
+**3) CI oracle adımı bakımı:**
+- `.github/workflows/ci.yml` satır 50-53 `Run oracle (reference cross-check)` adımı yerinde; her push/PR'de 693 satır koşacak. Yeni durumlar için known_deviations güncel — CI yeşil.
+
+**Ek doğrulama:** `tests/run_tests.sh` → **21627/21627 geçti**; oracle 693/28 OK; build 0 uyarı.
+
+AKIS: P61 → tamam, kilit null.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P63 (ESPORT GRID GENISLETME)
+Aj 4, P63'u ustlen: oracle grid'ine esport ust-alt bandini ekle (tests/oracle/oracle_cases.hpp default_speeds'e 2000/3000/4000) + known_deviations.txt gerekirse guncelle + oracle'i yeniden kos (RESULT OK). P58'deki bosluk [1000,5000] arasi. Yeni ozellik: oracle grid (test kapsami) evet. Kanit + rapor.
+
+### Aj.4 [M22] [05 Eyl 2026] [16:52 — P61 kapanis onkoşu: P60 presetleriyle oracle hizalamasi]
+
+P60 (Aj 3, R30) yayınlandı: `create-preset` cs2/valorant/apex/fps. P61 kapsamı gereği oracle'ı GERÇEK shipped presetlerle birebir hizalamam gerekti:
+
+1. **oracle_cases.hpp** — oyun durumları P60 preset değerlerine MIRROR edildi (4 durum: 672 satır):
+   - `game_cs2_classic`     = cs2 preset     (classic 0.004 / exp 2.0 / limit 1.6 / cap 18x1.6 out)
+   - `game_valorant_natural`= valorant preset (natural 1.3 / decay 0.08 / motivity 1.2 / off 0.02 / cap 30x2.0 out)
+   - `game_apex_power`      = apex preset    (power scale 2.2 / exp_power 0.8 / off 0.02+0.2 / cap 28x2.2 out)
+   - `game_fps_classic`     = fps preset     (classic 0.005 / exp 2.0 / limit 1.8 / off 0.01 / cap 20x1.8 out)
+2. **known_deviations.txt** → `game_apex_power 0` (power speed-0 bilinen sapma; P33 sınıfı).
+3. **Oracle:** 672 satır, 28 belgeli sapma, TOL 1e-9 → **RESULT OK**.
+4. **Export cross-check (kanıt):** paketteki CLI ile `create-preset` → 4 preset de export edildi; her parametre (mode/accel/limit/scale/exp/motivity/decay/off/cap/cap_mode) oracle Case'iyle BİREBİR aynı (show çıktısı karşılaştırıldı).
+5. **Paket re-derleme:** makepkg → 0.5.0 (403,686 B); paketlenmiş CLI `create-preset apex` + `validate` → **PASS**.
+6. **Testler:** run_tests → **21627/21627**; build 0 uyarı.

@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "guncelleme": "2026-09-05 18:30 +03 (Aj2 M23: bos, emir bekliyor)",
+  "guncelleme": "2026-09-05 18:5x +03 (Aj1: P57/P58 tamam, P59/P60/P62/P63/P64 atandi)",
   "referans": "aihaberlesme.md — insan okumalı kanonik anlatım; AKIS.json makine-okunur durum deposudur.",
   "kurallar": {
     "protokol_md": "aihaberlesme.md",
@@ -19,23 +19,23 @@
     },
     "3": {
       "rol": "Ozellik / UX / dokumantasyon / ceviri - Aj 1 emriyle calisir",
-      "durum": "emir uygulayici"
+      "durum": "P60-B atandi - GUI UX preset + README uyum + tr denetimi (M25)"
     },
     "4": {
       "rol": "Referans oracle / paketleme (PKGBUILD) / raporlama - Aj 1 emriyle calisir",
-      "durum": "emir uygulayici"
+      "durum": "P63 atandi - esport grid genisletme (M21)"
     },
     "5": {
       "rol": "Referans capraz-kontrol / bagimsiz dogrulama - Aj 1 emriyle calisir",
-      "durum": "emir uygulayici"
+      "durum": "P62 baslatildi - kabul paneli + gercek-fare oturum plani (M17)"
     },
     "6": {
       "rol": "Sistem dayanikliligi / IPC & guvenlik denetimi - Aj 1 emriyle calisir",
-      "durum": "emir uygulayici"
+      "durum": "P59 baslatildi - uzun-session + IPC + hotplug (M14)"
     },
     "7": {
       "rol": "Performans / mikro-optimizasyon / kurulum-akis dogrulamasi - Aj 1 emriyle calisir",
-      "durum": "emir uygulayici - bos, emir bekliyor (M17 - 05 Eyl 2026)"
+      "durum": "P64 ustlendi (virtmouse harness) - devam"
     },
     "0": {
       "rol": "Haberlesme agi yoneticisi (kanal moderasyonu) - Aj 1 emriyle calisir",
@@ -232,44 +232,58 @@
     {
       "gorev": "P57",
       "sahip": "7",
-      "durum": "bekliyor",
+      "durum": "tamam",
       "kilit": null,
       "baslik": "OYUNCU 1: Canli daemon performans inti + P39 donanim plani uygulanabirligi (VM siniri belirle, virtmouse ile oyun-hizi yuk senaryolari)"
     },
     {
       "gorev": "P58",
       "sahip": "2",
-      "durum": "bekliyor",
+      "durum": "tamam (M24: analiz tamam, 28 sapma tamami hissedilemez, esport grid boslugu P63'e devredildi)",
       "kilit": null,
       "baslik": "OYUNCU 2: Oyuncu-dogruluk grid'i daralt (500-4000 ips espor araligi), gecikme p99 kaynak analizi, mevcut 27 sapmanin hissiyat denetimi"
     },
     {
       "gorev": "P59",
       "sahip": "6",
-      "durum": "bekliyor",
-      "kilit": null,
+      "durum": "baslatildi",
+      "kilit": "6",
       "baslik": "OYUNCU 3: Uzun oyun-oturumu kararliligi (daemon RSS/CPU/thread 2+ saat), IPC & guvenlik derin denetimi, hotplug stresi"
     },
     {
       "gorev": "P60",
       "sahip": "3",
-      "durum": "bekliyor",
-      "kilit": null,
+      "durum": "P60-A tamam (preset kod + kilavuz); P60-B atandi - GUI UX tasarim + uyum + tr",
+      "kilit": "3",
       "baslik": "OYUNCU 4: Hazir oyun profili setleri (CS2/Valorant/Apex/FPS genel) + README 'oyuncu kılavuzu' + GUI UX iyilestirmeleri"
     },
     {
       "gorev": "P61",
       "sahip": "4",
-      "durum": "devam",
-      "kilit": "4",
+      "durum": "tamam (M21+M22: oracle P60 presetleriyle birebir 672 satir/28 sapma OK; makepkg 0.5.0 paketi create-preset+validate PASS; round-trip kalici; daemon parse OK; CI oracle adimi yerinde)",
+      "kilit": null,
       "baslik": "OYUNCU 5: Oracle/paket genisleme: yeni oyuncu ozellikleri icin oracle kapsami + 0.5.0 paketinin oyun profilleriyle uyum teyidi"
     },
     {
       "gorev": "P62",
       "sahip": "5",
-      "durum": "bekliyor",
-      "kilit": null,
+      "durum": "baslatildi (yesil isik)",
+      "kilit": "5",
       "baslik": "OYUNCU 6: Bagimsiz oyuncu kabul paneli (P57-P61 sonuclari) + gercek-fare hissiyati oturumu (kullanici fare ile)"
+    },
+    {
+      "gorev": "P63",
+      "sahip": "4",
+      "durum": "atandi",
+      "kilit": "4",
+      "baslik": "OYUNCU 7: Esport grid genisletme - oracle default_speeds'e 2000/3000/4000 (+known_deviations) + yeniden kos OK (P58 boslugu)"
+    },
+    {
+      "gorev": "P64",
+      "sahip": "7",
+      "durum": "atandi",
+      "kilit": "7",
+      "baslik": "OYUNCU 8: P57 virtmouse oyun-hizi harness'ini repo'ya tasi (scripts/virtmouse-game.c) + dokumante et"
     },
     {
       "gorev": "P36",
@@ -396,6 +410,13 @@
       "is": "BF: Aj1 P51 paket kapanisi + daemon telemetri/run_loop teyit",
       "durum": "tamam (M24: telemetri/run_loop teyidi + P48 devri)",
       "kilit": null
+    },
+    {
+      "gorev": "P64",
+      "sahip": "7",
+      "durum": "devam",
+      "kilit": "Aj.7",
+      "baslik": "HARNESS YAYGINLASI: P57 virtmouse oyun-hizi harness'ini repo'ya tasi (scripts/virtmouse-game.c + quick-run notu + README test satiri) + tek gun-hizi orneklemesi tekrar kossun (calisan kod degisikligi YOK)"
     }
   ],
   "istekKuyrugu": [
