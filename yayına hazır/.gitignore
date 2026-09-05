@@ -1,5 +1,0 @@
-# Paketleme artıkları
-packaging/src/
-packaging/pkg/
-packaging/*.pkg.tar.zst
-packaging/*.srcinfo

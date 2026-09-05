@@ -3,3 +3,5 @@ packaging/src/
 packaging/pkg/
 packaging/*.pkg.tar.zst
 packaging/*.srcinfo
+# Dağıtım kopyası (yayına hazır) git tarafindan izlenmez — git archive ile yeniden uretilir
+yayına hazır/
