@@ -6,7 +6,7 @@
     "protokol_md": "aihaberlesme.md",
     "kilit": "Bir dosya üzerinde çalışmadan önce o gorevin 'kilit' alanina Aj.N yazilir; bitince kaldirilir. Serbest calisma alanlari ve yeni dosyalar kilit gerektirmez.",
     "mesaj_format": "### Aj.N [MN] [gün ay yıl] [saat]",
-    "yeni_ozellik_yok": true
+    "yeni_ozellik_yok": false
   },
   "ajanlar": {
     "1": {
@@ -190,9 +190,86 @@
     {
       "gorev": "R24",
       "sahip": "ADMIN",
-      "durum": "commit atildi (c22072b) + CHANGELOG yazildi + Aj4 pkgver tamam; PUSH BLOKLU: OAuth workflow scope eksik (.github/workflows/ci.yml 0a895d1'de degismis, token 'workflow' yetkisi yok). Kullanici GitHub token yetkisi vermeli",
+      "durum": "tamam (commit c22072b, push yapildi - push OAuth workflow scope duzeltildi 63032f6)",
       "kilit": null,
       "baslik": "YONETICI: P35 kabulu sonrasi tek commit (0.5.0 bump + bu gorev) + push origin/main; CHANGELOG (Aj3 devri); pkgver bump dogrulama (Aj4 devri); T27 kapanis"
+    },
+    {
+      "gorev": "R25",
+      "sahip": "ADMIN",
+      "durum": "tamam (commit c5fd8d3)",
+      "kilit": null,
+      "baslik": "YONETICI: T27 admin gate kapanisi + R24 durum dokumantasyonu"
+    },
+    {
+      "gorev": "R26",
+      "sahip": "ADMIN",
+      "durum": "tamam (commit c4179cf - tek yonetici Aj 1)",
+      "kilit": null,
+      "baslik": "YONETICI: kanal hiyerarsisi - tek yonetici Aj 1, diger ajanlar emir uygulayici"
+    },
+    {
+      "gorev": "R27",
+      "sahip": "ADMIN",
+      "durum": "tamam (commit c0f910d - kanal senkronu)",
+      "kilit": null,
+      "baslik": "Kanal senkronu: Aj5 P35 kabul raporu + fuzz corpus/binary refresh"
+    },
+    {
+      "gorev": "R28",
+      "sahip": "ADMIN",
+      "durum": "tamam (commit 63032f6 - push main GITHUB'DA, origin/main = HEAD)",
+      "kilit": null,
+      "baslik": "Push origin/main basarili (OAuth workflow scope duzeltildi)"
+    },
+    {
+      "gorev": "R29",
+      "sahip": "ADMIN",
+      "durum": "devam",
+      "kilit": "ADMIN",
+      "baslik": "OYUNCU TURU: kullanici onayi - sadece hareket/ivme DEGIL, mouse'a dair her sey. Yeni ozellik politikasi aktif (yeni_ozellik_yok=false). Oyun profilleri, mouse buton/DPI shift, dusuk gecikme modu, gercek-fare dogrulamasi hedeflenir."
+    },
+    {
+      "gorev": "P57",
+      "sahip": "7",
+      "durum": "bekliyor",
+      "kilit": null,
+      "baslik": "OYUNCU 1: Canli daemon performans inti + P39 donanim plani uygulanabirligi (VM siniri belirle, virtmouse ile oyun-hizi yuk senaryolari)"
+    },
+    {
+      "gorev": "P58",
+      "sahip": "2",
+      "durum": "bekliyor",
+      "kilit": null,
+      "baslik": "OYUNCU 2: Oyuncu-dogruluk grid'i daralt (500-4000 ips espor araligi), gecikme p99 kaynak analizi, mevcut 27 sapmanin hissiyat denetimi"
+    },
+    {
+      "gorev": "P59",
+      "sahip": "6",
+      "durum": "bekliyor",
+      "kilit": null,
+      "baslik": "OYUNCU 3: Uzun oyun-oturumu kararliligi (daemon RSS/CPU/thread 2+ saat), IPC & guvenlik derin denetimi, hotplug stresi"
+    },
+    {
+      "gorev": "P60",
+      "sahip": "3",
+      "durum": "bekliyor",
+      "kilit": null,
+      "baslik": "OYUNCU 4: Hazir oyun profili setleri (CS2/Valorant/Apex/FPS genel) + README 'oyuncu kılavuzu' + GUI UX iyilestirmeleri"
+    },
+    {
+      "gorev": "P61",
+      "sahip": "4",
+      "durum": "bekliyor",
+      "kilit": null,
+      "baslik": "OYUNCU 5: Oracle/paket genisleme: yeni oyuncu ozellikleri icin oracle kapsami + 0.5.0 paketinin oyun profilleriyle uyum teyidi"
+    },
+    {
+      "gorev": "P62",
+      "sahip": "5",
+      "durum": "bekliyor",
+      "kilit": null,
+      "baslik": "OYUNCU 6: Bagimsiz oyuncu kabul paneli (P57-P61 sonuclari) + gercek-fare hissiyati oturumu (kullanici fare ile)"
     },
     {
       "gorev": "P36",

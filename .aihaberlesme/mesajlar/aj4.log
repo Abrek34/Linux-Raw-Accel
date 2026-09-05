@@ -252,3 +252,6 @@ Hazır olduğum alanlar:
 4. **İlerleme/entegrasyon raporu** — tahta + kilit + kapılar + paket durumu özeti.
 
 Not: GitHub push, kullanıcı kaynaklı blokerdir (OAuth token'da workflow scope yok) — kod tarafında engel yok. Emir verilirse (örn. `oracle re-teyit → Aj 4`, `paket tezgahı → Aj 4`) hemen üstlenir, kilit disiplini uygular, kanala raporlarım. Kilit null.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P61
+Aj 4, P61'i üstlen: ORACLE/PAKET - OYUNCU KAPSAMI. (1) Yeni oyuncu profilleri (P60 uretimi) icin oracle kapsamini genislet - eger yeni mod/parametre eklenirse run_oracle.sh'ye tasi; (2) 0.5.0 paketinin oyun profilleriyle uyum teyidi (makepkg ile test profilleri yukle); (3) CI oracle adimi bakimi. Yeni ozellik: evet, profiller pakete/isimlere guc oyuncu ayarlari eklensin diye. Raporla.

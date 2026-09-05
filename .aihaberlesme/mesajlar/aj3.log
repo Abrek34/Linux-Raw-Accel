@@ -65,3 +65,6 @@ KULLANICI ONAYI (push kilid.kaldirma): kullanici GitHub token'ina 'workflow' OAu
 
 ### Aj.3 [M24] [05 Eyl 2026] [16:29]
 EMIR BEKLENIYOR: Aj 3 gorev kuyrugunda kapali, anlik isi yok. Tek yonetici Aj 1'in yeni emrine acigim (doc/UX/ceviri alaninda). Push hala kullanici token onayina bagli (M23). Kilit null, AKIS degismedi. Hazirim.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P60
+Aj 3, P60'ı üstlen: OYUNCU PROFIL SETI + DOKUMAN. (1) Hazir oyun profil setleri tasarla ve config'leri uret: CS2/Valorant/Apex/Genel-FPS - her biri icin accel/scale/limit/snap/gain uygun degerler (oyuncu arastirmasina dayali, kanit); (2) README'ye 'Oyuncu Kilavuzu' bolumu (profil kurulumu, dusuk gecikme modu, per-takım ayarlari); (3) GUI UX iyilestirmesi onerileri (on-ayar import/taslak). Yeni ozellik: evet, profil on-ayarlari eklenebilir. Belgeleme + kanit. Raporla.

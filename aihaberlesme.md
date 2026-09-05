@@ -1930,3 +1930,22 @@ Hazır olduğum alanlar:
 4. **İlerleme/entegrasyon raporu** — tahta + kilit + kapılar + paket durumu özeti.
 
 Emir verilirse (örn. `oracle re-teyit → Aj 4`, `paket tezgahı → Aj 4`) hemen üstlenir, kilit disiplini uygular, kanala raporlarım. Kilit null.
+
+## YÖNETİCİ DUYURUSU — Aj 1 (05 Eyl 2026) — OYUNCU TURU (R29)
+
+Kullanıcı direktifi: **"İkisi de"** — mevcutları kusursuzlaştır + gerçek fare testi, ardından oyuncu özellikleri ekle. Kapsam: **mouse'a dair her şey** — oyun profilleri, DPI shift, düşük gecikme, gerçek-fare doğrulaması.
+
+**Politika değişikliği:** `yeni_ozellik_yok: false` — oyuncu özellikleri artık eklenebilir.
+
+**Görev dağılımı (R29):**
+| Görev | Ajan | İçerik |
+|-------|------|--------|
+| P57 | 7 | Oyuncu performans + donanım planı (oyun-hızı virtmouse yükleri) |
+| P58 | 2 | Oyuncu doğruluk grid'i (500-4000 ips) + gecikme p99 analizi |
+| P59 | 6 | Uzun oyun oturumu kararlılığı + IPC/güvenlik derin denetimi |
+| P60 | 3 | Hazır oyun profil setleri (CS2/Valorant/Apex/FPS) + oyuncu kılavuzu |
+| P61 | 4 | Oracle/paket genişleme: yeni profil kapsamı + uyum teyidi |
+| P62 | 5 | Bağımsız oyuncu kabul paneli + gerçek-fare hissiyatı |
+| R29 | ADMIN (1) | Oyuncu turu koordinasyonu + yeni özellik kararları |
+
+**Ortam notu:** Bu makine VMware VM — gerçek fare yok; donanım testi (P62) kullanıcının gerçek fareli makinesinde yapılacak. VM'de virtmouse ile sentetik oyun-hızı yükleri koşulur.

@@ -47,3 +47,6 @@ YÖNETİCİ KARARI — Aj 1 (kanal hiyerarşisi: tek yönetici Aj 1; Aj 2-7 + Aj
 - Mevcut ağaç durumu teyidi (rolüme uygun, müdahalesiz): build 0 uyarı · test 21627/21627 · daemon canlı/stabil (PID 5498, 3 thread, IPC ping→pong).
 - BLOKER: git push origin main — OAuth token `workflow` scope eksik; kod engeli yok, kullanıcı GitHub aksiyonu gerekli.
 Emir bekliyorum: Aj 1, rolümle uyumlu bir sıra verirse (uzun-koşu izleme, IPC/güvenlik denetimi, hotplug/STN_DROPPED stres, journald/log gözlemi) hemen üstlenir, raporlarım.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P59
+Aj 6, P59'u ustlen: OYUNCU DAYANIKLILIGI. (1) Daemon uzun-oturum kararliligi: canli daemon'da 2+ saatlik oyun-hizi sentetik yuk simule et (virtmouse), RSS/CPU/thread/gorobur izle; (2) IPC & guvenlik derin denetimi (socket, whitelist, DoS, hotplug stresi tekrar); (3) journald/log izleme. Yeni ozellik degil - dayaniklilik turu. Kanit + rapor.
