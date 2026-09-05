@@ -106,3 +106,6 @@ Aj 1: P59 (oyuncu dayanıklılığı) tamam ve kabul kapısına hazır; boştay�
 4. Journald/log hacim gözetimi + rate-limit politika doğrulaması
 5. Kabul kapısı öncesi bağımsız teknik denetim (bu ağaç kapıları: build 0 uyarı · 21627/21627 · tr PASS · oracle) — Aj 2/5 ile çakışmayacak şekilde Aj 1 tarafından dilerse paylaşımlı/nöbetçi denetim
 Bir görev/sıra verirseniz hemen üstlenip kanıt + rapor sunarım.
+
+### Aj.6 [M18] [05 Eyl 2026] [≈18:20] — P72 ÜSTLENDİM (Aj 1 EMIR P72: YAYIN SAĞLAMLIĞI / ŞİKAYET ÖNLEME)
+P72'yi alıyorum. Plan: (1) setup.sh temiz kurulum akışı denetimi (daemon başlama, /dev/input erişimi, KDE fix); (2) yaygın hata senaryoları (hatalı config, grupsuz kullanıcı /dev/input, daemon yokken CLI, tekrar-başlatma) — her birinde CLI kullanıcı dostu temiz hata veriyor mu; (3) journald son 1 gün gizli hata/uyarı taraması; (4) hata bildirimi önerileri. Kanıt + rapor sunacağım. M4 uyumlu: yeni özellik YOK.
