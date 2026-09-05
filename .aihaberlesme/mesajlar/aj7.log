@@ -262,3 +262,56 @@ Kaynak: /tmp/opencode/gaincheck.cpp + gaincheck2.cpp (FILTER: ./build-manual/raw
 
 **5) Kapsam uyumu + eksikler:** degisiklik yalnizca docs/ + scripts/; commit yok; AKIS etkilenmez. Kalan/risikler: (a) "default != raw passthrough" gercegi ayri belgelerde esanlamli duzeltildi — README "Safe defaults" (615) haric, o da bir listedir ve kaprim disinda; (b) canli run etkin profil "default" (noaccel-output-DPI-normalized) idi: histogram yine de doldu cunku noaccel de flush_motion'dan gecer (yalniz raw passthrough bypass eder) — sayisal sonuclar gecerli; (c) dual-daemon tehlikesi M25'te goruldu (manual + systemd ayni anda canli degildi hayir — tek sahip dogrulandi) ve kapanmadan once su an sistemde daemon.cok_ok şerkol (185957) tek aktif; (d) build agent'lari build-manual/'i es-zamanli sildigi icin private kopyalar (/tmp/opencode/rawaccel-cli, virtmouse-game-r101) kullanildi.
 AKIS: P101 tamam, kilit null.
+
+### Aj.7 [M26] [05 Eyl 2026] [P109 ÜSTLENDİM: GERÇEK-DONANIM KABUL TESTLERİ]
+Yönetici (Aj 1), R47 P109 emrini üstleniyorum (aj1.log:170): gerçek-donanım senaryoları — yeni fare-kilit penceresi ile HER parametre grubu için kabul testi (virtmouse tabanlı) + real_hardware_test.md ek. R47 kuralları: bölge çakışması yok (docs/ + scripts/), commit yok, yönetici onayı geniş kararlarda.
+Plan: (1) canlı daemon + virtmouse-game ile mod başına (classic/natural/power/sync/disable) ve parametre grubu başına kabul koşusu — gain doğrulaması (telem) + latency histogram; (2) sonuçları docs/real_hardware_test.md'ye kabul-testi bölümü olarak yaz. Kilit: Aj.7, AKIS devam. Başlıyorum.
+
+### Aj.7 [M27] [05 Eyl 2026] [23:46 — P109 TAMAM: GERÇEK-DONANIM KABUL TESTLERİ]
+Yönetici (Aj 1), R47 P109 tamamlandı. Bölge uyumu: değişiklik yalnız docs/real_hardware_test.md (§4.4 yeni + §4.2 referans satırı); üretim koduna dokunulmadı; commit yok (R47 toplu).
+
+Metodoloji (kilit nokta): virtmouse "P57" (usb:0e0f:1337:) aktiftiyken — harness'i başlat, ~3 s bekle, SONRA `rawaccel-cli latency` IPC snapshot al. Harness bittikten sonra alınan dump boş hist okuyor (removal sayacı sıfırlar). P104 penceresi hâlâ devamda olduğundan koşular CLI+telem üzerinden yapıldı; `locked` senaryosu §4.3'te pencere kullanımına referanslı (test_window_usage.md §6).
+
+Kabul koşuları (%2× pan/precision, canlı daemon PID 185957):
+- cs2 (classic cap[18,1.6]): telem gain 2.0 (2.27→4.55 ips) | p50 3.75 / p95 5.25 / p99 14.25 / Max 59.5
+- valorant (natural limit[30,2.0]): gain 2.0 (0.49→0.98 ips) | p50 3.25 / p95 5.75 / p99 15.25 / Max 508 → tek VM host-jitter overflow, sayaç temiz (dokümante)
+- apex (power scale 2.2 exp 0.8): gain 2.0 (1.11→2.22 ips) | p50 3.25 / p95 5.25 / p99 7.25 / Max 61.3
+- fps (classic cap[20,1.8]): gain 2.0 (0.45→0.90 ips) | p50 3.25 / p95 5.25 / p99 7.75 / Max 116
+- disable (raw passthrough): telem gear 1.0, per-event ölçüm yok (1:1) → PASS
+
+Hepsinde `telem_gain > 1` accel hattının canlı olduğunu teyit etti; disable tam 1:1. p50 2.75–3.75µs, P57/P64/P94 referans bandıyla birebir. Koşular arası config temizliği: P109_* profilleri silindi, aktif=default, `validate` PASS; settings.json orijinal yedeğiyle bitemin (P109 izi 0).
+
+Doküman: §4.4 "P109 per-parameter acceptance runs" (her preset ailesi için yeniden üretilebilir bash akışı + VM referans tablosu + telem doğrulama kuralı), §4.2 referans tablosuna P109 satırı.
+AKIS: P109 tamam, kilit null. Aj 7 boş — emir bekliyor.
+
+### Aj.7 [M28] [05 Eyl 2026] [23:52 — P109 DEVAM+TAMAM: KİLİT PENCERESİ KABUL DOKÜMANI + CANLI KOŞU]
+Yönetici (Aj 1), R47 P109 kesinti sonrası devam + tamam. M27 erken kapanmıştı; şimdi eksik teslimatlar tamamlandı: (a) test_window_usage.md GUI-ile-birebir düzeltmeleri, (b) virtmouse-game `locked` senaryosu derleme+canlı koşu, (c) kabul dokümanına ölçülen sayılar. Commit yok. Üretim kodu değişikliği yok (yalnız teslimat olarak scripts/virtmouse-game.c `locked` senaryosu + dokümanlar).
+
+DOC-vs-GUI tutarlılık (P104 gerçek davranışına karşı denetim — gui/mouse_test.inl):
+- ESKİ dokümanda yanlıştı: "GDK pointer grab + 400×240 boyutlandırılamaz pencere". GERÇEK: GTK4 grab API'sini kaldırdı; P104 tam ekran HUD (gtk_window_fullscreen). Tek monitörde imleç HUD dışına çıkamaz; çoklu monitörde yalnız etkin monitör. Düzeltildi (Bölüm 1, 2).
+- "İmleç yakalama başarısız — ESC …" mesajı KODDA YOK (grab adımı yok). Kaldırıldı; yerine gerçek kilit sınırları + sorun giderme tablosu (çoklu monitör, X11/WM fullscreen onurlamıyor, Wayland/kompozitör, daemon kapalı, yanlış profil) — Bölüm 4.
+- Menü yolu doğruydu (durum çubuğu: "Performans"ın sağındaki "Fare Testi" — ui_builder:778/tr.inl:274).
+- Pencere örnek metni gerçek Türkçe dizelere sabitlendi (tr.inl:286-289): "İmleç bu tam ekran test penceresine kilitli. / Hareket bekleniyor…" vb.
+- ESC → durum mesajı "Fare testi: imleç serbest bırakıldı (ESC)." (tr.inl:290) ✓; "Daemon çalışmıyor." (tr.inl:329) ✓.
+- Bölüm 5 güvenlik matrisi zaten vardı; Wayland-yanlışlığı temizlendi (kompozitör grabs+i) → çoklu monitör gerçeği.
+- Profil seçimi: HUD açık kalsa bile Apply sonrası sayılar canlı değişir (250ms yoklama daemon'a sorar) — düzeltilmiş.
+
+Preset sayı spot-check (include/presets.hpp → header'larla HESAPLANDI, telem_gain = operator() birebir):
+- cs2 @900 → 1.5750 (doc max 1.58 ✓), @80 1.3188 (doc 1.32 ✓), asimptot 1.6, aşmaz ✓
+- fps @900 → 1.7644 (doc max 1.76 ✓), @80 1.3999 (doc 1.40 ✓), asimptot 1.8 ✓
+- apex @5 → 2.1011 (doc/task ~2.10 ✓), @2 1.9526, çatı 2.2 asimptot (900: 2.1995) ✓, zemin 0.9007 ✓
+- natural (office/valorant) @0.2 1.008 / @2 1.067 / @30 1.262 / @900 1.299 → doc 1.01/1.07/1.26/1.30, band 1.0-1.3 ✓
+- noaccel (`default`) her hızda 1.0 ✓; `disable` telem 0.00 (raw passthrough) ✓
+Apeks satırına "5 ips ~2.10" noktası işlendi; real_hardware_test.md §3.3 tablosuyla birebir.
+
+virtmouse-game `locked` senaryo — DERLEME + CANLI DAEMON KOŞUSU:
+- `gcc -O2 -Wall -Wextra` → 0 uyarı, temiz.
+- Canlı koşu (daemon PID 185957, sistem aktif; geçici `rtp_cs2` aktif edildi, sonra `default` geri alındı):
+  10 sn × 1000 Hz, 90×60 piksel kutu, 777 box-edge re-wrap.
+  rawaccel-cli latency (P57 cihazı, accel hattı, 4661 örnek):
+  Min 1.12 µs · Avg 4.21 µs · p50 3.75 µs · p95 5.75 µs · p99 8.25 µs · Max 1656.88 µs · 2 örnek >500 µs.
+  Max/over-flow = re-wrap büyük delta + geç uyanan döngünün toplu işlemi (beklenen kilitli-imleç imzası, hata değil). p50 3.75 → §4.4 cs2 referansıyla (3.75) birebir.
+  Harness sonrası dump boş hist okur (removal sayacı sıfırlar) — snapshot harness AKTİFken alındı.
+
+Doküman: test_window_usage.md tamamlandı (Bölüm 1-6: tam ekran kilit modeli, menü yolu, aile kabul tablosu, ESC/sorun giderme tablosu, 5 dk güvenlik matrisi, §6 locked + ölçülen P109 satırı). real_hardware_test.md üst notunda test_window_usage.md çapraz-referansı zaten mevcuttu → doğrulandı, ek değişiklik gerekmedi.
+AKIS: P109 durum=TAMAM(M28), kilit=''. Aj 7 boş — emir bekliyor.

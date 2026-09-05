@@ -123,6 +123,7 @@ if(BUILD_GUI)
     target_link_libraries(rawaccel-gui
         rawaccel-config
         ${GTK4_LIBRARIES}
+        dl
     )
 
     install(TARGETS rawaccel-gui DESTINATION /usr/local/bin)

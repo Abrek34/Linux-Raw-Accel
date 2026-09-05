@@ -29,6 +29,7 @@
 #include <nlohmann/json.hpp>
 #include <random>
 #include <regex>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <unistd.h>
@@ -3834,6 +3835,243 @@ static void test_natural_gain_formula() {
     EXPECT_NEAR(r_ng_low, 1.0, 0.01);
 }
 
+// ── P105: classic+natural derin doğruluk turu ─────────────────────────────────
+// (R47 emri: smooth/sync_speed etkileşimi, decay_rate, limit, acceleration
+//  küçük-değer — finite/monotonic/cap doğruları. classic/natural, diğer
+//  modların parametrelerinden bağımsız olmalıdır.)
+
+static void test_classic_natural_deep_accuracy() {
+    SECTION("P105 — classic: acceleration küçük-değer finite/monotonic/cap");
+    for (double acc : { 1e-6, 1e-4, 5e-3, 5e-2, 5e-1 }) {
+        accel_args args = make_args(accel_mode::classic);
+        args.gain = true;
+        args.acceleration = acc;
+        classic c(args);
+        double g1  = c(1.0,    args);
+        double g10 = c(10.0,   args);
+        double g100 = c(100.0, args);
+        double g1e4 = c(10000.0, args);
+        EXPECT(std::isfinite(g1) && std::isfinite(g10)
+               && std::isfinite(g100) && std::isfinite(g1e4));
+        EXPECT(g1 >= 1.0);                      // baseline identity
+        EXPECT(g10 >= g1 && g100 >= g10 && g1e4 >= g100); // monotonic
+        EXPECT(g1e4 <= 1.5 + 1e-9);             // cap.out = 1.5
+    }
+
+    SECTION("P105 — classic: smooth/sync_speed bağımsızlığı");
+    {
+        accel_args base = make_args(accel_mode::classic);
+        classic c0(base);
+        double r0 = c0(42.0, base);
+        accel_args alt = base;
+        alt.smooth = 16.0;       // classic kullanmaz
+        alt.sync_speed = 500.0;  // classic kullanmaz
+        classic c1(alt);
+        double r1 = c1(42.0, alt);
+        EXPECT_NEAR(r1, r0, 1e-9);
+    }
+
+    SECTION("P105 — natural: decay_rate × limit etkileşimi finite");
+    for (double dr : { 1e-4, 1e-1, 5.0, 1e3 }) {
+        for (double lim : { 0.5, 1.0, 1.5, 3.0 }) {
+            accel_args args = make_args(accel_mode::natural);
+            args.gain = true;
+            args.decay_rate = dr;
+            args.limit = lim;
+            natural n(args);
+            double g1  = n(1.0,   args);
+            double g10 = n(10.0,  args);
+            double g100 = n(100.0, args);
+            double g1e5 = n(100000.0, args);
+            double g1e8 = n(100000000.0, args);
+            EXPECT(std::isfinite(g1) && std::isfinite(g10)
+                   && std::isfinite(g100) && std::isfinite(g1e5) && std::isfinite(g1e8));
+            if (lim >= 1.0) {
+                // limit >= 1 → artan monoton, args.limit'e yakınsar.
+                // Düşük decay_rate'de yakınsama yavaştır (dr=1e-4: e^-5 ≈ %0.67
+                // yanlık 1e5'te), asimptot 1e8'de ölçülür.
+                EXPECT(g10 >= g1 - 1e-12 && g100 >= g10 - 1e-12 && g1e5 >= g100 - 1e-12);
+                EXPECT(g1e5 <= lim + 0.01);     // asimptota alttan yaklaşır
+                EXPECT_NEAR(g1e8, lim, 0.01);
+            } else {
+                // limit < 1 → bilinçli deceleration (gain < 1), asimptot limit
+                EXPECT(g1e5 <= 1.0 + 1e-9);
+                EXPECT_NEAR(g1e8, lim, 0.01);
+            }
+        }
+    }
+
+    SECTION("P105 — natural: decay_rate=0 kolu (flat) + limit<1 guard");
+    {
+        accel_args args = make_args(accel_mode::natural);
+        args.gain = true;
+        args.decay_rate = 0.0;
+        args.limit = 3.0;
+        natural n(args);
+        EXPECT_NEAR(n(10.0, args), 1.0, 1e-9);  // flat (guard: accel≈0)
+        EXPECT_NEAR(n(1e5, args), 1.0, 1e-9);
+    }
+
+    SECTION("P105 — natural: smooth/sync_speed bağımsızlığı");
+    {
+        accel_args base = make_args(accel_mode::natural);
+        natural n0(base);
+        double r0 = n0(42.0, base);
+        accel_args alt = base;
+        alt.smooth = 16.0;       // natural kullanmaz
+        alt.sync_speed = 500.0;  // natural kullanmaz
+        natural n1(alt);
+        double r1 = n1(42.0, alt);
+        EXPECT_NEAR(r1, r0, 1e-9);
+    }
+
+    // ── P105 family-close (R47 devamı): per-parameter accuracy sweeps ─────────
+
+    SECTION("P105 — classic: exponent_classic 1..10 × input_offset × gain × cap.y");
+    {
+        const double ecs[]  = { 1.0, 1.0001, 1.5, 2.0, 3.3, 7.7, 10.0 };
+        const double offs[] = { 0.0, 1e-3, 1.0, 1e3 };
+        const double cys[]  = { 1.5, 1e3 };
+        const bool   gains[] = { false, true };
+        const double bases[] = { 0.0, 1e-9, 1e-3, 0.5, 1.0, 5.0, 100.0, 1e4, 1e6 };
+        for (double ec : ecs)
+        for (double off : offs)
+        for (double cy : cys)
+        for (bool gain : gains) {
+            accel_args args = make_args(accel_mode::classic);
+            args.gain = gain;
+            args.exponent_classic = ec;
+            args.input_offset = off;
+            args.cap = { 15.0, cy };
+            classic c(args);
+            std::vector<double> speeds(bases, bases + 9);
+            const double off_more[] = { 0.5 * off, off + 1e-3, off + 10.0 };
+            speeds.insert(speeds.end(), off_more, off_more + 3);
+            if (off > 0.0) speeds.push_back(off);
+            std::sort(speeds.begin(), speeds.end());
+            double prev = -1.0;
+            for (double x : speeds) {
+                double g = c(x, args);
+                EXPECT(std::isfinite(g) && g > 0.0);          // finite & >0, speed 0..1e6
+                EXPECT(g <= cy + 1e-9);                        // cap.y ceiling both modes
+                EXPECT(g >= prev - 1e-9);                      // monotone non-decreasing
+                prev = g;
+            }
+        }
+    }
+
+    SECTION("P105 — classic: scale/limit/decay_rate/output_offset foreign-param independence");
+    {
+        accel_args base = make_args(accel_mode::classic);
+        classic c0(base);
+        const double speeds[] = { 0.0, 1e-3, 1.0, 5.0, 100.0, 1e4, 1e6 };
+        for (double scale : { 0.0, 1e6 })
+        for (double limit : { 0.5, 1e3 })
+        for (double decay : { 0.0, 1e3 })
+        for (double out_off : { 0.9, 1e3 }) {
+            accel_args alt = base;
+            alt.scale = scale; alt.limit = limit;
+            alt.decay_rate = decay; alt.output_offset = out_off;
+            classic cv(alt);
+            double prev = -1.0;
+            for (double x : speeds) {
+                double g = cv(x, alt);
+                EXPECT(std::isfinite(g) && g > 0.0);           // foreign params stay finite
+                EXPECT_NEAR(cv(x, alt), c0(x, base), 1e-9);    // classic ignores them
+                EXPECT(g >= prev - 1e-9);                      // curve stays monotone
+                prev = g;
+            }
+        }
+    }
+
+    SECTION("P105 — natural: limit × decay_rate × input_offset × gain (speed 1e-3..1e6)");
+    {
+        const double lims[] = { 0.0, 0.5, 0.9, 1.0, 1.5, 3.0, 1e3 };
+        const double drs[]  = { 0.0, 1e-4, 0.1, 5.0, 1e3 };
+        const double offs[] = { 0.0, 1e3 };
+        const bool   gains[] = { false, true };
+        const double bases[] = { 1e-3, 0.01, 0.1, 1.0, 5.0, 100.0, 1e4, 1e6 };
+        for (double lim : lims)
+        for (double dr : drs)
+        for (double off : offs)
+        for (bool gain : gains) {
+            accel_args args = make_args(accel_mode::natural);
+            args.gain = gain;
+            args.limit = lim;
+            args.decay_rate = dr;
+            args.input_offset = off;
+            natural n(args);
+            bool flat = (dr == 0.0);          // decay_rate=0 → accel≈0 → flat 1.0
+            bool up   = (lim >= 1.0);         // ascend to args.limit, else deliberate decel
+            double prev = -1.0;
+            for (double x : bases) {
+                double g = n(x, args);
+                EXPECT(std::isfinite(g) && g >= 0.0);          // finite; lim=0 tail → 0
+                if (flat) EXPECT_NEAR(g, 1.0, 1e-9);            // flat identity (mount 0 guard)
+                if (prev >= 0.0) {
+                    if (up)   EXPECT(g >= prev - 1e-9);         // monotonicity verdict: non-decreasing
+                    else      EXPECT(g <= prev + 1e-9);         // non-increasing (designed decel)
+                }
+                prev = g;
+            }
+            double asympt = n(1e6, args);
+            EXPECT(std::isfinite(asympt));
+            if (!flat) {
+                // dr >= 1e-4 converges to args.limit in both gain modes, but the
+                // decay-length (limit/accel) grows with limit — probe far enough.
+                if (lim >= 10.0) {
+                    double a9 = n(1e9, args);
+                    EXPECT(std::isfinite(a9));
+                    EXPECT(a9 > lim * 0.9);       // within 10% by 1e9
+                } else {
+                    double a8 = n(1e8, args);     // lim=0 → asymptote 0 (decel to stop)
+                    EXPECT(std::isfinite(a8));
+                    EXPECT_NEAR(a8, lim, 0.01);
+                }
+            }
+        }
+        // decay_rate=0 × limit<1 guard: flat 1.0 through the offset band too.
+        for (double off : { 0.0, 1e3 })
+        for (double lim : { 0.0, 0.5 }) {
+            accel_args args = make_args(accel_mode::natural);
+            args.gain = true; args.limit = lim; args.decay_rate = 0.0; args.input_offset = off;
+            natural n(args);
+            EXPECT_NEAR(n(0.0, args), 1.0, 1e-9);
+            EXPECT_NEAR(n(off + 1e-9, args), 1.0, 1e-9);
+            EXPECT_NEAR(n(off + 5.0, args), 1.0, 1e-9);
+            EXPECT_NEAR(n(off + 1e6, args), 1.0, 1e-9);
+        }
+    }
+
+    SECTION("P105 — natural: smooth/sync_speed/scale/output_offset foreign independence + smooth 0 vs tiny");
+    {
+        accel_args base = make_args(accel_mode::natural);
+        natural n0(base);
+        const double speeds[] = { 0.0, 1e-3, 0.5, 5.0, 100.0, 1e6 };
+        for (double smooth : { 0.0, 1e-9, 1e3 })
+        for (double ss : { 1e-4, 1e3 })
+        for (double scale : { 0.0, 1e6 })
+        for (double out_off : { 0.9, 1e3 }) {
+            accel_args alt = base;
+            alt.smooth = smooth; alt.sync_speed = ss;
+            alt.scale = scale; alt.output_offset = out_off;
+            natural nv(alt);
+            for (double x : speeds) {
+                double g = nv(x, alt);
+                EXPECT(std::isfinite(g) && g > 0.0);           // foreign params stay finite
+                EXPECT_NEAR(nv(x, alt), n0(x, base), 1e-9);    // natural ignores them
+            }
+        }
+        // smooth=0 vs tiny boundary: no div-by-zero, identical curve.
+        accel_args s0 = base; s0.smooth = 0.0;
+        accel_args st = base; st.smooth = 1e-9;
+        natural ns0(s0), nst(st);
+        for (double x : speeds) {
+            EXPECT_NEAR(ns0(x, s0), nst(x, st), 1e-9);
+        }
+    }
+}
+
 // ── O4: natural reference-alignment regression ────────────────────────────────
 
 static void test_natural_reference_values() {
@@ -6817,6 +7055,564 @@ static void test_p99_config_guards() {
     }
 }
 
+// ── P107: set-param domain contract ─────────────────────────────────────────
+// The CLI now rejects out-of-domain set-param values (exit 1, config untouched)
+// instead of silently clamping them.  This guards the CONFIG side of that
+// contract: every value inside the CLI-accepted domains must survive
+// sanitize_device_profile() byte-correct (no clamping of what the CLI accepts),
+// so `set-param` always stores exactly what it reports.  Domains mirror the
+// set-param validation in cli/main.cpp cmd_set_param.
+static void test_p107_param_domain() {
+    SECTION("P107 — set-param domain contract: in-domain values survive sanitize");
+    {
+        device_profile dp;
+        auto& p = dp.prof;
+
+        dp.dev_cfg.dpi = 32000;                    // upper edge
+        dp.dev_cfg.polling_rate = POLL_RATE_MIN;   // lower edge (125)
+        p.degrees_snap = 45;                       // upper edge
+        p.output_dpi = 1;                          // lower edge
+        p.lr_output_dpi_ratio = 100;               // upper edge
+        p.ud_output_dpi_ratio = 0.01;              // lower edge
+        p.yx_output_dpi_ratio = 100;
+        p.domain_weights = { 0, 1e6 };             // [0, 1e6] inclusive edges
+        p.range_weights = { 1e6, 0 };
+        p.speed_processor_args.lp_norm = 1e-9;     // > 0 boundary
+        p.accel_x.exponent_classic = 1;            // min (exp==1 linear path)
+        p.accel_y.exponent_classic = 10;           // max
+        p.accel_x.exponent_power = 1e-4;           // min
+        p.accel_y.exponent_power = 1e-4;
+        p.accel_x.sync_speed = 1e-4;               // min
+        p.accel_y.sync_speed = 1e-4;
+        p.accel_x.cap = { 0, 0 };                  // min
+        p.accel_y.cap = { 15, 1.5 };
+        p.accel_x.limit = 0;
+        p.accel_y.limit = 1.5;
+        p.accel_x.decay_rate = 0;
+        p.accel_x.smooth = 0;
+        p.accel_x.motivity = 0;
+        p.accel_x.gamma = 0;
+        p.accel_x.input_offset = 0;
+        p.accel_x.output_offset = 0;
+        p.accel_x.scale = 0;
+        p.speed_min = 0;
+        p.speed_max = 0;
+        p.speed_processor_args.input_speed_smooth_halflife = 1e6;
+        p.speed_processor_args.scale_smooth_halflife = 1e6;
+        p.speed_processor_args.output_speed_smooth_halflife = 1e6;
+
+        sanitize_device_profile(dp);
+
+        EXPECT(dp.dev_cfg.dpi == 32000);
+        EXPECT(dp.dev_cfg.polling_rate == POLL_RATE_MIN);
+        EXPECT(std::fabs(p.degrees_snap - 45.0) < 1e-9);
+        EXPECT(std::fabs(p.output_dpi - 1.0) < 1e-9);
+        EXPECT(std::fabs(p.lr_output_dpi_ratio - 100.0) < 1e-9);
+        EXPECT(std::fabs(p.ud_output_dpi_ratio - 0.01) < 1e-9);
+        EXPECT(std::fabs(p.yx_output_dpi_ratio - 100.0) < 1e-9);
+        EXPECT(std::fabs(p.domain_weights.x) < 1e-9 && std::fabs(p.domain_weights.y - 1e6) < 1e-6);
+        EXPECT(std::fabs(p.range_weights.x - 1e6) < 1e-6 && std::fabs(p.range_weights.y) < 1e-9);
+        EXPECT(std::fabs(p.speed_processor_args.lp_norm - 1e-9) < 1e-9);
+        EXPECT(std::fabs(p.accel_x.exponent_classic - 1.0) < 1e-9 && std::fabs(p.accel_y.exponent_classic - 10.0) < 1e-9);
+        EXPECT(std::fabs(p.accel_x.exponent_power - 1e-4) < 1e-9 && std::fabs(p.accel_y.exponent_power - 1e-4) < 1e-9);
+        EXPECT(std::fabs(p.accel_x.sync_speed - 1e-4) < 1e-9 && std::fabs(p.accel_y.sync_speed - 1e-4) < 1e-9);
+        EXPECT(std::fabs(p.accel_x.cap.x) < 1e-9 && std::fabs(p.accel_x.cap.y) < 1e-9);
+        EXPECT(std::fabs(p.accel_y.cap.x - 15.0) < 1e-9 && std::fabs(p.accel_y.cap.y - 1.5) < 1e-9);
+        EXPECT(std::fabs(p.accel_x.limit) < 1e-9 && std::fabs(p.accel_y.limit - 1.5) < 1e-9);
+        EXPECT(std::fabs(p.accel_x.decay_rate) < 1e-9 && std::fabs(p.accel_x.smooth) < 1e-9);
+        EXPECT(std::fabs(p.accel_x.motivity) < 1e-9 && std::fabs(p.accel_x.gamma) < 1e-9);
+        EXPECT(std::fabs(p.accel_x.input_offset) < 1e-9 && std::fabs(p.accel_x.output_offset) < 1e-9);
+        EXPECT(std::fabs(p.accel_x.scale) < 1e-9);
+        EXPECT(p.speed_processor_args.input_speed_smooth_halflife == 1e6);
+        EXPECT(p.speed_processor_args.scale_smooth_halflife == 1e6);
+        EXPECT(p.speed_processor_args.output_speed_smooth_halflife == 1e6);
+    }
+}
+
+// ── P106: per-parameter-family sınır (uç değer) regresyon tablosu ────────────
+// (R47 emri: her parametre ailesi için KİLİTLENMİŞ sınır regresyonu. Aile başına
+//  0/tiny/MAX san-unrange'li değerler + aileye özgü ayrım noktaları. Beklenen
+//  değerler ya türetilebilir (exact) ya da döngüsel olmayan eşitsizliklerle
+//  kilitlenir. Oracle'a DOKUNMAZ: stress testleri burada unit-seviyede kalır,
+//  oracle grid'ine case eklenmez → 915 satır / 31 sapma değişmemelidir.
+//  Sanitize aralıkları src/config.cpp sanitize_accel_args/sanitize_profile ve
+//  cli/main.cpp set-param domain'leriyle birebir aynıdır.)
+static void test_p106_extremes_table() {
+    // ── Aile 1: speed_processor (whole / lp_norm / 3× halflife) ──────────────
+    SECTION("P106 — speed_processor sınır tablosu: whole × lp_norm");
+
+    // dist_mode eşleme tablosu (speed_processor::init):
+    //   whole=false            → separate
+    //   whole=true, lp<=0      → max
+    //   whole=true, lp>=MAX_NORM(16) → max
+    //   whole=true, |lp-2|<=1e-9 → euclidean
+    //   else → Lp
+    {
+        struct mode_case { bool whole; double lp; distance_mode want; };
+        mode_case cases[] = {
+            { false, 2.0,        distance_mode::separate  },
+            { true,  0.0,        distance_mode::max       },   // sanitize: <=0 → max (config'de 2'ye kırpılır)
+            { true,  -1.5,       distance_mode::max       },   // negatif de max (programatik path)
+            { true,  1e-9,       distance_mode::Lp        },   // "tiny" (>0, <16)
+            { true,  1.0,        distance_mode::Lp        },   // Manhattan
+            { true,  2.0,        distance_mode::euclidean },
+            { true,  2.0000000009, distance_mode::euclidean }, // |lp-2| representable olarak <=1e-9
+            { true,  2.000000001, distance_mode::Lp        },   // fp temsili nedeniyle 1e-9'un BİRİKİ dışına taşar
+            { true,  2.0000001,  distance_mode::Lp        },   // epsilon'un hemen dışı
+            { true,  3.0,        distance_mode::Lp        },
+            { true,  16.0,       distance_mode::max       },   // tam MAX_NORM sınırı
+            { true,  16.0001,    distance_mode::max       },
+            { true,  1e6,        distance_mode::max       },   // "huge"
+        };
+        for (auto& c : cases) {
+            speed_args sa;
+            sa.whole = c.whole;
+            sa.lp_norm = c.lp;
+            speed_processor sp;
+            sp.init(sa);
+            EXPECT(sp.speed_flags.dist_mode == c.want);
+        }
+    }
+
+    // exact hız: (3,4) her mod / sınır değerinde
+    {
+        speed_processor sp;
+        speed_args sa;
+        sa.whole = true; sa.lp_norm = 2.0;                     // euclidean
+        sp.init(sa);
+        EXPECT_NEAR(sp.calc_speed_whole({3,4}, 1.0), 5.0, 1e-9);
+        for (double lp : { 0.0, 16.0, 16.0001, 1e6 }) {        // max: |(3,4)|∞ = 4
+            sa.lp_norm = lp;
+            sp.init(sa);
+            EXPECT_NEAR(sp.calc_speed_whole({3,4}, 1.0), 4.0, 1e-9);
+        }
+        sa.lp_norm = 1.0;                                      // Manhattan: 3+4
+        sp.init(sa);
+        EXPECT_NEAR(sp.calc_speed_whole({3,4}, 1.0), 7.0, 1e-9);
+        sa.lp_norm = 3.0;                                      // Lp: (3³+4³)^(1/3)
+        sp.init(sa);
+        EXPECT_NEAR(sp.calc_speed_whole({3,4}, 1.0), 4.4979414452754147, 1e-9);
+        sa.lp_norm = 2.0000001;                                // epsilon dışı Lp ≈ 5
+        sp.init(sa);
+        EXPECT_NEAR(sp.calc_speed_whole({3,4}, 1.0), 5.0, 1e-5);
+        sa.lp_norm = 1e-9;                                     // "tiny" Lp: eksen vektörü tam 1
+        sp.init(sa);
+        EXPECT_NEAR(sp.calc_speed_whole({1,0}, 1.0), 1.0, 1e-9);
+        EXPECT_NEAR(sp.calc_speed_whole({0,1}, 1.0), 1.0, 1e-9);
+        // SURPRISE: tiny lp_norm ile (3,4) gibi çapraz vektörde 2^(1/p) → +Inf
+        // (sanitize lp_norm<=0'ı engeller ama 1e-9 geçer; pipeline Inf'i zero'lar).
+        EXPECT(std::isinf(sp.calc_speed_whole({3,4}, 1.0)));
+        EXPECT(sp.calc_speed_whole({3,4}, 1.0) > 0);
+        sa.whole = false;                                      // separate: |x|,|y|
+        sp.init(sa);
+        double vx = 0, vy = 0;
+        // calc_speed_separate input uint'ünde çalışır
+        vec2d vv = { -3.0, 4.0 };
+        sp.calc_speed_separate(vv, 1.0);
+        vx = vv.x; vy = vv.y;
+        EXPECT_NEAR(vx, 3.0, 1e-9);
+        EXPECT_NEAR(vy, 4.0, 1e-9);
+        (void)vx; (void)vy;
+    }
+
+    SECTION("P106 — speed_processor sınır tablosu: halflife 0/tiny/huge (NaN yok)");
+
+    // halflife=0 → smoothing DISABLED (flag'ler kapalı); negatif de kapalı (sanitize)
+    {
+        speed_args sa;
+        sa.input_speed_smooth_halflife = 0.0;
+        sa.scale_smooth_halflife       = 0.0;
+        sa.output_speed_smooth_halflife = 0.0;
+        speed_processor sp; sp.init(sa);
+        EXPECT(!sp.speed_flags.should_smooth_input);
+        EXPECT(!sp.speed_flags.should_smooth_scale);
+        EXPECT(!sp.speed_flags.should_smooth_output);
+
+        speed_args neg = sa;
+        neg.input_speed_smooth_halflife = -3.0;    // sanitize → 0
+        neg.output_speed_smooth_halflife = -7.0;
+        speed_processor spn; spn.init(neg);
+        EXPECT(!spn.speed_flags.should_smooth_input);
+        EXPECT(!spn.speed_flags.should_smooth_output);
+    }
+
+    // tiny halflife → katsayılar 0'a underflow, EMA pasif (passthrough) ama flag AÇIK
+    {
+        speed_args sa;
+        sa.whole = true;
+        sa.lp_norm = 2.0;
+        sa.input_speed_smooth_halflife = 1e-4;     // "tiny"
+        speed_processor sp; sp.init(sa);
+        EXPECT(sp.speed_flags.should_smooth_input);
+        simple_ema_smoother ema;
+        ema.init(1e-4);
+        EXPECT(ema.windowCoefficient == 0.0);      // pow(0.5,10000) double'da underflow
+        EXPECT_NEAR(ema.smooth(5.0, 1.0), 5.0, 1e-9);   // passthrough
+        linear_ema_smoother lin;
+        lin.init(1e-4, speed_processor::input_trend_halflife);
+        EXPECT_NEAR(lin.smooth(5.0, 1.0), 5.0, 1e-9);
+    }
+
+    // huge halflife → koyu smoothing: ilk adımda girişin çok altında, monoton artar,
+    // sabit girişle asimptota yaklaşır, hiç NaN üretmez; ani duruşta finite ve >=0.
+    {
+        simple_ema_smoother ema;
+        ema.init(1e6);                             // "huge"
+        EXPECT_NEAR(ema.windowCoefficient, 0.99999930685305971, 1e-15);
+        double a = ema.smooth(5.0, 1.0);
+        double b = ema.smooth(5.0, 1.0);
+        double c = ema.smooth(5.0, 1.0);
+        EXPECT(std::isfinite(a) && std::isfinite(b) && std::isfinite(c));
+        EXPECT(a < 5.0 && a > 0.0);
+        EXPECT(b > a && c > b);                    // artan (5'e asimptot)
+        double conv = 0;
+        bool nan = false;
+        for (int i = 0; i < 2000; i++) {
+            conv = ema.smooth(5.0, 1.0);
+            if (!std::isfinite(conv)) nan = true;
+        }
+        EXPECT(!nan);
+        EXPECT(conv < 5.0);                        // 1e6 halflife ile asimptota yavaş yaklaşır
+        double stop = ema.smooth(0.0, 1.0);
+        EXPECT(std::isfinite(stop));
+        EXPECT(stop >= 0.0);
+    }
+
+    // pipeline: 3 halflife birden huge → 2000 hareket + 200 duruş karesi, NaN yok
+    {
+        profile prof;
+        prof.accel_x = make_args(accel_mode::classic);
+        prof.accel_y = prof.accel_x;
+        prof.speed_processor_args.input_speed_smooth_halflife  = 1e6;
+        prof.speed_processor_args.scale_smooth_halflife        = 1e6;
+        prof.speed_processor_args.output_speed_smooth_halflife = 1e6;
+        modifier_settings ms; ms.prof = prof; init_settings(ms);
+        modifier mod;
+        speed_processor sp; sp.init(prof.speed_processor_args);
+        double rx = 0, ry = 0;
+        int ox = 0, oy = 0;
+        bool bad = false;
+        for (int i = 0; i < 2000; i++) {
+            apply_motion_math(mod, sp, ms, 1.0, 1.0, 6.0, 2.0, rx, ry, ox, oy);
+            if (!std::isfinite(rx) || !std::isfinite(ry)) bad = true;
+        }
+        for (int i = 0; i < 200; i++) {
+            apply_motion_math(mod, sp, ms, 1.0, 1.0, 0.0, 0.0, rx, ry, ox, oy);
+            if (!std::isfinite(rx) || !std::isfinite(ry)) bad = true;
+        }
+        EXPECT(!bad);
+    }
+
+    // ── Aile 2: cap (0 / tiny / huge, cap.y=0 "cap yok", cap_mode sırası) ────
+    SECTION("P106 — cap sınır tablosu: 0/tiny/huge × cap_mode sırası");
+
+    // classic GAIN, cap_mode::out — default-ish kurulum (acc=0.01, exp=2)
+    //   cap{15,1.5}: cap_y=0.5, cap_x=gain_inverse(0.5)=25, constant=-6.25
+    {
+        accel_args a = make_args(accel_mode::classic);
+        a.acceleration = 0.01;
+        a.cap = {15.0, 1.5}; a.cap_mode_val = cap_mode::out;
+        classic c(a);
+        EXPECT_NEAR(c(10.0, a), 1.1,   1e-9);      // cap_x(25) altı: base_fn              // g(10)=1.1
+        EXPECT_NEAR(c(25.0, a), 1.25,  1e-9);      // tam cap_x
+        EXPECT_NEAR(c(50.0, a), 1.375, 1e-9);      // cap tail: constant/x + cap_y + 1
+        EXPECT_NEAR(c(1e6, a), 1.49999375, 1e-9);  // asimptot → cap_y+1=1.5
+        EXPECT(c(1e6, a) < 1.5);
+    }
+
+    // cap.y=0 → "cap yok" (sentinel): sınırsız büyür, kapalı kuralla aynı değil
+    {
+        accel_args a = make_args(accel_mode::classic);
+        a.acceleration = 0.01;
+        a.cap = {15.0, 0.0}; a.cap_mode_val = cap_mode::out;
+        classic c(a);
+        EXPECT_NEAR(c(10.0, a), 1.1, 1e-9);        // cap.y=0 → cap DBL_MAX → saf base_fn
+        EXPECT_NEAR(c(1000.0, a), 11.0, 1e-9);     // 0.01*1000 + 1 (cap YOK)
+        EXPECT_NEAR(c(1e6, a), 10001.0, 1e-9);     // sınırsız
+    }
+
+    // cap tiny (cap.y=0.001 < 1) → sign-flip decelation (gain < 1), deterministic
+    {
+        accel_args a = make_args(accel_mode::classic);
+        a.acceleration = 0.01;
+        a.cap = {15.0, 0.001}; a.cap_mode_val = cap_mode::out;
+        classic c(a);
+        EXPECT_NEAR(c(10.0, a), 0.9, 1e-6);        // sign=-1: -(0.01*10) + 1
+        double gh = c(1000.0, a);
+        EXPECT(std::isfinite(gh));
+        EXPECT(gh < 1.0);                          // decelasyon
+    }
+
+    // cap huge (cap.y=1e9): pratik hızlarda cap'siz kurmayla aynı, hep finite
+    {
+        accel_args a = make_args(accel_mode::classic);
+        a.acceleration = 0.01;
+        a.cap = {15.0, 1e9}; a.cap_mode_val = cap_mode::out;
+        classic c(a);
+        EXPECT_NEAR(c(1000.0, a), 11.0, 1e-9);
+        EXPECT(std::isfinite(c(1e6, a)));
+    }
+
+    // cap_mode öncelik sırası: io | in | out — üçü de aynı cap{15,2} ile FARKLI kural
+    {
+        accel_args base = make_args(accel_mode::classic);
+        base.acceleration = 0.01;
+        base.cap = {15.0, 2.0};
+        // out: cap_y=1 → cap_x=gain_inverse(1)=50, constant=(base_fn(50)-1)*50=-25
+        accel_args a = base; a.cap_mode_val = cap_mode::out;
+        classic c_out(a);
+        EXPECT_NEAR(c_out(100.0, a), 1.75, 1e-9);      // -25/100 + 1 + 1
+        EXPECT_NEAR(c_out(1e6, a), 1.999975, 1e-9);    // → cap_y+1=2
+        // in: cap_x=15, cap_y=gain(15)=0.3 → constant=-2.25
+        accel_args b = base; b.cap_mode_val = cap_mode::in;
+        classic c_in(b);
+        EXPECT_NEAR(c_in(100.0, b), 1.2775, 1e-9);
+        EXPECT_NEAR(c_in(1e6, b), 1.29999775, 1e-9);
+        // io: gain_accel(15,1,2,0)=1/30 → accel_raised=1/30, constant=-7.5
+        accel_args d = base; d.cap_mode_val = cap_mode::io;
+        classic c_io(d);
+        EXPECT_NEAR(c_io(100.0, d), 1.925, 1e-9);
+        EXPECT_NEAR(c_io(1e6, d), 1.9999925, 1e-9);
+        // sıralama (x=100'de): io > out > in, üçü aynı değil
+        EXPECT(c_io(100.0, d) > c_out(100.0, a) && c_out(100.0, a) > c_in(100.0, b));
+    }
+
+    // io + cap.y=0: "cap yok" DEĞİL — inversion (SURPRISE: sentinel yalnız out'ta)
+    {
+        accel_args a = make_args(accel_mode::classic);
+        a.acceleration = 0.01;
+        a.cap = {15.0, 0.0}; a.cap_mode_val = cap_mode::io;
+        classic c(a);
+        EXPECT_NEAR(c(10.0, a), 0.6666666666666666, 1e-9);  // sign flip: 1 - (1/30)*x
+        EXPECT_NEAR(c(100.0, a), 0.075, 1e-9);
+        EXPECT(c(10.0, a) < 1.0);                            // decelasyon
+    }
+
+    // power ailesi: cap{30,2} out/in/io → farklı kollar; 1e6'da out/io cap'a (2) yaklaşır
+    {
+        accel_args base = make_args(accel_mode::power);
+        base.scale = 0.5; base.exponent_power = 0.3; base.output_offset = 0;
+        base.cap = {30.0, 2.0};
+        accel_args a = base; a.cap_mode_val = cap_mode::out;
+        power p_out(a);
+        EXPECT_NEAR(p_out(30.0, a), 1.87065823485, 1e-6);
+        EXPECT_NEAR(p_out(1e6, a), 1.99999611975, 1e-6);
+        EXPECT(p_out(1e6, a) < 2.0);
+        accel_args b = base; b.cap_mode_val = cap_mode::in;
+        power p_in(b);
+        EXPECT_NEAR(p_in(30.0, b), 2.25334338084, 1e-6);
+        EXPECT_NEAR(p_in(1e6, b), 2.92932611501, 1e-6);
+        accel_args d = base; d.cap_mode_val = cap_mode::io;
+        power p_io(d);
+        EXPECT_NEAR(p_io(30.0, d), 1.53846153846, 1e-6);
+        EXPECT_NEAR(p_io(1e6, d), 1.99998615385, 1e-6);
+        EXPECT(p_in(30.0, b) > p_out(30.0, a) && p_out(30.0, a) > p_io(30.0, d));   // in>out>io
+        EXPECT(std::fabs(p_in(30.0, b) - p_out(30.0, a)) > 0.1);                    // kollar farklı
+    }
+
+    // power cap.y=0 → cap yok (out): sınırsız, finite
+    {
+        accel_args a = make_args(accel_mode::power);
+        a.scale = 0.5; a.exponent_power = 0.3; a.output_offset = 0;
+        a.cap = {30.0, 0.0}; a.cap_mode_val = cap_mode::out;
+        power p(a);
+        EXPECT_NEAR(p(1000.0, a), 6.45195012148, 1e-6);
+        EXPECT(std::isfinite(p(1e6, a)));
+    }
+
+    // ── Aile 3: per-device (dpi / polling_rate / device_id) ──────────────────
+    SECTION("P106 — per-device sınır tablosu: dpi × polling_rate × device_id");
+
+    // dpi sanitize: [1, 32000]
+    {
+        device_profile dp;
+        dp.dev_cfg.polling_rate = 1000;
+        struct dpi_case { int in; int want; };
+        dpi_case dpi_cases[] = {
+            { 0,          1     },   // altı → 1
+            { -100,       1     },   // negatif → 1
+            { 1,          1     },   // alt sınır
+            { 100,        100   },
+            { 16000,      16000 },
+            { 32000,      32000 },   // üst sınır
+            { 999999,     32000 },   // 1e6 aşım → 32000
+        };
+        for (auto& c : dpi_cases) {
+            dp.dev_cfg.dpi = c.in;
+            sanitize_device_profile(dp);
+            EXPECT(dp.dev_cfg.dpi == c.want);
+        }
+    }
+
+    // polling_rate sanitize: [POLL_RATE_MIN(125), POLL_RATE_MAX(8000)]
+    {
+        device_profile dp;
+        dp.dev_cfg.dpi = 800;
+        struct rate_case { int in; int want; };
+        rate_case rate_cases[] = {
+            { 0,     POLL_RATE_MIN },   // 0 → 125
+            { 50,    POLL_RATE_MIN },
+            { 124,   POLL_RATE_MIN },
+            { POLL_RATE_MIN, POLL_RATE_MIN },
+            { 1000,  1000 },
+            { POLL_RATE_MAX, POLL_RATE_MAX },
+            { 8001,  POLL_RATE_MAX },
+            { 99999, POLL_RATE_MAX },
+        };
+        for (auto& c : rate_cases) {
+            dp.dev_cfg.polling_rate = c.in;
+            sanitize_device_profile(dp);
+            EXPECT(dp.dev_cfg.polling_rate == c.want);
+        }
+    }
+
+    // device_id: boş ve dolu — sanitize korur, JSON round-trip korur
+    {
+        device_profile dp;
+        dp.device_id = "";
+        sanitize_device_profile(dp);
+        EXPECT(dp.device_id.empty());
+        device_profile dp2;
+        dp2.device_id = "usb:1234:5678:serial";
+        sanitize_device_profile(dp2);
+        EXPECT(dp2.device_id == "usb:1234:5678:serial");
+        EXPECT(profile_from_json(profile_to_json(dp)).device_id.empty());
+        EXPECT(profile_from_json(profile_to_json(dp2)).device_id == "usb:1234:5678:serial");
+    }
+
+    // device_id uzunluk sınırı: JSON yolunda 256'ya kesilir (kaynak config.hpp/MAX)
+    {
+        std::string long_id(300, 'a');
+        nlohmann::json j = nlohmann::json::object();
+        j["name"] = "cap"; j["device_id"] = long_id;
+        j["dpi"] = 16000; j["polling_rate"] = 1000;
+        j["profile"] = nlohmann::json::object();
+        device_profile dp = profile_from_json(j.dump());
+        EXPECT(dp.device_id.size() == 256);
+        EXPECT(dp.name == "cap");
+    }
+
+    // boş device_id hiçbir zaman duplicate sayılmaz (iki boş profil çakışmasız)
+    {
+        app_config cfg;
+        device_profile a; a.name = "a"; a.device_id = "";
+        device_profile b; b.name = "b"; b.device_id = "";
+        cfg.profiles = {a, b};
+        EXPECT(check_dup_ids(cfg).empty());
+    }
+
+    // dev_cfg.dpi ve prof.output_dpi bağımsız alanlar — ayrı ayrı kırpılır
+    {
+        device_profile dp;
+        dp.dev_cfg.dpi = 16000;          // device dpi
+        dp.prof.output_dpi = 1.0;        // profile output dpi (alt sınır)
+        sanitize_device_profile(dp);
+        EXPECT(dp.dev_cfg.dpi == 16000);
+        EXPECT(dp.prof.output_dpi >= 1.0);
+    }
+
+    // ── Aile 4: offset (input_offset / output_offset — classic/natural/power) ─
+    SECTION("P106 — offset sınır tablosu: classic/natural/power × 0/tiny/max");
+
+    // classic input_offset: x<=offset → kimlik bandı 1.0; tiny=0 gibi; max kaydırır
+    {
+        accel_args a = make_args(accel_mode::classic);
+        a.acceleration = 0.01;
+        classic c0(a);                                  // offset 0
+        EXPECT_NEAR(c0(0.0, a), 1.0, 1e-9);
+        EXPECT_NEAR(c0(5.0, a), 1.05, 1e-9);
+        EXPECT_NEAR(c0(10.0, a), 1.1, 1e-9);
+
+        accel_args t = a; t.input_offset = 1e-9;        // "tiny"
+        classic ct(t);
+        EXPECT_NEAR(ct(0.0, t), 1.0, 1e-9);
+        EXPECT_NEAR(ct(5.0, t), 1.05, 1e-6);
+
+        accel_args m = a; m.input_offset = 1e6;         // "max" (yukarıda boundsuz)
+        classic cm(m);
+        EXPECT_NEAR(cm(0.0, m), 1.0, 1e-9);
+        EXPECT_NEAR(cm(5e5, m), 1.0, 1e-9);             // band içi → kimlik
+        EXPECT_NEAR(cm(1e6, m), 1.0, 1e-9);             // tam offset → kimlik
+        EXPECT_NEAR(cm(2e6, m), 1.249996875, 1e-6);     // cap tail'e girer (asimptot 1.5)
+        EXPECT_NEAR(cm(1e7, m), 1.449999375, 1e-5);
+        EXPECT(cm(1e7, m) < 1.5);
+    }
+
+    // natural input_offset: aynı kimlik bandı; tiny=0; max kaydırır
+    {
+        accel_args a = make_args(accel_mode::natural);
+        natural n0(a);                                  // offset 0
+        EXPECT_NEAR(n0(0.0, a), 1.0, 1e-9);
+        EXPECT_NEAR(n0(5.0, a), 1.18393972059, 1e-6);   // limit 1.5, dr 0.1 → accel 0.2
+        EXPECT_NEAR(n0(2e6, a), 1.49999875, 1e-6);      // asimptot → args.limit=1.5
+
+        accel_args t = a; t.input_offset = 1e-9;
+        natural nt(t);
+        EXPECT_NEAR(nt(5.0, t), 1.18393972059, 1e-6);
+        EXPECT_NEAR(nt(2e6, t), 1.49999875, 1e-6);
+
+        accel_args m = a; m.input_offset = 1e6;
+        natural nm(m);
+        EXPECT_NEAR(nm(5e5, m), 1.0, 1e-9);             // band içi
+        EXPECT_NEAR(nm(1e6, m), 1.0, 1e-9);             // tam offset
+        EXPECT_NEAR(nm(2e6, m), 1.24999875, 1e-6);      // kaymış asimptot
+        EXPECT_NEAR(nm(1e8, m), 1.494999975, 1e-5);
+        EXPECT(nm(1e8, m) < 1.5);
+    }
+
+    // power output_offset: x<=offset.x → SABİT gain=output_offset (kaydırılmış çizgi)
+    {
+        accel_args a = make_args(accel_mode::power);
+        a.scale = 0.5; a.exponent_power = 0.3;
+        a.output_offset = 0.0;
+        power p0(a);
+        EXPECT_NEAR(p0(0.0, a), 1.0, 1e-9);
+        EXPECT_NEAR(p0(1.0, a), 0.81225239636, 1e-6);   // (0.5*1)^0.3 + 0/1
+        EXPECT_NEAR(p0(1e5, a), 1.49998884528, 1e-5);   // out-cap 1.5'e yaklaşır
+        EXPECT(p0(1e5, a) < 1.5);
+
+        accel_args o2 = a; o2.output_offset = 2.0;
+        power p2(o2);
+        EXPECT_NEAR(p2(1.0, o2), 2.0, 1e-9);            // offset.x≈8.407 altı → sabit 2
+        EXPECT_NEAR(p2(1e5, o2), 1.50001611238, 1e-5);  // üstte cap 1.5'e doğru
+        EXPECT(p2(1.0, o2) > p0(1.0, a));               // band farkı
+
+        accel_args o9 = a; o9.output_offset = 1e-9;     // "tiny"
+        power p9(o9);
+        EXPECT_NEAR(p9(0.0, o9), 1.0, 1e-9);
+        EXPECT(std::isfinite(p9(1e-6, o9)));            // offset.x≈8.3e-31 → baz eğri
+        EXPECT_NEAR(p9(1.0, o9), 0.81225239636, 1e-6);  // tiny offset, bazla aynı
+
+        accel_args om = a; om.output_offset = 1e6;      // "max": offset.x≈8.3e19
+        power pm(om);
+        EXPECT_NEAR(pm(1.0, om), 1e6, 1e-3);            // çok geniş sabit bant
+        EXPECT_NEAR(pm(1e5, om), 1e6, 1e-6);
+        EXPECT_NEAR(pm(1e9, om), 1e6, 1e-6);
+    }
+
+    // output_offset YALNIZCA power'ı etkiler: classic/natural'da kullanılmaz
+    {
+        accel_args a = make_args(accel_mode::classic);
+        a.acceleration = 0.01;
+        classic c_base(a);
+        accel_args b = a; b.output_offset = 2.0;
+        classic c_alt(b);
+        accel_args m = a; m.output_offset = 1e6;
+        classic c_max(m);
+        for (double x : { 0.5, 1.0, 5.0, 17.0, 2000.0 }) {
+            EXPECT_NEAR(c_base(x, a), c_alt(x, b), 1e-12);
+            EXPECT_NEAR(c_base(x, a), c_max(x, m), 1e-12);
+        }
+        accel_args n = make_args(accel_mode::natural);
+        natural n_base(n);
+        accel_args nm2 = n; nm2.output_offset = 1e6;
+        natural n_max(nm2);
+        for (double x : { 0.5, 1.0, 5.0, 2000.0 }) {
+            EXPECT_NEAR(n_base(x, n), n_max(x, nm2), 1e-12);
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -6928,6 +7724,7 @@ int main(int argc, char** argv) {
     test_subpixel_cumulative_drift();
     test_classic_gain_mode_cap_consistency();
     test_natural_gain_formula();
+    test_classic_natural_deep_accuracy();
     test_natural_reference_values();
 
     // R10 — EMA smoother, NaN propagation, event batching, config edge cases
@@ -7003,6 +7800,12 @@ int main(int argc, char** argv) {
 
     // P99 — config-layer deep-scan regressions
     test_p99_config_guards();
+
+    // P107 — set-param domain contract (CLI accepted-domain values survive sanitize)
+    test_p107_param_domain();
+
+    // P106 — per-parameter-family sınır (uç değer) regresyon tablosu
+    test_p106_extremes_table();
 
     if (g_list_only) return 0;
 

@@ -2343,3 +2343,55 @@ cli/src/config derin tarama tamamlandı (kilit Aj.5). Bulgular:
 - F3: `--json` global bayrağı sadece list için (help'te de eksik).
 - B2 (P80 izleme) açık: `set-param cap_x "18.0,1.6"` çift-değer yok.
 Panel: build 0 uyarı, 21801/21801, ASan 21801/21801, oracle 768/31 OK, tr PASS.
+
+### R46 — R47 arası (23:00-23:30) — DERİN TARAMA SEZONU (P96-P102) KAPANDI, R47 PARALEL DALGASI
+
+**Yönetici:** R47 talimatı — tüm 8 ajana paralel görevler (P103-P110), kullanıcı isteği "herkese görev ver, programı küçük parçalara böl, daha hızlı geliştir". Bölge çakışması yok; geniş tasarım kararları Aj 1 onayı; commit yok (R47 sonunda toplu).
+
+**Kapanan derin tarama round'u R46 (commit 5d6b4ff):**
+- P96 (aj2): accel-jump/power doğruluk islahatı + BETA parametre sweep → 24922/24922 ASan temiz (in-flight P96-B accel-jump felaketli iptal sorunu bu fix'le kapandı).
+- P97 (aj3): GUI active_profile başlatma fixi + batarya atoi UB→strtol.
+- P98 (aj4): oracle harness 4 bug fix + 147 yeni case → 915 satır, 31 sapma değişmedi.
+- P99 (aj5): CLI arity sabitleme, -c"" reddi, --json iki pozisyon, P54 6-nokta tip guard + .bak geri yükleme testleri; **F1** (isimsiz export JSON değil) fix önerisi Aj 1'de.
+- P100 (aj6): daemon çift-fclose UB fix, uninstall.sh gerçek konumlar; /etc vs ~/.config ayrışması raporu; canlı daemon sistemde tek sahip.
+- P101 (aj7): real_hardware_test 3.3 tablo kodla eşitlendi; "default raw 1:1" yanlışı düzeltildi; README:591 STALE (latency SIGUSR1) Aj 1'e bildirildi.
+- P102 (aj8): N=2 vs N=4 LUT hata tablosu → sub-perceptual; öneri D (değişiklik yok), ileride fork-stamplı A.
+
+**N2/N3 (Aj 0, P103):** parametre envanteri `docs/research/parameter_index.md` yazıldı (JSON↔set-param anahtarları, domain, default, alias, mode uygulanabilirliği, beş kaynak dosyaya çapraz-referanslı), araştırma index'e bağlandı, AKIS 99 göreve derlendi, bu belge R46→R47 geçişiyle senkronlandı. Yayın öncesi açık kararlar: P99-F1 (isimsiz export), /etc↔~/.config birleştirme, README:591 düzeltmesi.
+
+### Aj.0 [M60] [05 Eyl 2026] [23:35 — P103 TESLİM DOĞRULANDI (DOC-ONLY)]
+
+Yönetici (Aj 1), P103 kapandı; M60 bu teslimin kesin rakamları: envanter **43 parametre** (app 3 / device 5 / accel_args 19 / profile 11 / speed_processor 5); `set-param` ile doğrudan **35**, diğer CLI **2** (`active_profile`→`set`, `name`→create/rename/duplicate), dolaylı **1** (`whole`→`distance_mode`), oto **1** (`version`). **Gerçek GAP (set-param'tan erişilemeyen, yönetici turu): 4** — `use_raw_input`, `disable`, `lut_data`, `lut_length`; ayrıca `whole` için doğrudan anahtar eksik. `use_raw_input` ve `disable` daemon hattında **okunmuyor (dormant)** — CLI anahtarı eklemek veya kaldırmak yönetici kararı. Parametre eşlemesi `docs/research/parameter_index.md` "CLI erişilebilirlik denetimi" + "GAP listesi" bölümlerinde; temsilci settings.json çapraz-doğrulaması tam. Kod değişikliği YOK (R47 kuralı), commit YOK. Detay: mesajlar/aj0.log M60.
+
+### Aj.5 [M27] [05 Eyl 2026] [23:39 — P107 RAPOR]
+
+set-param tamamlık matriksi (R47): **41/41 anahtar** round-trip kayıpsız; `use_raw_input` + `disable` CLI'dan değiştirilemiyor (onay bekliyor). Bilinmeyen anahtar hatası «Unknown key» + listeye düzeltildi. Help'e her anahtar için domain/default eklendi. Panel: build 0 uyarı / oracle OK / tr PASS; **test derleme Aj2 kırıklı** (test_accel.cpp `lp_norm` yanlış struct — `speed_processor_args`'a taşımalı). Kilit Aj.5, aj2 düzeltince panel tamam.
+
+### Aj.3 [M35] [05 Eyl 2026] [23:45 — P104 TAMAMLANDI: FARE KILIT TEST PENCERESI]
+
+P104 (R47) teslim: GUI'ye fare-kilit test penceresi eklendi (gui/mouse_test.inl + 4 dosya, +36 satır, yalnız gui/). Canlı telem (telem_in_ips/telem_out_ips/telem_gain, daemon status seqlock), ESC ile bırakma, 250ms poll, "Daemon çalışmıyor."/"Hareket bekleniyor…" yolları, tr/en PASS, build 0 uyarı, commit yok.
+**Kritik uyarlama:** emir "GDK pointer grab" istiyordu ama kurulu GTK4'te pointer/seat grab + gtk_grab_add + warp TAMAMEN kaldırılmış; X11-native yol da kapalı (gdkx.h/-lX11 yok). → **Tam ekran kısıtlama** uyarlaması: diğer pencereler hiçbir olay almaz (kullanıcı şikayeti sıfır-bağımlılıkla çözüldü); multi-monitor/Wayland best-effort. `docs/test_window_usage.md`'deki 400×240+grab spesifikasyonu gerçek duruma göre güncellenmeli (Aj 1 onayı).
+**Panel notu:** run_tests şu an Aj.2'ye bağlı kırık — test_accel.cpp P107 `accel_x.lp_norm` derlenemiyor (Aj.5 M27 ile aynı tespit); P104 ile ilgisiz. Detay: mesajlar/aj3.log M35.
+
+### Aj.7 [M27] [05 Eyl 2026] [23:46 — P109 TAMAM: GERÇEK-DONANIM KABUL TESTLERİ]
+
+Yönetici (Aj 1), R47 P109 tamamlandı. Yalnız docs/real_hardware_test.md değişti (§4.4 yeni + §4.2 satırı); üretim kodu temiz, commit yok (R47 toplu).
+
+Kabul koşuları (canlı daemon, virtmouse uinput "P57", snapshot harness aktifken alındı):
+- **cs2** classic cap[18,1.6]: telem gain 2.0 | p50 3.75 / p95 5.25 / p99 14.25
+- **valorant** natural limit[30,2.0]: gain 2.0 | p50 3.25 / p95 5.75 / p99 15.25 (tek VM jitter overflow, dokümante)
+- **apex** power scale 2.2 exp 0.8: gain 2.0 | p50 3.25 / p95 5.25 / p99 7.25
+- **fps** classic cap[20,1.8]: gain 2.0 | p50 3.25 / p95 5.25 / p99 7.75
+- **disable**: raw passthrough, gain 1.0, per-event ölçüm yok → 1:1 PASS
+
+p50 3–4µs, P57/P64/P94 bandıyla birebir; her modda `telem_gain > 1` accel hattı canlı. Temizlik: P109_* profilleri silindi, aktif=default, validate PASS, settings.json orijinaliyle aynı. Doc §4.4'te yeniden üretilebilir akış + referans tablosu. AKIS P109 `tamam`, kilit null. Aj 7 boş — emir bekliyor.
+
+### Aj.7 [M28] [05 Eyl 2026] — P109 kesinti sonrası devam + tamam (kilit-pençesi kabul dokümanı + locked senaryo)
+
+Yönetici (Aj 1), R47 P109 M27 erken kapanmıştı; eksik teslimatlar tamamlandı (commit yok):
+
+(a) **test_window_usage.md GUI-ile-birebir düzeltmeleri** (P104 gerçek davranışına karşı denetim): GTK4 grab API'si kaldırılmış → tam ekran HUD modeli (gtk_window_fullscreen); "imleç yakalama başarısız" mesajı kodda yok → gerçek kilit sınırları + sorun giderme tablosu (çoklu monitör, X11/WM, Wayland, daemon kapalı); gerçek tr.inl dizeleri; profil seçimi canlı (250ms yoklama).
+(b) **virtmouse-game `locked` senaryosu** — derleme 0 uyarı + canlı daemon koşusu (PID 185957, rtp_cs2 geçici aktif → default geri): 10 sn × 1000 Hz, 90×60 kutu, 777 box re-wrap; **p50 3.75 / p95 5.75 / p99 8.25 / Max 1656.88** (n=4661) — §4.4 cs2 referansıyla birebir; Max/overflow = re-wrap büyük delta + geç uyanan döngü (kilitli-imleç imzası, hata değil).
+(c) **Preset sayı spot-checki** presets.hpp → header hesabıyla: cs2 @900 1.5750 / @80 1.3188 (asimptot 1.6); fps @900 1.7644 / @80 1.3999 (1.8); apex @5 2.1011 / zemin 0.9007 / çatı 2.1995; natural @0.2 1.008→@900 1.299 (bant 1.0-1.3); noaccel 1.0, disable telem 0.00 — §3.3 ile birebir.
+
+Trend: docs/test_window_usage.md (Bölüm 1-6) + real_hardware_test.md üst notu. AKIS P109 `TAMAM (M28)`, kilit null. Aj 7 boş — emir bekliyor.

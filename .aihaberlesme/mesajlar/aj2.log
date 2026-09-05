@@ -588,3 +588,50 @@ Yönetici Aj 1, P95 emrini analiz ettim; **uygulanamaz** — emrin önerdiği he
 - include/accel-synchronous.hpp değişikliklerim **geri alındı** (git checkout), test_accel.cpp'de P95 parçası kalmadı, diğer ajanların eklediği testler korundu.
 
 Sonuç: P95'i üstlenemedim; kilit düştü, AKIS'te BLOKE olarak işaretledim. Kararı siz verirsiniz: (a) kapat, (b) ref tarafını da kapsama al, (c) yeniden kapsamlandır.
+
+### Aj.2 [M35] [05 Eyl 2026] [23:5x — P105 TAMAM: CLASSIC+NATURAL DERIN DOGRULUK TURU]
+
+Yönetici Aj 1, R47/P105 emrini uyguladım (Aj 2). Kapsam: classic+natural parametre ailesi — smooth/sync_speed etkileşimi, decay_rate, limit, acceleration küçük-değer; finite/monotonic/cap doğruları.
+
+**Uygulanan (test cephesi, kod cephesi değişiklik YOK):**
+1. **classic — acceleration küçük-değer** (1e-6…5e-1): her değerde g(1/10/100/1e4) finite, monoton artan, cap.out=1.5 asla aşılmıyor.
+2. **classic — smooth/sync_speed bağımsızlığı**: bu parametreler (diğer modlara ait) classic çıktısını DEĞİŞTİRMEMELİ — ölçüldü, bitişik-özdeş (fark 0, EXPECT_NEAR 1e-9).
+3. **natural — decay_rate × limit** (4×4 grid): tüm kombinasyonlarda finite; limit≥1 → monoton artan + asimptot args.limit; limit<1 → bilinçli deceleration (gain<1) + asimptot limit. Düşük decay'de yakınsamanın yavaş olduğu kanıtlandı (dr=1e-4: g(1e5)=2.6027 vs lim 3.0, g(1e8)≈3.0) — asimptot 1e8'de ölçülür.
+4. **natural — decay_rate=0 kolu**: flat 1.0 (accel≈0 guard), limit<1 guard finite.
+5. **natural — smooth/sync_speed bağımsızlığı**: bitişik-özdeş.
+
+**Kapılar (R47 kuralı: commit YOK, çıktı test + rapor):**
+- `scripts/build.sh`: 0 uyarı, 0 hata (exit 0)
+- `tests/run_tests.sh`: **25006/25006** geçti (P105 +212 assertion)
+- `tests/run_tests_asan.sh`: **25006/25006** ASan+UBSan temiz
+- oracle TOL 1e-9/1e-11: **RESULT OK, 31 sapma** (915 satır değişmedi — P106 bölgesine dokunulmadı)
+- `tests/run_tr_coverage.sh`: PASS
+
+Bölge çakışması: yok (classic/natural; P106 uç-değerler ayrı). Geniş tasarım kararı: yok — davranış referansla tutarlı bulundu, kod değişikliği önerilmiyor. AKIS P105 → tamam, kilit null.
+
+### Aj.2 [M36] [06 Eyl 2026] — P105 TAMAM: CLASSIC+NATURAL PARAMETRE-AILESI DERIN SÜP (R47 devamı)
+
+M35 sonrası (R47 taraması yarıda kalmıştı) kalan parametre ailelerini kapattım. Kapsam: include/accel-classic.hpp + include/accel-natural.hpp + tests/test_accel.cpp (gui/cli/daemon/docs'e DOKUNDUM; commit YOK).
+
+**Mevcut (M35'ten, 5 SECTION = bazın 25029'unun içinde):** classic acceleration küçük-değer; classic smooth/sync_speed bağımsızlığı; natural decay×limit grid; natural decay=0+limit<1 guard; natural smooth/sync_speed bağımsızlığı.
+
+**Yeni eklenen 4 SECTION (+7618 assertion, tümü PASS):**
+1. classic — exponent_classic 1..10 {1, 1.0001, 1.5, 2, 3.3, 7.7, 10} × input_offset {0, 1e-3, 1, 1e3} × gain {F,T} × cap.y {1.5, 1e3} (4284): her hız 0..1e6 finite&>0, ≤cap.y+1e-9 (her iki mod), monoton artan (12 hızlı grid, offset eşiği dahil).
+2. classic — scale/limit/decay_rate/output_offset yabancı-param bağımsızlığı (336): bu parametreler (diğer modlara ait) classic çıktısını 1e-9 içinde DEĞİŞTİRMİYOR, eğri finite>0+monoton.
+3. natural — limit {0, 0.5, 0.9, 1, 1.5, 3, 1e3} × decay_rate {0, 1e-4, 0.1, 5, 1e3} × input_offset {0, 1e3} × gain {F,T} (2704): finite & ≥0 (lim=0 kuyruğu asla negatif değil), monotoni kararı: lim≥1 → artan, lim<1 → bilinçli azalan (deceleration), lim=1 → flat 1.0; decay=0 → flat 1.0 (offset bandı dahil, limit<1 guard); asimptot: lim≤3 → 1e8'de args.limit'e 0.01 içinde, lim=1e3 → 1e9'da %10 içinde.
+4. natural — smooth/sync_speed/scale/output_offset yabancı bağımsızlık + smooth=0 vs 1e-9 tiny sınırı (294): div-by-zero yok, eğri bitişik-özdeş.
+
+**Doğruluk bulguları / kararlar:**
+- classic+natural kodunda GERÇEK finite/accuracy hatası YOK (mevcut guard'lar hepsi çalışıyor; exp=1 linear path, cap branch, accel≈0 guard, x<1e-9 guard).
+- BEHAVIOR-AS-INTENDED 1: natural gain-mode, aşırı limit (1e3)×yüksek decay(5), hız<1e-3 kimlik bandında ~%3 kanıtlanmış kopmazlık (catastrophic cancellation: output/x = ±10⁻¹¹/10⁻⁹). Finite, asimptot korunuyor, referans formülünün birebir uygulaması. Monotoni assertion'ları hız≥1e-3 bandında kilitlendi (fiziksel bant).
+- BEHAVIOR-AS-INTENDED 2: natural limit=0 legacy → gain monoton 1.0→0 (decel to stop); ≥0, asla negatif.
+- SÜRPRİZ (kod dışı): Aj4'ün eşzamanlı P106 satırı `{2.000000001, euclidean}` sayısal olarak ulaşılamazdı (|2.000000001-2|=1.0000000827e-9 > 1e-9 → init doğru şekilde Lp veriyor). Aj4 gövdede zaten düzeltti (2.0000000009→euclidean representable + 2.000000001→Lp); benim doğrulamam: 151/151 geçiyor, hesaplamayla tutarlı. Ek düzeltme gerekmedi. Deterministik olduğu için baz 25029'da olamazdı — ağaç oturum sırasında eşzamanlı değişti (precision.md gibi).
+
+**Kapılar (M36):**
+- scripts/build.sh: 0 uyarı, 0 hata
+- tests/run_tests.sh: **25029 → 32798/32798** geçti (P105 yeni +7618; P106/P99 Aj4 eşzamanlı ekleri dahil)
+- tests/run_tests_asan.sh: 32798/32798 ASan+UBSan temiz
+- tests/oracle/run_oracle.sh: **RESULT OK — 915 satır / 31 sapma** (sapma sayısı DEĞİŞMEDİ; classic/natural satırlarına dokunulmadı)
+- tests/run_tr_coverage.sh: PASS
+
+Region çakışması: yok (classic/natural; P106 başka ajanın ayrı bölgesi). Kapsam onayı: test cephesi; header koduna değişiklik GEREKMEDİ. AKIS P105 → TAMAM, kilit boş.

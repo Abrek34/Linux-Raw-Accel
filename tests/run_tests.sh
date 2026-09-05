@@ -101,4 +101,37 @@ PY
     fi
     echo "CLI P99 arity/-c\"\" kapısı: ekstra-arg red + -c\"\" red ✓"
     rm -f "$TMPA"
+
+    # ── P107: set-param domain kapısı (sessiz clamp → red) ──────────────────
+    # Out-of-domain set-param values must exit 1 AND leave the config file
+    # byte-identical (previously snap 90 silently stored 45 and exited 0).
+    TMPP=$(mktemp)
+    rm -f "$TMPP" "$TMPP.bak"
+    "$CLI" -c "$TMPP" --no-daemon create-preset gaming g >/dev/null 2>&1
+    set +e
+    "$CLI" -c "$TMPP" --no-daemon set-param g snap 20 >/dev/null 2>&1
+    RC_OK=$?
+    set -e
+    if [ $RC_OK -ne 0 ]; then
+        echo "FAIL: P107 valid in-domain set-param rejected (rc=$RC_OK)"
+        exit 1
+    fi
+    BEFORE=$(cat "$TMPP")
+    for BAD in "snap 90" "dpi 999999" "exponent_classic 0.5" "lp_norm 0" "polling_rate 50" "snap abc"; do
+        set +e
+        OUT=$("$CLI" -c "$TMPP" --no-daemon set-param g $BAD 2>&1)
+        RC=$?
+        set -e
+        AFTER=$(cat "$TMPP")
+        if [ $RC -eq 0 ]; then
+            echo "FAIL: P107 boundary 'set-param g $BAD' accepted (rc=$RC): $OUT"
+            exit 1
+        fi
+        if [ "$BEFORE" != "$AFTER" ]; then
+            echo "FAIL: P107 boundary 'set-param g $BAD' mutated config"
+            exit 1
+        fi
+    done
+    echo "CLI P107 set-param domain kapısı: out-of-domain red + config dokunulmadı ✓"
+    rm -f "$TMPP" "$TMPP.bak"
 fi

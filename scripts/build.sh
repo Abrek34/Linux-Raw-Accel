@@ -109,7 +109,7 @@ echo "[1/3] Building rawaccel-daemon..."
         $CXX $BASE_CXXFLAGS $EVDEV_CFLAGS $GTK4_CFLAGS -I$ROOT/include \
             "$ROOT/src/config.cpp" \
             "$ROOT/gui/main.cpp" \
-            $GTK4_LIBS $LDFLAGS_HARDEN \
+            $GTK4_LIBS -ldl $LDFLAGS_HARDEN \
             -o "$BUILD/rawaccel-gui"
     else
         echo "[3/3] Skipping rawaccel-gui (GTK4 development files not found)."

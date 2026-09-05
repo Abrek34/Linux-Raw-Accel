@@ -365,3 +365,53 @@ Kapsam: daemon/ + kurulum akışı (daemon/daemon.cpp, daemon/main.cpp, setup.sh
 - tr_coverage: PASS ✓
 
 **Sonuç:** kendi bölgem temiz (daemon/ + kurulum); 2 minimal fix uygulandı (çift-fclose, uninstall yolları); R34 canlı; aktif config'e dokunulmadı; commit yok. ASan'deki tek başarısızlık eş zamanlı P96 WIP'ine ait — yönetici/Aj8 kararı.
+
+### Aj.6 [M28] [05 Eyl 2026] [≈23:2x] — P100 EK BULGULAR (M27 SONRASI RAFLARDA KALAN 2 DÜZELTME)
+P100 M27 raporuna GİRMEYEN ama kendi oturumumda yakalanıp düzeltilen 2 gerçek tutarsızlık (commit YOK; kilit Aj.1):
+
+**[1] BULGU — uninstall.sh /usr/lib udev kuralı artığı**
+- setup.sh temizleme listesinde `/usr/lib/udev/rules.d/99-rawaccel.rules` VAR (satır 184), kurulum ise sadece `/etc/udev/rules.d/`'ye kuruyor (satır 252). Yani `/usr/lib` kopyası kurulumdan kaynaklanmaz, PKGBUILD/paketleme akışının (19:21, root) artığıdır.
+- CANLI KANIT: `/usr/lib/udev/rules.d/99-rawaccel.rules` (root, 19:21, 804 b) SİSTEMDE MEVCUT. `setup.sh --uninstall` bu dosyayı temizlediği hâlde `scripts/uninstall.sh` yalnız `/etc/udev`'yi silip bu kopyayı BIRAKIYORDU.
+- FİX (minimal, tek satır): uninstall.sh udev bloğuna `rm -f /usr/lib/udev/rules.d/99-rawaccel.rules` eklendi. bash -n OK; setup/uninstall temizlik listeleri artık birebir örtüşüyor (karşılıklı kontrol: tek eksik yok).
+
+**[2] BULGU — daemon raw-passthrough dalında gereksiz 2. clock okuması**
+- flush_motion() raw dalı (daemon.cpp:971): `dev.telem_wall_ms = now_ms();` — AGENTS.md "Unified clock source" + P93 batched write sonrası non-raw dal 2 clock'a inmişti ama raw dal ikinci clock_gettime'ı koruyordu.
+- telem_wall_ms AGENTS.md'de "struct'ta tutulur, serileştirilmez" açıkça yazılı → status_json onu BASMAZ. Bu yüzden now_ms() çağrısı yalnızca israf.
+- FİX (minimal): `dev.telem_wall_ms = static_cast<double>(t_start) / 1'000'000.0;` — t_start zaten flush başında alınan aynı monotonic-RAW zamanı (ns). Ek syscall 0. Raw dal: t_start(t1) + now_ns(t_end) + tek batched write = 2 clock + 1 write.
+
+**KAPILAR (bu oturum)**
+- build.sh: 0 uyarı / 0 hata ✓
+- run_tests.sh: 24922/24922 ✓ (P96-B accel-jump artık GEÇİYOR — Aj8 WIP oturma, M27'deki 24921/24922 farkı çözüldü)
+- run_tests_asan.sh: 24922/24922 ✓ (ASan+UBSan temiz)
+- oracle: RESULT OK — 915 satır, 31 bilinen sapma, rel tol 1e-09 ✓
+- Canlı sisteme DOKUNULMADI (kilit Aj.1; aktif config / R34 değişmedi; kurulu daemon 0.5.0 P93'süz çalışmaya devam ediyor PID 185957)
+
+**Sonuç:** P100 bölgesinde M27'in 2 fix'i + M28'in 2 fix'i = toplam 4 gerçek bulgu düzeltildi, kendi bölgemde kalan tutarsızlık yok. 3 dosya dokunuldu: daemon.cpp (fclose + telem_wall_ms), scripts/uninstall.sh (systemd/bin + udev /usr/lib). Commit kararı Aj.1.
+
+### Aj.6 [M29] [05 Eyl 2026] [≈23:3x] — P108 ÜSTLENDİM (Aj 1 R47 emir P103-P110 → P108 aj6)
+P108 kapsamı: (1) daemon hot-path parametre turu: input_speed_smooth_halflife (düşük poll senaryoları), lp_norm, whole; (2) canlı sistem daemon doğrulaması (PID 185957 / R34); (3) P104 mouse-kilit penceresinin telem IPC'si için status JSON alan payının DAEMON tarafında hazır/dolu olması. Kural: GERÇEK bulgu → minimal fix + regression; geniş tasarım → yönetici onayı. Commit YOK. Kilit: Aj.6 (P108).
+
+### Aj.6 [M31] [05 Eyl 2026] [≈23:5x] — P108 DAEMON HOT-PATH PARAMETRE TURU + CANLI DOĞRULAMA (+ R46 KANIT TEYİDİ)
+R46 toplu commit (23:26) P100'ün tüm işini içermiş (teyit: HEAD==working tree daemon.cpp:976 telem_wall_ms=t_start/1'000'000 ✓, uninstall.sh /usr/lib/udev ✓; git diff --exit-code temiz). P108 turu bitti; commit YOK; kilit Aj.1.
+
+**[1] CANLI SİSTEM DAEMON DOĞRULAMASI (PID 185957, 34+ dk kararlı)**
+- servis: active(running), 1.2M/3.2M peak, `-c /etc/rawaccel/settings.json` → R34 "default 1:1 raw". 
+- IPC socket /run/rawaccel.sock (root:input 0660) doğrudan sorgu → status JSON: running=true, 3 cihaz (2 fiziksel + P57 test faresi).
+- P57 sıcak telem kanıtı: telem_in_ips=4.460, telem_out_ips=5.575, telem_gain=1.250 (=5.575/4.460 EXACT), telem_dx=4, telem_dy=0, lat p50=3.25µs p99=7.25µs max=868.73µs. → seqlock telem zinciri + dpi_factor=1.0 modülü gerçek donanımda tutarlı; gain 1.25 aktif profil oranıyla birebir.
+
+**[2] STATUS ALAN PAYI → P104 MOUSE-KİLİT PENCERESİ İÇİN HAZIR**
+- status JSON'da telem_in_ips / telem_out_ips / telem_gain / telem_dx / telem_dy (+ lat_samples, lat_p50/95/99/max) SICAK olarak serileştiriliyor. Kilit penceresine hız (in/out), kazanç, delta göstergesi için **ek alan gereksinimi YOK**. 
+- `telem_wall_ms` bilinçli serileştirilmiyor (AGENTS.md) — kilit penceresi bunu isterse AYRI bir karar (yönetici onayı), bugün gerekmez.
+
+**[3] HOT-PATH PARAMETRE ZİNCİRİ (input_speed_smooth_halflife / lp_norm / whole)**
+- config → JSON (config.cpp 179-183 ↔ 242-250) → sanitize (finite_or 393-398; lp_norm negatif/0 korunur, test 1931/1945; halflife≥0 test 2405/2409) → apply_profile (daemon.cpp 643→654) → speed_processor.init (rawaccel.hpp 117-147; whole=false→separate, lp_norm>16→max, ≠2→Lp, ≈2→euclidean; smoothing init) → calc_speed_whole/separate (149-172). Zincir EKSİKSİZ.
+- R14 (test_speed_processor 1103-1175: euclidean/max/Lp/separate + smoothing flag + halflife 0), R12 (5010 lp_norm=3), all_distance_modes (4302), smoothing (4345: 500 kare + ani duruş) mevcut.
+
+**[4] GERÇEK TÜR KAPSAM AÇIĞI (küçük, raporlama amaçlı)**
+- Birim testlerde `modify()` hep `time_ms=1.0` sabit karesi ile çağrılıyor; **düşük-önem düşük poll (125Hz/8ms, 250Hz/4ms) açık sabit-değer birim testi yok**. Fuzz KAPSAR: fuzz_accel.cpp 93-95 rastgele time_val 1.0-100.0 clamp → düşük poll dahil, ASan+UBSan 24922/24922 ile temiz. → Bu bir açık değil, dokümantasyon/tür notu. Ek sabit kare (8ms) testi istenirse Aj2 P105 turuna önerilebilir.
+
+**[5] KAPILAR (bu oturum)**
+- build.sh 0 uyarı/0 hata ✓
+- run_tests.sh 24922/24922 ✓ | run_tests_asan.sh 24922/24922 ✓ | oracle 915/31 OK (rel tol 1e-09) ✓
+
+**Sonuç:** P108 bölgesi temiz ve doğrulandı; P104'ün ihtiyacı olan tüm status telem alanları hazır; düşük-poll tür açığı fuzz ile kapsanıyor (kod değişikliği gerekmedi). Kurulu daemon'a dokunulmadı (R34 canlı, kilit Aj1). Commit YOK.

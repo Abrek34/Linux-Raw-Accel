@@ -185,3 +185,57 @@ OKUMA: Diskretizasyon hatası BİAS'tır, ULP değil; en kötü N=2 hatası sigm
 - learning.md: DEĞİŞMEDİ (talimat).
 
 Yöneticiye özet: N=2 LUT hatası ~%1.15 dizinde, 100 ips üstü ≤%0.074 → kullanıcı algılayamaz; N=4 yarıya indirir ama her iki iyileştirme (partition veya double) oracle'ı kırar (69/21 satır). Öneri bugün D; ileride yalnız "fork-stamp"lı A. Detaylar: docs/research/precision.md §7, deviations.md §P102.
+
+### Aj.8 [M14] [05 Eyl 2026] — P110 TAMAM: MOD-PARAMETRE ETKILESIM ARASTIRMASI (interaction-aware defaults ile)
+R47 P110 (Aj 1 emri — mod-parametre etkilesim arastirmasi) TAMAM. Emir kapsami: (1) natural<->classic, (2) power cap/cap_mode x input_offset, (3) synchronous sync_speed x halflife, (4) lookup LUT x output_dpi; + etkilesim-duyarli default onerileri. Kural: YALNIZCA docs/research/*.md, kod degisikligi YOK, commit YOK. Kilit birakildi (kilit null).
+
+## 1) natural <-> classic (sabit parametrelerle karsi egri)
+
+Ayni set-param domainindeki ortak parametreler (input_offset, cap_mode, output_dpi, gain=true) karsilastirmasi, varsayilan profile (natural limit=1.5/decay=0.1 vs classic accel=0.005/exp=2/cap{15,1.5} out):
+- 300 ips: natural 1.491667 vs classic 1.458333 = +%2.29
+- 1000 ips: 1.497500 vs 1.487500 = +%0.67
+- 4000 ips: 1.499375 vs 1.496875 = +%0.17
+- En buyuk fark ~50 ips: 1.450002 vs 1.250000 = +%16.0 (classic gecis ustunde daha yavas yukselir)
+- Her ikisi de args.limit=1.5'e asimptot olur (classic icin cap_x=50 = cap.y=1.5'in gain_inverse'i). Deger actik; literaturde/net dokumanda yoktu. Doc: precision.md 8.1.
+- input_offset altinda ikisi de duz 1.0 (acilim noktasi kimliksel). Islevsel cakisma YOK.
+
+## 2) power cap/cap_mode x input_offset — WORST UX HAZIR BULGUSU
+
+- **input_offset power'da NO-OP'tur** (kilit bulgu): include/accel-power.hpp ve tests/oracle/ref/accel-power.hpp input_offset'i HIC OKUMAZ (sadece saklar). Kullanici "oradaki deger ne yapiyor" diye ayarlar ama homo yok; dokumante etmeden kullanici yanilgisi yaratir.
+- Sanitizer (src/config.cpp:324-360) scale/exponent_power/cap.x/cap.y/output_offset icin UST SINIR YOK; GUI maxlari scale=100, exp=5, cap_y=100 (gui/ui_builder.inl:225-236) — yani en kotu kombinasyon GUI'den ulasilabilir ve hata vermeden kabul edilir.
+- **EN KOTU kombinasyon (GUI-ulasilabilir, hatasiz):** power+GAIN, scale=100, exponent_power=2, cap_mode=in, cap_x=500:
+  - gain 2.5e3 @ 0.5 ips, 1e4 @ 1 ips, 1e6 @ 10 ips (cap devre disi kalmis)
+- **Alternatif bypass (default exp 0.05):** power+GAIN, output_offset=50 -> offset.x=3.6e33 >> cap.x=1253 -> gain HER HIZDA sabit 50x, cap tamamen sessiz/inert. output_offset=10 -> sabit 10x.
+- Kontroller: scale=100, n=2, default out cap_y=1.5 -> 1.486-1.499 guvenli (cap calisiyor); scale=50, n=1 -> tam 50x @ 1 ips (esik).
+- Guvenli kullanim paragrafi (kullanici rehberi) precision.md 8.2'ye yazildi: scale<=2, exp 0.5-1.0, output_offset [0,1], cap out cap_y 1.5-2.
+
+## 3) synchronous sync_speed x halflife (input_speed_smooth_halflife) — gecikme tablosu
+
+EMA smoother (linear_ema_smoother) ile step -> sync_speed'te "bulanik pencere" (gain hatasi >%5):
+- halflife=0:  0 ms  (off)
+- halflife=2:  3.5-3.8 ms
+- halflife=10: 18.8-19.0 ms
+- halflife=100: 189.2-192.5 ms
+- Yerlesme: hl=10 -> %95~23.5ms / %99~35.5ms; hl=100 -> %95~249ms / %99~382.5ms
+- sync_speed 0.5 / 0.9 / 5.0 sonuclari <%2 fark -> **sync_speed gecikme-not R** (yalniz egri sekli); tek gecikme kolu halflife'dir. Zirve anlik gain hatasi ~%10 her konfigde benzer.
+- **Gecikme-en-guvenli oneri:** hl=0 (off); smooth gerekirse halflife <= 10ms (~19ms = 1 kare), 100ms (~190ms) ASLA. Doc: precision.md 8.3.
+
+## 4) lookup LUT x output_dpi — cift-normalizasyon YOKTUR (kod yolu dogrulanmis)
+
+Kod yolu: dev.dpi_factor = NORMALIZED_DPI/dev.dpi (daemon/daemon.cpp:651) -> apply_motion_math (daemon/motion_math.hpp:19-33) -> modifier::modify (rawaccel.hpp:231). Tek normalizasyon INPUT: ips_factor = dpi_factor/time (rawaccel.hpp:242), abs_vel -> normalized ips (rawaccel.hpp:287-288) = LUT x-domain (accel-lookup.hpp:61-121). Gain tek kez: in.x *= scale (rawaccel.hpp:324,330). Tek rescale OUTPUT: dpi_adjustment = (output_dpi/NORMALIZED_DPI)*dpi_factor (rawaccel.hpp:348-352) = net output_dpi/dpi, GAIN'DEN SONRA. output_dpi, steps 3-4'te OKUNMAZ.
+- Numerik: gain output_dpi 500/1000/2000/8000 icin BIT-AYNI. Tek tehlikeli yol: kullanicinin LUT y'sini kendi eliyle output_dpi ile olceklendirmesi. Truncation tek kez (motion_math.hpp:46). Doc: precision.md 8.4.
+
+## 5) ETKILESIM-DUYARLI DEFAULT SECIMLERI (yeni oyuncu rehberi, precision.md 8.5)
+
+- classic: accel=0.005, exp=2, input_offset 0-20, cap out cap_y 1.5-2, gain=true (limite cok yakin kurma)
+- natural: limit=1.3-1.8, decay_rate=0.08-0.12, input_offset 0-5, gain=true
+- power: scale=1 (max 2), exponent 0.5-1.0 (taban tavan pozitifse 0.05 VARSAYILANI KULLANMA), output_offset [0,1], cap out cap_y 1.5-2, input_offset ETKISIZ (unuttur)
+- synchronous: smooth 0.25-0.5, motivity<=2, gamma=1, sync_speed ~ takip hizi, input halflife<=10 (tercih 0)
+- lookup: LUT x-y IKI eksen normalized ips, output_dpi=1000 veya native, output_dpi'yi LUT y'sine KATLAMA
+- noaccel/disable: raw_passthrough preset'i
+
+## Degisen dokumanlar
+- docs/research/precision.md: +218 satir, eklendi §8 (8.1-8.5), gecmis typos (cap.x/apt, face) duzeltildi.
+- docs/research/index.md: +24/-3 — P110 agenda maddesi (DONE), ozet satiri, precision.md doku tablo satiri. learning.md: DEGISME DI.
+- .aihaberlesme/AKIS.json: P110 durum=TAMAM, kilit bosaltildi (Aj7 P109 kaydiyla birlikte calisti; 99 gorev korundu).
+- Kod degisikligi YOK, commit YOK. Odometre: /tmp/opencode/p110/{harness,harness2,harness3}.cpp (REPO DISI).

@@ -774,6 +774,12 @@ void build_ui(AppState* S, GtkApplication* gapp) {
     g_signal_connect(perf_btn, "clicked", G_CALLBACK(on_perf_clicked), S);
     gtk_box_append(GTK_BOX(status_hbox), perf_btn);
 
+    // Mouse lock test window (P104): pointer lock + live speed/gain readout.
+    GtkWidget* test_btn = trbtn("Mouse Test");
+    trtip(test_btn, "Mouse lock test window — locks the pointer inside and shows live speed/gain. ESC releases.");
+    g_signal_connect(test_btn, "clicked", G_CALLBACK(on_mouse_test_clicked), S);
+    gtk_box_append(GTK_BOX(status_hbox), test_btn);
+
     gtk_box_append(GTK_BOX(outer_vbox), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
     gtk_box_append(GTK_BOX(outer_vbox), status_hbox);
 
@@ -1267,6 +1273,7 @@ void on_activate(GtkApplication* gapp, gpointer user_data) {
 "separator { background-color: #333336; min-height: 1px; }"
     ".sidebar { background-color: #141416; }"
     ".battery-label { color: #e0e0e0; font-weight: bold; min-width: 80px; }"
+    ".test-val { font-family: monospace; font-size: large; color: #7fd4ff; min-width: 110px; }"
     );
     gtk_style_context_add_provider_for_display(
         gdk_display_get_default(),

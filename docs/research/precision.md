@@ -298,3 +298,219 @@ Decision logic:
 Recommended eventual action, if any: **A** (with a `ref` "fork stamp"), executed
 with `double`-storage folded in **only if** the ABI source-contract ramification
 is accepted at the same time. Until then, **D**.
+
+---
+
+## 8. Cross-parameter-family interaction research (P110)
+
+> Aj 8 (P110, R47). DOC-ONLY — no code changes. Every number below was computed
+> with the **real headers** (`include/accel-*.hpp` via `accel_union::apply`, or
+> `speed_processor` EMA smoothers) compiled at `-O2`, not by hand. Parameter
+> families (natural/classic sweeps, power cap, synchronous halflifes, lookup LUT,
+> output_dpi) are tuned independently by different agents; this section maps the
+> surfaces where two families *interact*, catches cross-family hazards, and ends
+> with interaction-aware defaults for new players.
+
+### 8.1 natural "smooth" ↔ classic — numeric difference at same params
+
+Both modes honour `input_offset` identically (flat gain `1.0` below it,
+`accel-classic.hpp:45` / `accel-natural.hpp:29`) — that surface is **safe**. The
+*surface that differs* is how each mode climbs to its asymptote. At
+**defaults** (natural: `limit=1.5, decay_rate=0.1`; classic:
+`acceleration=0.005, exponent_classic=2, cap{15,1.5} cap_mode=out`) both
+approach `args.limit=1.5`, but via different machinery:
+
+| ips | natural GAIN | classic GAIN | Δ (nat−cls) | Δ rel | note |
+|-----|-------------:|-------------:|------------:|------:|------|
+| 0.5 | 1.024187 | 1.002500 | +0.0217 | +2.16% | both barely off 1.0 |
+| 5   | 1.183940 | 1.025000 | +0.1589 | +15.5% | classic still in its `x²` ramp |
+| 50  | 1.450002 | 1.250000 | +0.2000 | **+16.0%** | classic cap knee is at `cap_x=50` |
+| 100 | 1.475000 | 1.375000 | +0.1000 | +7.3% | classic tail `constant/x+cap_y` engages |
+| **300** | **1.491667** | **1.458333** | +0.0333 | **+2.29%** | |
+| **1000** | **1.497500** | **1.487500** | +0.0100 | **+0.67%** | |
+| **4000** | **1.499375** | **1.496875** | +0.0025 | **+0.17%** | |
+
+- At the requested 300/1000/4000 ips the two curves are within **2.3% → 0.2%** of
+  each other — *numerically interchangeable in the flick/track band*.
+- The real difference is **low-mid band** (5–100 ips): natural reaches ~97% of
+  its asymptote by 50 ips (exponential `exp(−accel·t)`), while classic climbs
+  `(acc·x)^2/...` and only rounds off after its `cap_mode=out` knee at
+  `cap_x = gain_inverse(cap.y) = 50`. At 50 ips the gains differ by **16%**.
+- **Was it documented?** No. `formulas.md` documents each mode's formula but not
+  the *pairwise* reading. This row fixes that: *"classic's cap point and
+  natural's decay corner land at different speeds even when both 'limit' to the
+  same asymptote."* A GUI curve comparison will show a visibly steeper early
+  natural curve for the same `limit`.
+
+Numeric takeaway for tuning agents: if a preset swaps natural↔classic "keeping
+the same limit", the *high-speed* feel is preserved (≤2.3% above 300 ips) but the
+*micro/mid-speed* feel changes a lot (up to 16% at 50 ips). Match by feel at the
+operating band, not by `limit` alone.
+
+### 8.2 power cap/cap_mode ∩ input_offset — hyper-sensitivity hazard (WORST)
+
+**Finding 1 — `input_offset` is a hard NO-OP in power.** Neither this port
+(`accel-power.hpp` never reads `args.input_offset`) nor the reference
+(`tests/oracle/ref/accel-power.hpp`) consumes it. It is stored-only
+(`parameter_index.md` #18). Consequence: a config that sets `input_offset=20` in
+classic/natural (protecting a slow 1:1 micro band) **silently loses that band**
+when switched to power — the power curve is active from its `offset.x`
+(determined by `output_offset`, not `input_offset`). Measured:
+
+| ips | classic `input_offset=20` | power `input_offset=20` (IGNORED) |
+|----:|--------------------------:|------------------------------------:|
+| 5   | 1.0000 (flat, protected)  | **5.0000** (scale·x)¹ |
+| 15  | 1.0000 (flat, protected)  | **15.0000** |
+| 25  | 1.0050 (just kicked in)   | **25.0000** |
+
+¹ example uses `scale=1, exponent_power=1`, far `cap_mode=in` cap.
+
+**Finding 2 — a >50× pre-cap gain is reachable, and by the GUI alone.**
+The pre-cap gain curve is `gain(x) = (scale·x)^n + C/x`, i.e. ~`scale^n·x^n`.
+The sanitizer (`src/config.cpp:324-360`) has **no upper bound** on `scale`,
+`exponent_power`, `cap.x`, `cap.y`, or `output_offset` (only negative→0 and
+floors); the GUI spinners max at scale=100, exponent=5, cap.y=100
+(`gui/ui_builder.inl:225,230,235`). Measured worst configurable combos:
+
+| combo (power + GAIN) | gain @0.5 | gain @1 | gain @10 | verdict |
+|----------------------|----------:|--------:|---------:|---------|
+| scale=100, n=2, cap_mode=**in**, cap_x=500 (GUI maxes) | 2.5e3 | 1e4 | 1e6 | **>50× everywhere** |
+| scale=100, n=5 (GUI max exp), cap_mode=in, cap_x=100 | 3.1e8 | 1e10 | — | **>50× everywhere** |
+| scale=100, n=2, cap_mode=**out**, cap_y=100 (GUI max) | 92.3 | 96.2 | 99.6 | **~100× (at the cap)** |
+| scale=50, n=1, cap far (min combo at threshold) | 25 | **50** | 500 | crosses 50× at 1 ips |
+| scale=100, n=2, **default out cap_y=1.5** | 1.486 | 1.493 | 1.499 | **safe** (control) |
+
+The guard that keeps power sane is **the cap tail**, not anything built into
+`scale`. With the default `cap_mode=out, cap_y=1.5` the curve is clamped to
+~1.5×; push `cap_x` (in) or `cap_y` (out) far away "to let the curve breathe"
+and the pre-cap region becomes an **uncapped `scale^n` curve**.
+
+**Finding 3 — `output_offset` can pin the gain AND silently disable the cap.**
+With the default tiny `exponent_power=0.05`, `offset.x = gain_inverse(oo) =
+(oo/(n+1))^(1/n)` is astronomically displaced: `output_offset=50 → offset.x =
+3.6e+33`, while the `cap_mode=out, cap_y=1.5` cap sits at `cap_x=1253`. Since
+`operator()` returns `offset.y` for every `x ≤ offset.x`
+(`accel-power.hpp:95`), the result is **gain pinned at 50.0× for every speed
+0..4000 ips and the cap never engages** (silent bypass). Measured:
+`output_offset=10 → gain=10` flat at all speeds; `output_offset=50 → gain=50`
+flat at all speeds; cap values are inert.
+
+**Verdict:** the worst cross-family hazard exists. Exact parameters:
+`power + GAIN, scale=100, exponent_power=2, cap_mode=in/out with a
+far-away cap (cap_x≥~60 in, cap_y≥~50 out)` → gain **10⁴× @ 1 ips**; or
+**`power + GAIN, exponent_power=0.05 (default), output_offset≥50` → constant
+50× over the entire speed range with the cap bypassed**. Both are GUI-reachable
+and sanitized (no error), and both mean *every micro-movement is a teleport* —
+the mouse is unusable, not subtly wrong.
+
+> **User-guidance paragraph (for docs/help):**
+> *Power mode is the one curve whose gain is `(scale · speed)^n` — it will not
+> cap itself unless you leave the gain-cap engaged. Three rules keep it sane:
+> (1) treat `input_offset` as **inert in power** — the field is stored but never
+> read by this mode, so a slow 1:1 offset band configured in classic/natural
+> disappears the moment you switch to power; (2) keep `scale ≤ ~2` and `cap_mode
+> = out` with `cap_y ≤ ~2`: that cap tail is the only thing standing between
+> you and a `scale^n` blow-up, so never raise `cap_x`/`cap_y` "to let the curve
+> breathe" — a far-away cap means an uncapped curve, and with scale ≥ 50 the
+> gain crosses 50× at 1 ips; (3) if you set a positive `output_offset`, think of
+> it as a *floor* (the Apex preset uses 0.9), not a gain — combined with the
+> tiny default `exponent_power=0.05` a floor ≥ 1 displaces the curve's start to
+> absurd speeds, pins the gain at that floor forever, and disables the cap
+> entirely. When in doubt: `output_offset=0, scale=1, exponent_power≈0.5–1,
+> cap_mode=out, cap_y=1.5–2` and verify the curve actually reaches its cap with
+> `rawaccel-cli show` / the GUI graph.*
+
+### 8.3 synchronous sync_speed ∩ smoothing halflifes — responsiveness table
+
+Measured with the **real** `linear_ema_smoother` (`rawaccel.hpp:33-82`,
+`input_speed_smooth_halflife`) driven by the natural SDK step 0 → sync_speed at
+1 ms events (trend 1.25 ms). Two metrics: the smoother's own settle time, and
+the *gain-tracking* "muddy window" (duration where the applied synchronous gain
+is >5% off its steady-state target at the knee).
+
+| input halflife (ms) | sync_speed (ips) | settle 95% (ms) | settle 99% (ms) | gain-err>5% window (ms) |
+|--------------------:|------------------:|----------------:|----------------:|-------------------------:|
+| 0 (off) | 0.5 / 0.9 / 5 | 0 | 0 | **0.0** |
+| 2 | 0.5 | 4.8 | 7.2 | 3.5 |
+| 2 | 0.9 | 4.8 | 7.2 | 3.8 |
+| 2 | 5.0 | 4.8 | 7.2 | 3.8 |
+| 10 | 0.5 | 23.5 | 35.5 | 18.8 |
+| 10 | 0.9 | 23.5 | 35.5 | 19.0 |
+| 10 | 5.0 | 23.5 | 35.5 | 18.8 |
+| 100 | 0.5 | 249 | 382.5 | 189.2 |
+| 100 | 0.9 | 249 | 382.5 | 192.5 |
+| 100 | 5.0 | 249 | 382.5 | 191.2 |
+
+Readings:
+- **`sync_speed` is essentially irrelevant to latency** (0.5 vs 0.9 vs 5.0 differ
+  by <2% in the muddy window). The sigmoid is a log-space function of
+  `x/sync_speed`; its knee slope is the same relative steepness regardless of
+  where you place it. `sync_speed` positions the *knee*, it does not gate *lag*.
+- **Halflife is the entire story.** Settling is ~3.5× the halflife (10 ms → 99%
+  in ~35 ms; 100 ms → 99% in ~383 ms). Halving the halflife halves the muddy
+  window: 100 ms ≈ **190 ms of wrong gain** (>3 frames — floaty/gliding);
+  10 ms ≈ **19 ms** (≈ one 60 Hz frame — near-imperceptible); off = 0.
+- Peak transient gain error is ≈10% in all smoothing configs; what changes with
+  halflife is **how long you live with it**, which is the responsiveness that
+  players feel.
+
+**Latency-safest combo recommendation:** `input_speed_smooth_halflife = 0`
+(smoothing off) is the only zero-lag config; if jitter demands smoothing use
+**input halflife ≤ 10 ms** (**never 100 ms**), and prefer `scale_smooth_halflife`
+or `output_speed_smooth_halflife` (simple EMA, no trend term) over
+input-speed smoothing when a smooth feel is the goal. Keep `motivity ≤ ~2` to
+keep the knee slope — and the smoothing-amplified gain error — gentle.
+
+### 8.4 lookup LUT ∩ output_dpi — no double normalization (verified code path)
+
+The apply path (daemon → pure-math → modifier) normalizes **exactly once on the
+way in** and **once on the way out**; the LUT sits between them and never sees
+`output_dpi`.
+
+1. `dev.dpi_factor = NORMALIZED_DPI / dev.dpi` — precomputed per device
+   (`daemon/daemon.cpp:651`).
+2. Event → `flush_motion` → `apply_motion_math` (`daemon/motion_math.hpp:19-33`)
+   → `modifier::modify` (`rawaccel.hpp:231`).
+3. **Input normalization (once):** `ips_factor = dpi_factor/time`
+   (`rawaccel.hpp:242`); velocity magnitude
+   `abs_vel = |in.x · ips_factor · domain_weights|` (`:287-288`) → speed in
+   **normalized-ips** (the reference 1000-cpi count-rate frame). This is the
+   LUT's x-domain: `lookup::operator()` (`accel-lookup.hpp:61-121`) consumes
+   exactly this value; its x-axis and (in velocity/gain mode) y/x gain are
+   expressed in that same normalized-ips unit.
+4. **Gain applied once:** `scale = 1 + (accel−1)·range_weight`
+   (`rawaccel.hpp:324`), `in.x *= scale` (`:330`).
+5. **Output rescale (once):** `dpi_adjustment = (output_dpi/NORMALIZED_DPI) ·
+   dpi_factor` (`rawaccel.hpp:348-352`), net `output_dpi/dpi`, applied to both
+   axes (Y extra × `yx_ratio`) **after** the gain. `output_dpi` is not read
+   anywhere in steps 3–4 (`accel-lookup.hpp`, `rawaccel.hpp:286-343`).
+
+Numeric check (real header): for the same LUT, `gain(x)` is bit-identical for
+`output_dpi ∈ {500, 1000, 2000, 8000}` — output_dpi only rescales counts on the
+count-sink side. **No double normalization exists in the apply path.** The only
+way to *get* a double normalization is user-side: hand-scaling the LUT's `y`
+values by `output_dpi` (folding the count rescale into the gain) would double
+it. Guidance: keep the LUT in *normalized ips* on both axes and treat
+`output_dpi` as an orthogonal count rescale (set it to your native `dpi` for a
+pure "inch-for-inch" feel, or 1000 for the reference frame); do **not** bake it
+into the LUT points. The final truncation to integer counts happens once in
+`apply_motion_math` (`motion_math.hpp:46`).
+
+### 8.5 Interaction-aware default tuning picks (new players, per mode)
+
+Defaults chosen so that no cross-family hazard above can bite. Each row is the
+"interaction-safe" starting point; deviations are only safe along the stated
+axis.
+
+| mode | interaction-safe default | why (which hazard it avoids) |
+|------|--------------------------|------------------------------|
+| **classic** | `acceleration=0.005, exponent_classic=2, input_offset=0..20, cap_mode=out, cap_y=1.5–2, gain=true` | GAIN cap tail bounds gain (§8.2 control row = safe); `input_offset` is honored. The `out` cap at `cap_y≤2` keeps worst gain ~2×. |
+| **natural** | `limit=1.3–1.8, decay_rate=0.08–0.12, input_offset=0..5, gain=true` | Bounded by `limit` asymptote (no cap needed); `input_offset` honored; no `scale^n` blow-up exists in natural. |
+| **power** | `scale=1 (≤2 max), exponent_power=0.5–1.0, output_offset∈[0,1], cap_mode=out, cap_y=1.5–2, gain=true` | Avoids the §8.2 class immediately: far cap + scale≥50, and the tiny-`n` + `output_offset≥1` plateau/cap-bypass. Never the default `n=0.05` with a positive floor. **Do not set `input_offset` expecting it to work here (inert).** |
+| **synchronous** | `smooth=0.25–0.5, motivity≤2, gamma=1, sync_speed≈your typical tracking speed, input_speed_smooth_halflife≤10 (prefer 0), scale/output halflifes optional` | §8.3: halflife is the only latency lever (10 ms ≈ one frame, 100 ms ≈ floaty); motivity≤2 keeps the knee slope — and smoothing-amplified error — gentle. |
+| **lookup** | points in normalized ips on both axes; velocity mode `gain=y/x`; `output_dpi=1000` (or native dpi), **never fold output_dpi into LUT y** | §8.4: keeps the single-normalization contract; user-side double normalization is the only failure mode. |
+| **noaccel / disable** | `raw_passthrough=true` preset for true 1:1 (P101) | Default config ≠ raw 1:1 (it normalizes to 1000 dpi); the preset is the only byte-exact 1:1 path. |
+
+These are *picks*, not claims of optimality: they are the smallest-config
+destinations from which a new player can tune one param at a time without
+double-normalizing, capping-away, or unlatching the power gain.

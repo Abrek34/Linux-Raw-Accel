@@ -101,6 +101,21 @@ struct AppState {
     GtkWidget* battery_detected_lbl  = nullptr; // battery % label
     GtkWidget* latency_lbl           = nullptr; // read-only latency stats display
 
+    // Mouse lock test window (P104) — popup that locks the pointer inside it
+    // (X11 XGrabPointer via gdkx; GDK4 has no grab API, see mouse_test.inl)
+    // while showing live speed/gain telemetry (daemon status JSON). ESC, focus
+    // loss or window destroy releases the lock.
+    GtkWidget* mouse_test_win    = nullptr;
+    GtkWidget* test_speed_lbl    = nullptr; // live "In (ips)" value
+    GtkWidget* test_out_lbl      = nullptr; // live "Out (ips)" value
+    GtkWidget* test_gain_lbl     = nullptr; // live "Gain (×)" value
+    GtkWidget* test_status_lbl   = nullptr; // daemon-down / awaiting-motion note
+    GtkWidget* test_hint_lbl     = nullptr; // lock-tier explanation (persistent)
+    guint      test_poll_id      = 0;       // 250 ms telemetry poll source
+    guint      test_confine_id   = 0;       // warp-confine tick (Tier-2 grab fallback)
+    bool       test_grabbed      = false;   // Tier-1 X11 pointer grab active?
+    bool       test_x11          = false;   // X11 backend + lock bridge usable
+
     // ── Widgets ──────────────────────────────────────────────────────────────
     GtkWidget* window            = nullptr;
     GtkWidget* profile_combo     = nullptr;

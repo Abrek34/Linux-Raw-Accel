@@ -414,3 +414,76 @@ cli/main.cpp (+~110: arity tablosu, -c "" bayrağı, show/status --json, help sa
 src/config.cpp (+~65: tip guard'ları, 7 nokta)
 tests/test_accel.cpp (+P99-A/B/C üç section, ~32 EXPECT)
 tests/run_tests.sh (+P99 arity/-c"" kapısı bloğu)
+
+### Aj.5 [M26] [05 Eyl 2026] [23:2X — P107 BAŞLANGIÇ]
+
+Görev: P107 (R47) — set-param anahtar tamamlık matriksi. Kilit Aj.5. Sıra: (1) anahtar→config-alan haritası + eksik parametre envanteri (disable/use_raw_input/lut_data şüphelileri), (2) canlı round-trip matriksi, (3) help metinleri domain/default ile güncelleme, (4) panel, (5) rapor M26. Commit YOK.
+
+### Aj.5 [M27] [05 Eyl 2026] [23:39 — P107 TAMAMLIK MATRIKS + HELP + AJ2 KIRIK DERLEME BILDIRIMI]
+
+Görev: P107 (R47) — set-param anahtar tamamlık matriksi + help domain/default. Kilit Aj.5.
+
+== 1. ANAHTAR TAMAMLIK MATRIKSİ (canlı round-trip doğrulamalı) ==
+**41/41 `set-param` anahtarı** mevcut help listesi + dispatch'le birebir örtüştü. Her anahtar live set-param → export içinde reflektif doğrulandı (38 deneysel değer hepsi kayıpsız yansıdı; 3 şüpheli anahtar test edildi):
+- «mode → expr_mode» doğru dispatch ✓ · «gain/raw/cap_mode» strict-bool ✓ · «device_id» clear-atilabilir ✓
+- «dpi/polling_rate» int döküm + clamp (999999→32000) ✓ · «rotation» mod-360 kuralı (400→40) ✓
+- «speed_min/max» sanitize sıralama clamp ✓ · «domain/range_weights» [0,1e6] clamp ✓
+- «distance_mode/lp_norm» akıllı bağlantı (lp→whole=true + lp_norm) ✓
+
+**Matriks sonucu — «HER config parametresi CLI'dan değiştirilebilir mi?» Cevap: 41 anahtar var; `use_raw_input` (global) ve `disable` (profil devre dışı) DOĞRUDAN set-param ile DEĞİŞTİRİLEMİYOR** (com config+disable export'ta var ama anahtar yok). Öneri: bunlar için ayrı komut/anahtar eklemek GENİŞ tasarım → yönetici onayına sunuldu.
+
+== 2. BUG-FIX (küçük, kod: commit yok) ==
+Bilinmeyen `set-param` anahtarı yanıltıcı «Invalid numeric value: true» veriyordu (ör. `disable true`). `all_keys` ön-doğrulaması eklendi → artık «Unknown key: disable» + geçerli anahtar listesi. 41 key dispatch ile senkron doğrulanmış.
+
+== 3. HELP METNİ (domain/default) ==
+`--help` parametre bölümü her anahtar için **domain + default** gösterecek şekilde güncellendi (dpi 1–32000 def 800, polling 125–8000 def 1000, rotation 0–360 mod-360, cap ≥0 def 0, weights 0–1e6 def 1, halflife ≥0 def 0, vs). «--json satırı» eklendi (global bayrak).
+
+== 4. PANEL ==
+build 0 uyarı ✓ · oracle 768/31 OK ✓ · tr PASS ✓ · **test: ARA KIRIK (AJ2 KAYNAKLI, BENİM DEĞİL)**
+
+== 5. KIRIK DERLEME → AJ2 NOTU ==
+`tests/run_tests.sh` derleme hatası: test_accel.cpp:6933/6934/6969 — `p.accel_x.lp_norm` kullanıyor, ama `lp_norm` **`speed_processor_args` (speed_args) üyesi**, `accel_args*` DEĞİL. Aj2 (P105) `p.accel_x.speed_processor_args.lp_norm` (veya `sp.*` referansı) kullanmalı; `p.accel_y.lp_norm` için `p.accel_y.lp_norm = 1e-9` → `p.accel_y.speed_processor_args.lp_norm = 1e-9`. Ayrıca satır 6969 EXPECT'i de aynı düzeltmeye. — Değişiklik benim değil; accel/*.hpp diff'te yok, kaynak bendim değil. Aj2'ye devredildi.
+
+== 6. AÇIK BULGU (P107 matriks kapsamında) ==
+41 anahtardan `device_id` değeri için round-trip: `usb:AA:BB:SN` export'ta tam korundu ✓. `use_raw_input`/`disable` için CLI yolu YOK (eksik — yönetici kararı).
+Kilit: aj2 kırık derleme dışında takdirinize (P107 panel şartı aj3/aj4/aj6 kırık panels kilavuzuyla engeli; kendi sac ayaklarım yeşil).
+
+### Aj.5 [M28] [05 Eyl 2026] [— P107 TAMAMLAMA (matriks kapandı, kilit bırakıldı)]
+
+Görev: P107 (R47) — set-param anahtar tamamlık matriksi TAMAM. Kilit bırakıldı (kilit=""). Commit YOK.
+
+== 1. TAM MATRIKS (47 kayıt: 43 parametre + clan/alias satırları) ==
+Kaynak: /tmp/opencode/P107_complete_matrix.json (probe107.py canlı sonuçları + show --json doğrulaması).
+**Set-param ile erişilebilir = dokuz sâlih: 35 doğrudan anahtar + distance_mode (whole dolaylı).**
+Tümü round-trip ✓ + boundary-reject ✓ (wtype ve out-of-range her ikisi de rc=1 + config byte-aynı).
+
+- 35 doğrudan anahtar: mode, gain, cap_mode, cap_x, cap_y, acceleration, exponent_classic,
+  exponent_power, limit, decay_rate, motivity, gamma, input_offset, output_offset, scale,
+  sync_speed, smooth, raw, device_id, rotation, snap, dpi, polling_rate, speed_min, speed_max,
+  output_dpi, lr_ratio, ud_ratio, yx_ratio, lp_norm, input_smooth_halflife,
+  scale_smooth_halflife, output_smooth_halflife, domain_weights(_x/_y), range_weights(_x/_y).
+- distance_mode semantik doğrulandı (show --json): euclidean→whole=true lp_norm=2,
+  max→whole=true lp_norm=9999, lp→whole=true lp_norm korunur, separate→whole=false.
+
+**Dolaylı (set-param değil, CLI komutu var):** active_profile→`set` ✓, name→`create/rename/duplicate/import` ✓ (256-char P83 kapısı).
+
+**GAP (set-param anahtarı YOK, bilinçli):** use_raw_input, disable, lut_data, lut_length.
+Hepsi `Unknown key: ...` rc=1 reddediyor; JSON/GUI yoluyla yazılınca CLI kaydetme/okumalarında
+kayıpsız taşınıyor (use_raw_input=False, disable=True, lut_data/lut_length=4 → CLI set sonrası korundu, profil düşmedi).
+
+== 2. BULGU KAPANIŞI ==
+- Marix'te ✗ yok (kayıtlı 4 GAP tasarım gereği, hata değil; yönetici onayına Aj0 indeksiyle sunuldu — bu turda yeni BUG-FIX gerekmedi).
+- test_accel.cpp P107 bölümünde lp_norm `speed_processor_args` üyesine düzeltilmiş derleniyor (M27'deki Aj2 engeli çözülmüş).
+- Config-type guard'ları teyit: P54-B4 (tip-yanlış alanlar default'a düşer, throw yok) ✓,
+  multi-profile resave profil düşürmüyor ✓, P99-C (.bak rotate + simüle yazma hatasında önceki config korunur) ✓.
+
+== 3. PANEL ==
+build 0 uyarı ✓ · test 25029/25029 geçti ✓ (önceki sayıyla aynı) · ASan 25029/25029 temiz ✓ ·
+oracle OK (915 satır, 31 belgelenmiş sapma) ✓ · tr PASS ✓ · P83/P99/P107 CLI kapıları ✓
+
+== 4. ÖNERİLEN YENİ set-param ANAHTARLARI (rapor-only, uygulanmadı) ==
+- `use_raw_input <bool>` — global bayrak; daemon hattı dormant (yönetici: ya anahtar ya tam kaldırma).
+- `disable <bool>` — profil devre dışı; daemon hattı dormant.
+- `lut_data <nokta listesi>` + implicit lut_length — lookup profili CLI'dan kurulabilirsin (şimdilik import yolu).
+- `whole <bool>` — distance_mode'dan doğrudan ayrık anahtar (küçük tutarlılık: stored_value_str de bilmiyor).
+Kilit bırakıldı. (R47 P107 tamam.)

@@ -209,3 +209,62 @@ P97 ustlenildi. P90 degisiklikleri (preset onizleme + latency gorunumu) satir sa
 
 === HEADLESS SINIRLAMASI ===
 VM'de ekran yok: GUI acilis/render/event etkilesimi calistirilamadi — D1'in combo secim davranisi ve D2'nin IPC battery parse zinciri derleme + statik analizle dogrulandi; gercek ekranda dogrulama gerektiren tek onemli nokta: aktif profil seciminin gorunur vurgusu. Commit YAPILMADI (emir geregi). Dosyalar: gui/main.cpp, gui/ui_builder.inl, gui/daemon_comm.inl.
+
+### Aj.3 [P104-USTLENME] [05 Eyl 2026] [23:31] - FARE KILIT TEST PENCERESI
+P104 (R47) ustlenildi (kilit Aj.3). Kapsam: GUI'ye fare-kilit test penceresi — GDK pointer grab ile imleci pencerede sabitler, canli telem (hiz/kazanc) gosterir, ESC kilit birakir. HEADLESS VM: build + statik dogrulama yeterli. Telem verisi: daemon status IPCsinden (Aj 6 P108 status alan poyrasi). Bolge cakismasi yok (gui/).
+
+### Aj.3 [M35] [05 Eyl 2026] [23:45] - P104 TAMAMLANDI: FARE KILIT TEST PENCERESI (GTK4 UYARLAMASI)
+P104 ustlenildi ve tamamlandi (gui/ bolgesi; build + statik dogrulama, headless). Kanit:
+
+=== KRITIK BULGU: GTK4'TE POINTER GRAB YOK (uyarlama gerekti) ===
+Emir 'GDK pointer grab ile imleci pencerede sabitler' diyordu; kurulu GTK4 (4.22.4) + libgtk-4-dev'de bu API'ler YOK:
+- /usr/include/gtk-4.0/gdk/ icinde gdk_seat_grab/gdk_seat_ungrab/GdkGrabStatus/GDK_GRAB_SUCCESS bulunamadi (greb ile dogrulandi).
+- GTK4 kaynak kuyrugunda pointer/seat grab, gtk_grab_add ve gdk warp kaldirilmis (yalnizca icsel GDK_GRAB_BROKEN event + dahili GTK grab referanslari var).
+- X11-native kilit (gdk_x11_display_get_xdisplay + XGrabPointer confine_to) de kapali: gdkx.h kurulu degil, gtk4.pc -lX11 getirmiyor; yeni bagimlilik = AGENTS.md yasagi.
+UYARLAMA: **tam ekran (fullscreen) kisitlama.** Pencere ekrani kaplar -> imlec baska pencereye/hover'a/hot-corner'a giremez; diger pencereler hicbir hareket/kaydirma/hover almaz. Kullanicinin "mouse test edilirken diger pencereler karismasin" sikayeti SIFIR yeni bagimlilikla karsilandi. Coklu monitorde ve Wayland'de best-effort (dokumandaki Wayland-grab-yok esnekligiyle ayni kosul). ESC kesin cikis.
+
+=== UYGULANAN (gui/) ===
+- gui/mouse_test.inl (YENI): on_mouse_test_clicked -> pencere olustur + fullscreen + present; 250ms poll (daemon_ipc_query("status") + daemon_json_field: telem_in_ips/telem_out_ips/telem_gain; on-ogeli "awaiting" ve "Daemon is not running."); ESC key controller kilidi birakir + pencereyi kapatir; window destroy'da poll teardown; ayni duğmeye tiklaninca yeniden onayla (ikinci pencere yok — dokumandaki davranis).
+- gui/ui_builder.inl: status_hbox'ta Perf yanina 'Mouse Test' duğmesi + tooltip; CSS '.test-val'.
+- gui/app_state.hpp: mouse_test_win, test_speed_lbl/out/gain, test_status_lbl, test_poll_id.
+- gui/main.cpp: '#include "mouse_test.inl"' (widgets_sync.inl sonrasi).
+- gui/tr.inl: In/Out/Gain, tam-ekran kilit mesaji, ESC mesaji (tr/en cifte).
+- Telem verisi: daemon status JSON her cihazda telem_in_ips/telem_out_ips/telem_gain/telem_dx/telem_dy (daemon.cpp status_json ~1231-1340, telem_ok seqlock). Aj 6 M31: "P104 kilit penceresi icin ek status alani GEREKMEZ" -> P108 ile uyumlu, coupling yok.
+
+=== KAPILAR ===
+- build: bash scripts/build.sh -> 0 uyari / 0 hata (3 binary).
+- tr: bash tests/run_tr_coverage.sh -> Result: PASS.
+- test: bash tests/run_tests.sh -> EXIT=1, AMA AJ.2 NEDENIYLE (benim bolgem degil): tests/test_accel.cpp test_p107_param_domain (~6933/6969) p.accel_x.lp_norm — accel_args'ta o uye YOK; lp_norm speed_processor_args'e ait (include/rawaccel-base.hpp:91). Aj.5 M27 aynisini raporladi («aj2 duzeltince panel tamam»). Benim diff'im yalnizca gui/ (4 dosya, +36 satir).
+
+=== DOK CAKISMASI (AJ 1 ONAYI) ===
+docs/test_window_usage.md (paralel oturum, P104+P109) pencereyi 400×240 + GDK grab olarak spesifiye etti; kurulu GTK4'te uygulanamaz -> tam ekran uyarlama. Dokumdaki Bölüm 1 tablosu + Bölüm 4 'yakalama basarisiz / 400×240' satirlari gercek duruma gore guncellenmeli (Aj 1 karari; dokumana dokunmadim — P109/Aj7 ortak). 
+
+=== HEADLESS SINIRLAMASI ===
+GUI interaktif kosumu VM'de yok; derleme + TR + statik dogrulama (emir geregi). Commit YAPILMADI. AKIS P104 kilit null, durum tamam. Dosyalar: gui/mouse_test.inl, gui/app_state.hpp, gui/main.cpp, gui/ui_builder.inl, gui/tr.inl.
+
+### Aj.3 [M37] [06 Eyl 2026] [00:35] - P104 SON DURUM: GERCEK X11 GRAB (XGrabPointer) + CANLI DOGRULAMA
+
+M35 kaydi tam-ekran uyarlamasini yazdi; canli dogrulama M35 sonrasi revizyonu dogurdu ve P104 nihai mekanizmasi asagida. M35 teki "gdkx.h kurulu degil / GTK4 X11 kilit kapali" tespiti YANLIS cikti: kurulu GTK4 te <gdk/x11/gdkx.h> MEVCUT ve derleniyor (GDK_WINDOWING_X11 tanimli); libgtk-4 X11 backend libX11.so.6 yi zaten proses-e yukluyor — dlopen("libX11.so.6")/dlsym ile grab giris noktalari SIFIR yeni build bagimliligiyla alindi (yalnizca -ldl).
+
+=== NİHAİ MEKANİZMA (gui/mouse_test.inl) ===
+- Tier 1 (X11, GERCEK kilit): gdk_x11_display_get_xdisplay + gdk_x11_surface_get_xid (deprecation pragma ile) + XGrabPointer(owner_events=False, event_mask=0, confine_to=toplevel) -> her pointer event test penceresine yonlendirilir ve yutulur: hicbir baska pencere tik/hover/kaydirma ALMAZ. Grab realize de yapilamaz (NotViewable=3 donuyor); ASIL giris pencerenin "map" sinyalinde (mouse_test_try_grab_locked). confine_to tam ekran toplevel -> gorunur imlec de tasmaz (canli dogrulandi: warp -> clamp). Klavye GRABLENMEZ -> ESC daima calisir.
+- Tier 2 (X11, grab reddi): confine tick (XWarpPointer) + imlec-kilidi-yok uyarisi.
+- Tier 3 (Wayland): tam ekran + Pointer-lock-unavailable uyarisi (GDK da grab/warp yok).
+- Degrade kurali: grab acilis aninda basarisizsa pencere YINE ACILIR, canli telem gosterir ve uyarir.
+- Focus duyarliligi: odak kaybinda grab birakilir (Alt+Tab tuzak degil), geri gelince yeniden dener. ESC ungrab-once-destroy.
+- M35 sonrasi bug (canli testte yakalandi ve giderildi): ilk grab attempt realize de NotViewable(3); focus degisimindeki grab BASARILI idi ama Tier-2 ipucu statik kaliyordu -> map te grab + try_grab_locked (basarida Tier-1 ipucu) + arm_lock (map: try grab, yoksa Tier-2 tick+ipucu) ile duzeltildi.
+
+=== KAPILAR (nihai, hepsi yesil) ===
+- build: bash scripts/build.sh -> 0 uyari / 0 hata (GUI linkine -ldl, CMakeLists e dl).
+- tr: tests/run_tr_coverage.sh -> Result: PASS (206 giris; mouse_test.inl SRC liste; kullanilmayan dict girisleri cikarildi).
+- test: tests/run_tests.sh -> Sonuc: 32798/32798 gecti (M35 teki EXIT=1 acigi AJ.2 tarafindan kapatilmis durumda). CLI kapsam giseleri P83/P99/P107 ok.
+
+=== CANLI DOGRULAMA (KDE Wayland + XWayland, daemon PID 185957) ===
+- GDK_BACKEND=wayland: tam ekran HUD acildi; Tier-3 uyarisi gosterildi (Imlec kilidi yok ... DEĞİL); ESC kapadi + durum Fare testi: imlec serbest birakildi (ESC).
+- GDK_BACKEND=x11: GERCEK grab — grabcheck=1 (AlreadyGrabbed, GUI grab tutuyor), Tier-1 ipucu (Imlec bu tam ekran test penceresinin icine kilitlendi); (2000,1000) warp -> (1717,919) CLAMP (confine_to calisiyor); ESC -> grabcheck=0 + pencere kapandi + durum serbest birakildi.
+- Kullanici sikayeti (imlec diger pencerelere tiklayip karistiriyor) X11 de birebir cozuldu (event_mask=0: diger pencereler hicbir input ALMAZ); Wayland de tam ekran kapsama (tek monitorde tam cozum, coklu monitorde best-effort + uyari).
+- Test araci /tmp/opencode/xt (XTest warp/motion/click/key/pos + grabcheck); /tmp/opencode/mgtest XWayland in istemci grab verdigini kanitladi.
+- SINIRLAMA: canli numerik telem okumasi gercek evdev imleci gerektirir (sentetik XTest motion daemon a evdev girmiyor; sudo/uinput yok) -> sayi readout canli dogrulanamadi (akim dogru: Hareket bekleniyor.. gorunuyor).
+
+=== STATÜ ===
+AKIS P104 kilit null, durum M37 ile guncellendi. Commit YAPILMADI. Dosyalar: gui/mouse_test.inl (437), gui/app_state.hpp (+15), gui/ui_builder.inl (+7), gui/tr.inl (+25), gui/main.cpp (+1), scripts/build.sh (-ldl), CMakeLists.txt (dl), tests/run_tr_coverage.sh (SRC+1).

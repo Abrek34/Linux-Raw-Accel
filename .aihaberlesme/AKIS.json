@@ -1,6 +1,6 @@
 {
  "format_version": 1,
- "guncelleme": "2026-09-05 23:11 +03 (Aj0: P101 TAMAM kaydi)",
+ "guncelleme": "2026-09-06 00:36 +03 (Aj0: P104 M37 detay - gercek XGrabPointer)",
  "referans": "aihaberlesme.md — insan okumalı kanonik anlatım; AKIS.json makine-okunur durum deposudur.",
  "kurallar": {
   "protokol_md": "aihaberlesme.md",
@@ -35,7 +35,7 @@
   },
   "7": {
    "rol": "Performans / mikro-optimizasyon / kurulum-akis dogrulamasi - Aj 1 emriyle calisir",
-   "durum": "bos - emir bekliyor (M25, P94 tamam)"
+   "durum": "bos - emir bekliyor (M28, P109 tamam)"
   },
   "0": {
    "rol": "Haberlesme agi yoneticisi (kanal moderasyonu) - Aj 1 emriyle calisir",
@@ -662,6 +662,62 @@
    "kilit": null,
    "durum": "TAMAM (M13: N4/ULP arastirmasi - hata sub-perceptual (max ~%1.15 dizde, 100ips uzeri <=%0.074); her iki iyilestirme (partition 2->4 / float->double) oracle 69/21 satir kiri; oneri D (degisiklik yok), ileride fork-stampli A)",
    "baslik": "DERIN TARAMA: arastirma N=4/ULP"
+  },
+  {
+   "gorev": "P103",
+   "sahip": "0",
+   "durum": "TAMAM (M59: docs/research/parameter_index.md yazildi - tum config parametreleri domain/default/alias/set-param anahtarlari, 5 kaynak dosyaya capraz-referans; research index + aihaberlesme.md guncellendi; kod degisikligi YOK)",
+   "kilit": null,
+   "baslik": "ARASTIRMA: parametre envanteri (parameter_index.md)"
+  },
+  {
+   "gorev": "P104",
+   "sahip": "3",
+   "durum": "TAMAM (M37: GUI fare-kilit penceresi GERCEK XGrabPointer + canli dogrulama - Wayland tam ekran HUD/Tier-3, X11 grabcheck=1 + confine clamp (2000,1000)->(1717,919) + ESC serbest; kullanici sikayeti X11'de cozuldu; numerik telem canli okunamadi (sudo yok); 32798/32798, tr PASS; gui/mouse_test.inl+others)",
+   "kilit": null,
+   "baslik": "Fare kilit test penceresi (GUI)"
+  },
+  {
+   "gorev": "P105",
+   "sahip": "2",
+   "durum": "TAMAM (P105 classic+natural parametre-ailesi derin sup, M36: exponent 1..10 x input_offset x gain x cap.y + foreign-param bagimsizligi + natural limit x decay x offset grid + smooth 0-vs-tiny; +7618 assert, 25029 -> 32798/32798; oracle 915/31 OK; classic/natural kod hatasi yok)",
+   "kilit": null,
+   "baslik": "classic+natural derin dogruluk turu"
+  },
+  {
+   "gorev": "P106",
+   "sahip": "4",
+   "durum": "TAMAM (M30: uc degerler tablosu regresyonlari test_p106_extremes_table - accel familyasi (classic exp 1/10/1e-3, power scale/cap, synchronous LUT), per-device (dpi/polling, 256 kesim), offset bagimsizlik kurali; 32798/32798, ASan temiz, oracle 915/31 OK degismedi; yalniz tests/test_accel.cpp, commit yok)",
+   "kilit": null,
+   "baslik": "uc degerler regresyon tablosu"
+  },
+  {
+   "gorev": "P107",
+   "sahip": "5",
+   "durum": "TAMAM (M28: set-param anahtar tamamlilik matriksi 41/41 round-trip kayipsiz; unknown key net hata; help'e domain/default; build 0 uyari / oracle OK / tr PASS; kilit birakildi)",
+   "kilit": null,
+   "baslik": "set-param anahtar tamamlilik matriksi"
+  },
+  {
+   "gorev": "P108",
+   "sahip": "6",
+   "durum": "TAMAM (M31: daemon hot-path parametre turu - canli 34dk PID 185957, telem seqlock dogru (gain 1.25=5.575/4.460 EXACT); P104 kilit penceresi icin ek status alan GEREKMEZ; dusuk-poll birim test acigi fuzz kapsar; 24922/24922, oracle 915/31 OK; commit yok)",
+   "kilit": null,
+   "baslik": "daemon hot-path parametre turu"
+  },
+  {
+   "gorev": "P110",
+   "sahip": "8",
+   "durum": "TAMAM (M14: mod-parametre etkilesim arastirmasi - natural/classic 300-4000ips <=%2.3 fark (50ips'te %16); WORST UX HAZIR: power+GAIN input_offset NO-OP + uzak cap + scale>=50 n>=1 -> 1ips'te 1e4x, output_offset>=1 (n=0.05) tum hizlarda sabit gain + cap bypass; sync x halflife: 10ms~19ms / 100ms~190ms bulanik pencere (halflife tek latency kolu); lookup x output_dpi cift-normalizasyon YOK (tek giris + tek cikis); interaction-aware defaults precision.md 8.5; kod degisikligi YOK)",
+   "kilit": null,
+   "baslik": "mod-parametre etkilesim arastirmasi"
+  },
+  {
+   "gorev": "P109",
+   "sahip": "7",
+   "kilit": null,
+   "durum": "TAMAM (M28: kilit-penceresi kabul dokumani GUI ile birebir + virtmouse locked senaryosu canli kohusu; doc/test_window_usage.md tamam, sorun giderme tablosu eklendi; commit yok)",
+   "baslik": "gercek-donanim kabul testleri + fare-kilit penceresi kullanim dokumani"
   }
  ],
  "istekKuyrugu": [

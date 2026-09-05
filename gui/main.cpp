@@ -100,6 +100,7 @@ std::string check_duplicate_device_ids(const app_config& cfg) {
 #include "daemon_comm.inl"
 #include "graph.inl"
 #include "widgets_sync.inl"
+#include "mouse_test.inl"
 #include "profile_mgr.inl"
 #include "ui_builder.inl"
 

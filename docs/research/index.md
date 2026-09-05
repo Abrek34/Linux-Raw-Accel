@@ -9,8 +9,9 @@
 |-----|------------------|
 | [formulas.md](formulas.md) | Every mode's exact formula (classic/natural/power/synchronous/jump/lookup/noaccel), the GAIN vs LEGACY distinction, all three cap-mode branches, edge cases, and `include/accel-*.hpp` cross-references. **Start here.** |
 | [deviations.md](deviations.md) | Root-cause of the 31 oracle rows (views: `tests/oracle/known_deviations.txt`), per-class KEEP/FIXABLE verdicts, reference values vs local, and why none should be "fixed". Plus the **P102 prospective** precision-enhancement drift class (N=2→4 / float→double), not applied. |
-| [precision.md](precision.md) | float vs double, where ULP is lost in the hot path, `pow` argument-reduction error, the only `float` (synchronous LUT), measured N=2 vs N=4 vs exact-integral table, float→double ABI truth, `-ffast-math` analysis, accuracy recommendations + P102 ranked roadmap. |
+| [precision.md](precision.md) | float vs double, where ULP is lost in the hot path, `pow` argument-reduction error, the only `float` (synchronous LUT), measured N=2 vs N=4 vs exact-integral table, float→double ABI truth, `-ffast-math` analysis, accuracy recommendations + P102 ranked roadmap. **§8 (P110):** cross-parameter-family interaction research (natural↔classic, power cap hazards, sync×halflife latency, lookup×output_dpi) + interaction-aware defaults. |
 | [learning.md](learning.md) | The RawAccel model origins (InterAccel, Quake/Source heritage), log-space sigmoid rationale, cap theory, and the literature + sources for education. |
+| [parameter_index.md](parameter_index.md) | P103 (Aj 0): the single reference table of every configuration parameter — JSON key ↔ `set-param` key, stored type, post-sanitize domain, default, aliases, mode-applicability, and the not-settable / compile-time constants. Cross-referenced to `rawaccel-base.hpp`, `config.hpp`, `src/config.cpp`, `cli/main.cpp`. |
 
 ## One-line summary of findings
 
@@ -29,6 +30,16 @@
   21 rows), so the recommendation is **D (no change)**; if ever wanted, only
   Option A (N=4 on both local and ref, with an explicit "forked reference"
   contract) is clean. See precision.md §7 and deviations.md §P102.
+- (P110) Cross-parameter-family interactions: natural↔classic differ ≤2.3% in
+  the 300–4000 ips band but up to **16% at 50 ips** (different cap/decay
+  corners, same 1.5 asymptote). **Power is the only family with a real hazard:**
+  `input_offset` is a NO-OP there (stored-only), a far-away cap + `scale≥50, n≥1`
+  gives **10⁴× gain at 1 ips**, and `output_offset≥1` with the tiny default
+  `n=0.05` pins gain at the floor for **all** speeds while silently disabling
+  the cap — player-guidance in precision.md §8.2. sync×halflife: halflife is the
+  only latency lever (10 ms ≈ one frame, 100 ms ≈ 190 ms of wrong gain);
+  `sync_speed` is latency-neutral. lookup×output_dpi: no double normalization in
+  the apply path (one input normalisation, one output rescale). See precision.md §8.
 
 ## Verification (current tree)
 
@@ -50,3 +61,12 @@ bash tests/oracle/run_oracle.sh   → 768 rows, 31 known, RESULT OK (rel 1e-9)
 4. Long-term: double-double (or `long double`) evaluation of the cap-tail
    constants — predicted gain ≤ 1 ULP, i.e. unobservable; only if profiling
    shows it free.
+5. ~~Cross-parameter-family interaction research: natural↔classic effective-gain
+   deltas, power cap/cap_mode∩input_offset hyper-sensitivity, sync×halflife
+   latency, lookup×output_dpi double-normalization, interaction-aware
+   per-mode defaults.~~ **DONE (P110, Aj 8)** → precision.md §8. Findings:
+   natural↔classic ≤2.3% band (16% at 50 ips); power hazard real
+   (10⁴×-and-up reachable, GUI-included; input_offset inert); sync latency
+   lever = halflife (10 vs 100 ms: 19 vs 190 ms muddy window); lookup×output_dpi
+   clean (single normalization each side). Interaction-aware defaults in
+   precision.md §8.5.

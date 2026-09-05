@@ -13,6 +13,7 @@ SRC=(
   gui/widgets_sync.inl
   gui/profile_mgr.inl
   gui/ui_builder.inl
+  gui/mouse_test.inl
 )
 CXX="${CXX:-g++}"
 "$CXX" -std=c++20 -Wall -Wextra -O1 -o /tmp/tr_coverage tests/tr_coverage.cpp

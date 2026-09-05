@@ -223,6 +223,14 @@ static bool safe_save(const app_config& cfg, const std::string& path) {
 
 // ── Profile display ────────────────────────────────────────────────────────────
 
+/// Space-joined key list for error messages (P107).
+static std::string join_keys(const std::vector<std::string>& keys) {
+    std::string s;
+    for (size_t i = 0; i < keys.size(); i++)
+        s += (i ? " " : "") + keys[i];
+    return s;
+}
+
 static void print_accel_args(const accel_args& a, const std::string& prefix = "  ") {
     auto mode_str = [](accel_mode m) -> std::string {
         switch (m) {
@@ -710,6 +718,25 @@ static int cmd_set_param(app_config& cfg, const std::string& config_path,
         return false;
     };
 
+    // P107: validate the key against the FULL set up front so an unknown key
+    // reports "Unknown key" instead of a misleading numerical parse failure
+    // ("Invalid numeric value: true" for the nonexistent 'disable' key, etc.).
+    static const std::vector<std::string> all_keys = {
+        "mode", "gain", "cap_mode", "cap_x", "cap_y", "acceleration",
+        "exponent_classic", "exponent_power", "limit", "decay_rate",
+        "input_offset", "output_offset", "scale", "sync_speed", "smooth",
+        "motivity", "gamma", "raw", "device_id", "rotation", "snap", "dpi",
+        "polling_rate", "speed_min", "speed_max", "output_dpi", "lr_ratio",
+        "ud_ratio", "yx_ratio", "distance_mode", "lp_norm",
+        "input_smooth_halflife", "scale_smooth_halflife",
+        "output_smooth_halflife", "domain_weights", "domain_weight_x",
+        "domain_weight_y", "range_weights", "range_weight_x", "range_weight_y"
+    };
+    if (std::find(all_keys.begin(), all_keys.end(), key) == all_keys.end()) {
+        std::cerr << "Unknown key: " << key << "\n"
+                  << "Valid keys: " << join_keys(all_keys) << "\n";
+        return 1;
+    }
     // Parse numeric value only for numeric params (not for string/bool keys)
     static const std::vector<std::string> non_numeric_keys = {
         "mode", "gain", "cap_mode", "distance_mode", "raw", "device_id"
@@ -742,6 +769,69 @@ static int cmd_set_param(app_config& cfg, const std::string& config_path,
                       << " (NaN/Inf not allowed)\n";
             return 1;
         }
+    }
+
+    // P107: reject out-of-domain values instead of silently clamping them.
+    // sanitize_device_profile() still clamps hand-edited JSON at load time
+    // (a documented degrade path), but the CLI must not persist a different
+    // value than the user asked for while exiting 0 — a script checking $?
+    // would see "success" for e.g. `snap 90` that actually stored 45.
+    // Domains mirror the sanitize ranges in src/config.cpp exactly.
+    // Intentionally unconstrained (accept any finite value): acceleration
+    // (negative is a legit classic-decel feature) and rotation (any angle is
+    // normalized into [0,360) — documented aliasing).  Non-numeric keys
+    // (mode/gain/cap_mode/raw/distance_mode/device_id) never reach here.
+    auto range_ok = [&](const char* k, double lo, double hi) -> bool {
+        if (v >= lo && v <= hi) return true;
+        std::cerr << "Invalid value for '" << k << "': " << val
+                  << "  (valid range: " << lo << ".." << hi << ")\n";
+        return false;
+    };
+    auto min_ok = [&](const char* k, double lo) -> bool {
+        if (v >= lo) return true;
+        std::cerr << "Invalid value for '" << k << "': " << val
+                  << "  (must be >= " << lo << ")\n";
+        return false;
+    };
+    auto int_ok = [&](const char* k, double lo, double hi) -> bool {
+        if (v != std::floor(v)) {
+            std::cerr << "Invalid value for '" << k << "': " << val
+                      << "  (must be an integer)\n";
+            return false;
+        }
+        return range_ok(k, lo, hi);
+    };
+
+    if (key == "dpi" || key == "output_dpi") {
+        if (!int_ok("dpi/output_dpi", 1, 32000)) return 1;
+    } else if (key == "polling_rate") {
+        if (!int_ok("polling_rate", POLL_RATE_MIN, POLL_RATE_MAX)) return 1;
+    } else if (key == "snap") {
+        if (!range_ok("snap", 0, 45)) return 1;
+    } else if (key == "lr_ratio" || key == "ud_ratio" || key == "yx_ratio") {
+        if (!range_ok(key.c_str(), 0.01, 100)) return 1;
+    } else if (key == "exponent_classic") {
+        if (!range_ok("exponent_classic", 1, 10)) return 1;
+    } else if (key == "exponent_power" || key == "sync_speed") {
+        if (!min_ok(key.c_str(), 1e-4)) return 1;
+    } else if (key == "lp_norm") {
+        if (v <= 0) {
+            std::cerr << "Invalid value for 'lp_norm': " << val
+                      << "  (must be > 0)\n";
+            return 1;
+        }
+    } else if (key == "cap_x" || key == "cap_y" || key == "limit" ||
+               key == "decay_rate" || key == "motivity" || key == "gamma" ||
+               key == "input_offset" || key == "output_offset" ||
+               key == "scale" || key == "smooth" ||
+               key == "speed_min" || key == "speed_max" ||
+               key == "input_smooth_halflife" || key == "scale_smooth_halflife" ||
+               key == "output_smooth_halflife") {
+        if (!min_ok(key.c_str(), 0)) return 1;
+    } else if (key == "domain_weights" || key == "domain_weight_x" ||
+               key == "domain_weight_y" || key == "range_weights" ||
+               key == "range_weight_x" || key == "range_weight_y") {
+        if (!range_ok(key.c_str(), 0, 1e6)) return 1;
     }
 
     if      (key == "mode")             {
@@ -1232,49 +1322,53 @@ Presets (values loaded by `create-preset <preset> <name>`):
   exp-power = power-mode exponent; classic/natural presets use
   exponent_classic/other defaults instead.  All presets: dpi 800, poll 1000.
 
-Parameters (for set-param):
-  raw               true|false|1|0  (raw passthrough — bypass all processing)
-  mode              classic|power|natural|jump|synchronous|lookup|noaccel
+Parameters (for set-param). Domain = accepted range — out-of-range values are
+REJECTED (exit 1, config untouched); default = fresh `create` profile value:
+  raw               true|false|1|0  (raw passthrough — bypass all processing). Default false.
+  mode              classic|power|natural|jump|synchronous|lookup|noaccel. Default noaccel.
   device_id         Assign profile to a device ("usb:VVVV:PPPP:serial", by-id path,
                     or event node); empty string = all mice. Hint: run `status`
-                    to list devices with their device_id values.
-  gain              true|false|1|0  (gain mode on/off)
-  acceleration      Acceleration multiplier (e.g. 0.005)
-  exponent_classic  Classic exponent (e.g. 2.0)
-  exponent_power    Power/synchronous exponent (e.g. 0.05)
-  limit             Upper multiplier asymptote, jump/natural (e.g. 1.5)
-  decay_rate        Natural decay rate (e.g. 0.1)
-  motivity          Natural motivity (e.g. 1.5)
-  gamma             Classic gamma (e.g. 1.0)
-  input_offset      Speed offset before acceleration starts
-  output_offset     Output offset (power mode)
-  scale             Scale factor (power mode)
-  sync_speed        Synchronous sync speed (e.g. 5.0)
-  smooth            Jump smoothness (e.g. 0.5)
-  cap_x             Input speed cap
-  cap_y             Output gain cap
-  cap_mode          out|in|io  (cap mode)
-  rotation          Rotation in degrees
-  snap              Snap angle in degrees
-  dpi               Mouse DPI
-  polling_rate      Mouse polling rate (Hz)
-  speed_min         Minimum speed clamp (ips)
-  speed_max         Maximum speed clamp (ips)
-  output_dpi        Output DPI normalization value (default: 1000)
-  lr_ratio          Left/right output DPI ratio
-  ud_ratio          Up/down output DPI ratio
-  yx_ratio          Y-axis output DPI ratio (relative to X)
-  distance_mode     euclidean|max|lp|separate  (speed calculation method)
-  lp_norm           Lp-norm value (when distance_mode=lp, e.g. 3.0)
-  input_smooth_halflife   Input speed EMA halflife (ms, 0=off)
-  scale_smooth_halflife   Scale EMA halflife (ms, 0=off)
-  output_smooth_halflife  Output speed EMA halflife (ms, 0=off)
-  domain_weights    Both-axis domain weight (e.g. 1.0)
+                    to list devices with their device_id values. Default: empty.
+  gain              true|false|1|0  (gain mode on/off). Default true.
+  acceleration      Acceleration multiplier. Domain any finite (negative = classic
+                    decel). Default 0.005.
+  exponent_classic  Classic exponent. Domain 1–10. Default 2.
+  exponent_power    Power/synchronous exponent. Domain ≥ 1e-4. Default 0.05.
+  limit             Upper multiplier asymptote, jump/natural. Domain ≥ 0. Default 1.5.
+  decay_rate        Natural decay rate. Domain ≥ 0. Default 0.1.
+  motivity          Natural motivity. Domain ≥ 0. Default 1.5.
+  gamma             Classic gamma. Domain ≥ 0. Default 1.
+  input_offset      Speed offset before acceleration starts. Domain ≥ 0. Default 0.
+  output_offset     Output offset (power mode). Domain ≥ 0. Default 0.
+  scale             Scale factor (power mode). Domain ≥ 0. Default 1.
+  sync_speed        Synchronous sync speed. Domain ≥ 1e-4. Default 5.
+  smooth            Jump smoothness. Domain ≥ 0. Default 0.5.
+  cap_x             Input speed cap. Domain ≥ 0. Default 15.
+  cap_y             Output gain cap. Domain ≥ 0. Default 1.5.
+  cap_mode          out|in|io  (cap mode). Default out.
+  rotation          Rotation in degrees. Domain any finite (normalized mod 360:
+                    −45 → 315, 400 → 40). Default 0.
+  snap              Snap angle in degrees. Domain 0–45. Default 0.
+  dpi               Mouse DPI. Domain 1–32000 (integer). Default 800.
+  polling_rate      Mouse polling rate (Hz). Domain 125–8000 (integer). Default 1000.
+  speed_min         Minimum speed clamp (ips). Domain ≥ 0. Default 0 (off).
+  speed_max         Maximum speed clamp (ips). Domain ≥ 0; if both set, max ≥ min.
+                    Default 0 (off).
+  output_dpi        Output DPI normalization value. Domain 1–32000. Default 1000.
+  lr_ratio          Left/right output DPI ratio. Domain 0.01–100. Default 1 (off).
+  ud_ratio          Up/down output DPI ratio. Domain 0.01–100. Default 1 (off).
+  yx_ratio          Y-axis output DPI ratio (relative to X). Domain 0.01–100. Default 1.
+  distance_mode     euclidean|max|lp|separate  (speed calculation method). Default euclidean.
+  lp_norm           Lp-norm value (when distance_mode=lp). Domain > 0. Default 2.
+  input_smooth_halflife   Input speed EMA halflife (ms). Domain ≥ 0; 0=off. Default 0.
+  scale_smooth_halflife   Scale EMA halflife (ms). Domain ≥ 0; 0=off. Default 0.
+  output_smooth_halflife  Output speed EMA halflife (ms). Domain ≥ 0; 0=off. Default 0.
+  domain_weights    Both-axis domain weight. Domain 0–1e6. Default 1.
   domain_weight_x / domain_weight_y
-                    Per-axis domain weight
-  range_weights     Both-axis range weight (e.g. 1.0)
+                    Per-axis domain weight. Domain 0–1e6. Default 1.
+  range_weights     Both-axis range weight. Domain 0–1e6. Default 1.
   range_weight_x / range_weight_y
-                    Per-axis range weight
+                    Per-axis range weight. Domain 0–1e6. Default 1.
 
 Examples:
   rawaccel-cli list

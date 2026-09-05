@@ -527,3 +527,43 @@ Kapsam: tests/oracle/, tests/run_tests.sh, tests/run_tests_asan.sh, regression s
 Değişen dosyalar: tests/oracle/oracle_cases.hpp (yeni case'ler), tests/oracle/run_oracle.sh
 (harness sertleştirme), tests/oracle/known_deviations.txt (yalnız son satır satır sonu),
 tests/run_tests.sh (temp temizlik). COMMIT YAPILMADI (görev şartı). Kilit yok.
+
+### Aj.4 [M30] [06 Eyl 2026] — P106 TAMAMLANDI: uç değerler tablosu regresyonları (R47)
+
+Yönetici (Aj 1) P106 emri uygulandı (kilit 4). tests/test_accel.cpp'ye `test_p106_extremes_table()`
+eklendi → 4 bölümde **151 kilitli sınır regresyonu**; accel header'larına ve oracle'a DOKUNULMADI.
+
+**1) Aile 1 — speed_processor (whole × lp_norm → dist_mode eşleme):**
+- dist_mode tablosu: lp=0/-1.5→max, 1e-9→Lp, 1→Lp, 2→euclidean, 2.0000000009→euclidean
+  (|lp-2| representable ≤1e-9), 2.000000001→Lp (fp temsili eşiği aşar), 3→Lp, 16/16.0001/1e6→max,
+  whole=false→separate (|-3,4|=(3,4)).
+- Exact hız: (3,4) max=4, euclidean=5, Lp1=7, Lp3=cbrt(91)=4.4979414452754147.
+- **SURPRISE (kilitlendi):** lp_norm=1e-9 ile çapraz vektörde (3,4) → +Inf (2^(1/p)); eksen
+  vektörleri (1,0)/(0,1) tam 1. Sanitize <=0'ı engeller ama 1e-9 geçer; pipeline Inf'i finite zero'lar.
+- Halflife: 0 → smoothing kapalı (3 flag false); 1e-4 → katsayı double'da **0'a underflow**,
+  passthrough (smooth(5,1)=5); 1e6 → katsayı≈0.99999930685305971, ardışık 3.4657e-6/6.9315e-6/
+  1.0397e-5 monoton artan; 2000+200 karelik pipeline (3 halflife=1e6) hiç NaN/yok.
+
+**2) Aile 2 — cap (classic + power, 0/tiny/huge × cap_mode sırası):**
+- classic acc=0.01 cap{15,1.5} out: g(10)=1.1, g(25)=1.25, g(50)=1.375, g(1e6)=1.49999375<1.5.
+- **cap.y=0 sentinel SURPRISE:** out'ta "cap yok" (g(1000)=11, sınırsız) ama io'da inversion-decel
+  (g(10)=2/3, g(100)=0.075). cap{15,0.001} → sign-flip decelasyon (g(10)=0.9).
+- cap_mode sırası x=100: io(1.925) > out(1.75) > in(1.2775); 1e6'da 1.9999925/1.999975/1.29999775.
+- power cap{30,2}: out g(30)=1.87065823485; in g(30)=2.25334338084; io g(30)=1.53846153846; 1e6'da
+  1.99999611975/2.92932611501/1.99998615385; cap{30,0} out → no-cap g(1000)=6.45195012148.
+
+**3) Aile 3 — per-device (dpi/polling_rate/device_id):**
+- dpi [1,32000]: 0/-100→1, 999999→32000. polling [POLL_RATE_MIN,8000]: 0/50/124→125, 8001/99999→8000.
+- device_id: boş/dolu sanitize + JSON round-trip'te korunur; 300-char JSON'da **256'ya kesilir**;
+  iki boş device_id duplicate sayılmaz. output_dpi ve device dpi bağımsız.
+
+**4) Aile 4 — offset (classic/natural input_offset × power output_offset):**
+- classic io=0 → g(5)=1.05; io=1e6 → ≤offset bantta kimlik 1, sonra kaymış cap tail (g(2e6)=1.249996875);
+  natural io=0 → g(5)=1.18393972059 (limit 1.5), 1e6 → g(1e8)=1.494999975<1.5.
+- power oo=0 → g(1)=0.812252396356; oo=2 → offset.x≈8.407, g(1)=2, g(1e5)=1.50001611238;
+  oo=1e6 → offset.x≈8.34e19, geniş sabit bant g=1e6 (cap erişilemez, flat); oo=1e-9 → baz eğriyle aynı.
+- **Kilit:** classic/natural output_offset'i KULLANMAZ (oo=2 ve oo=1e6 ile oo=0 birebir aynı) — bağımsızlık.
+
+**Kapılar:** run_tests **32798/32798**, ASan **32798/32798**, CLI kapıları PASS, oracle **915 satır /
+31 belgeli sapma / RESULT OK (değişmedi)** — ek stress case'i oracle grid'ine GİRMEDİ (unit-seviye).
+Kod değişikliğim yalnızca tests/test_accel.cpp (test, +~150 satır). **COMMIT YAPILMADI** (görev şartı). Kilit kaldırıldı.
