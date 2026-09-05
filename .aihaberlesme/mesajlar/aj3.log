@@ -2,3 +2,50 @@
 T18'i üstlendim (Belge/UX senkronu + çeviri denetimi + GUI dili canlı doğrulama). AKIS.json: durum=devam, kilit=3. Şimdi çeviri kapsam aracını koşuyorum, GUI dil yükleyicisini ve doküman senkronunu inceliyorum.
 ### Aj.3 [M6] [05 Eyl 2026] [13:40]
 T18 TAMAMLANDI (AKIS: tamam, kilit null): çeviri denetimi PASS (0 eksik) | GUI dili canlı doğrulama: üretim-kodu probe 20/20 OK + canlı Wayland rawaccel-gui Türkçe render (OCR kanıt /tmp/opencode/gui_ocr.txt, görüntü /tmp/opencode/gui_shot.png) | belge senkronu: README GUI language + AGENTS.md GUI language resolution | kapılar: build 0 uyarı, test 21587/21587, tr_coverage PASS.
+### Aj.3 [M7] [05 Eyl 2026] [13:50]
+Boştayım — tahtada Aj 3'e atanmış açık iş yok (T18 ✅). Kanalı 5 saniyede bir izliyorum. Şeridim (dokümantasyon/UX/çeviri) hazır; devredilecek iş olursa hemen alırım. AJ 3, T18 `tamam` (kilit null) — AKIS doğrulanmış durumda.
+### Aj.3 [M8] [05 Eyl 2026] [13:55]
+T26 üstlendim (AKIS: durum=devam, kilit=3): dokümantasyon senkronu (README/AGENTS) + tr.inl/tr_coverage PASS teyidi + GUI canlı dil geçişi yeniden doğrulaması. Başlıyorum.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [14:21 — P34 emri]
+Aj 3, P34 UX/doc: dusuk gecikme modu & guvenli varsayilanlar belgesi + README "oyuncu profili" kesiti. Yeni ozellik YOK; dokumantasyon. tr.inl/tr_coverage PASS'i de teyit et. Sonuc loguna.
+### Aj.3 [M9] [05 Eyl 2026] [14:25]
+P34 TAMAMLANDI: README "Player profile (oyuncu profili)" + "düşük gecikme & güvenli varsayılanlar" + Performance genişletme; AGENTS.md "Low-latency motion contract" karar notu. Kaynak-tabanlı (presets/lat_stats/default.json). Yeni özellik yok, kod değişmedi. T-tur kalıntıları (CI oracle senkronu, CLI ağacı, tr_coverage PASS, GUI TR/EN canlı) ağaçta duruyor. Build kapısı T30 (Aj 1) yüzünden kırmızı — benim serim bağımsız.
+### Aj.3 [M10] [05 Eyl 2026] [14:30]
+AKIS.json eski anlık görüntüyle değiştirilmişti (13:16, sadece T16-22); P34 güncelleme yazma girişimim bunu sağlamlaştırdı. Tahta kanaldaki son duruma göre geri yüklendi: 20 gorev (T16-29 + P30-35), P34=tamam/kilit null. Aj 0'a koordinasyon notu düşüldü.
+### Aj.3 [M11] [05 Eyl 2026] [14:35]
+P34 teyitleri (P35 paketine): tr_coverage PASS, run_tests.sh 21587/21587, gui_lang=tr yerinde. T-tur TR/EN canlı kanıtları hazır (gui_tr.png/gui_en8.png/ocr_en8.txt, probe 20/20). P34 kilit null, board tamam.
+### Aj.3 [M12] [05 Eyl 2026] [14:40]
+Görev talebi kanala düşüldü (Aj 0/Aj 5): 1) CHANGELOG/sürüm notları, 2) commit-öncesi README/AGENTS final senkron + diff özeti, 3) oyuncu-odaklı özet kılavuz, 4) telemetri alanları için tr.inl terim senkronu. Atanırsa üstlenirim.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [14:35 - P37 emri]
+Aj 3, P37: telemetri IPC + P31 bulgusu dokumantasyonu — AGENTS.md "Live telemetry & seqlock" kisim + README "telemetry via status" satiri. tr.inl anahtar teyidi. Kaynaklar: aihaberlesme.md M11/M13. AKIS kilit 3.
+### Aj.3 [M13] [05 Eyl 2026] [14:42]
+P37 üstlendim (AKIS: P37 durum=devam, kilit=3): telemetri IPC + P31 bulgusu dokümantasyonu — AGENTS.md "Live telemetry & seqlock" bölümü, README "telemetry via status" satırı (M13 ile senkron), tr.inl kapsam teyidi. Başlıyorum.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [14:46 - P42 emri: Bug Hunt]
+cli/main.cpp (1289 satir) tam incele: arg parse, device_id cozumleme, set_config push protokolu, exit kodlari, cikti format tutarliligi, truncation/large-LINE riskleri. Inceleme modu. Bulgu formati dosya:satir-SINIF-aciklama-fix. P37 dokumantasyon askiya - P41 serisi oncelikli.
+### Aj.3 [M13] [05 Eyl 2026] [14:42]
+P37 üstlendim (AKIS: devam, kilit 3): telemetri IPC + P31 bulgusu dokümantasyonu — AGENTS.md "Live telemetry & seqlock" bölümü, README "telemetry via status" satırı (M13 ile senkron), tr.inl kapsam teyidi. Başlıyorum.
+### Aj.3 [M14] [05 Eyl 2026] [14:48]
+P37 TAMAMLANDI: AGENTS.md "## Live Telemetry & Seqlock" bölümü (yazıcı/okuyucu/seqlock/unique_ptr/semantik), README CLI status telemetri satırı (JSON anahtarları daemon.cpp ile birebir). tr.inl: GUI telemetri render etmiyor → yeni anahtar yok, tr_coverage PASS. AKIS P37 tamam, kilit null.
+### Aj.3 [M15] [05 Eyl 2026] [15:30]
+P42 tamam: 4 bulgu (1 kritik exit-134 abort + arg hatası + trailing -c + bozuk-config üzerine yazma); hepsi canlı doğrulandı, 3'ü safe_save/hedefli-mesaj/data-koruması yamalarıyla düzeldi. Harici bloker raporlandı: LUT round-trip testi P43-BF1 (version okuma) nedeniyle kırık — Aj 4/QA'ya devredildi. tr PASS. AKIS P42 tamam, kilit null.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [15:35 - P52 emri: fix entegrasyon]
+Aj 3, P42'deki 3 fix (safe_save/hedefli-mesaj/data-korumasi) tamamlandi. P52 atandi: cli/main.cpp diff envanterini cikar (hangi satirlar degisti, neden), P51 8-dosya paketine ekle. Build + test + oracle + tr PASS teyidi bekle. Raporu loguna. Kilit 3.
+### Aj.3 [M16] [05 Eyl 2026] [15:52]
+Aj 1 P52 atamasını kabul ettim (AKIS P52 devam, kilit 3): P42'nin 3 cli/main.cpp düzeltmesinin diff envanteri, P35 tek-commit paketi entegrasyon teyidi, build/test/oracle/tr re-teyidi. Başlıyorum.
+### Aj.3 [M17] [05 Eyl 2026] [15:58]
+P52 tamam: cli diff envanteri (tek dosya +80/-21; Fix A safe_save 8 çağrı noktası, Fix B hedefli arity, Fix C -c/data-koruması), P35 paketinde dosya alanları ayrık (daemon/config/gui/lat çakışması yok). Re-teyit: build 0 uyarı, 21591/21591, oracle OK 588/27, tr PASS. AKIS P52 tamam, kilit null.
+### Aj.3 [M18] [05 Eyl 2026] [16:10]
+P53 üstlendim (Aj 1 M22 emri, kullanıcı "hatasız olsun"): daemon/main.cpp — json log escape + --flag=value parse düzeltmesi. Başlıyorum.
+### Aj.3 [M19] [05 Eyl 2026] [16:25]
+P53 tamam: daemon/main.cpp json-escape (tüm log satırları jq-valid kanıtlı) + --flag=value parse + eksik-değer guard + explicit-path = formu; T1-T6, exit kodları, validation kanıtlandı. Benim dosyam 0 uyarı. Aj 4'e 2 ağaç kırığı devredildi: config.cpp:298 sign-compare + test_accel.cpp <cstdio> eksik (std::remove derlenmiyor). AKIS P53 tamam, kilit null.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [16:50 - T26 emri (istegin karsilandi)]
+Aj 3, dokumantasyon/ceviri istegin karsilandi: T26 -> dokumantasyon senkronu (README/AGENTS guncellik) + tr.inl/tr_coverage PASS teyidi + GUI canli dil gecis yeniden dogrulamasi. Kullanici "tum gorevler" + "is isteyen varsa" emri. Kilit 3.
+### Aj.3 [M20] [05 Eyl 2026] [15:45]
+T26 tamam (Aj 1 M24 ataması): 1) AGENTS test sayıları 132 grup/21604 assertion + 7 yeni KDD (P42/P53/P54/P55/P43 kod-çaprazlı) + README daemon --config=/--log-format; 2) tr_coverage PASS; 3) GUI dil: tr-vs-en AE 20972 vs kontrol AE 38 (~550x), kod zinciri load_lang_override/resolve_lang/refresh_language teyidi, gui_lang=tr geri yüklendi. AKIS T26 tamam, kilit null.
+### Aj.3 [M21] [05 Eyl 2026] [15:52]
+AGENTS.md test metrikleri güncellendi 21604→21627 (T24 Aj7'nin +23 EXPECT'ini doğruladım: run_tests 21627/21627; grup 132 sabit). SYN_DROPPED durum makinesi kapsama listesine eklendi.

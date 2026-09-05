@@ -24,7 +24,9 @@
 #include <cstdlib>
 #include <sys/stat.h>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <random>
 #include <regex>
 #include <string>
@@ -1931,6 +1933,74 @@ static void test_lut_sort_on_sanitize() {
 
 // ── Test: LUT sort + JSON round-trip (unsorted JSON → sorted after load) ─────
 
+static void test_cfg_p54_guards() {
+    SECTION("P54-B2 — LUT length clamp in sanitize");
+    {
+        device_profile dp;
+        dp.name = "b2clamp";
+        dp.prof.accel_x.mode = accel_mode::lookup;
+        dp.prof.accel_x.length = 100000;
+        dp.prof.accel_x.data[0] = 0.0f;
+        dp.prof.accel_x.data[1] = 1.0f;
+        sanitize_device_profile(dp);
+        EXPECT(static_cast<size_t>(dp.prof.accel_x.length) <= LUT_RAW_DATA_CAPACITY);
+        EXPECT(dp.prof.accel_x.length >= 0);
+
+        device_profile dpn;
+        dpn.name = "b2neg";
+        dpn.prof.accel_x.mode = accel_mode::lookup;
+        dpn.prof.accel_x.length = -7;
+        sanitize_device_profile(dpn);
+        EXPECT(dpn.prof.accel_x.length == 0);
+    }
+
+    SECTION("P54-B3 — save_config tmp is pid-suffixed, atomic, no .tmp left");
+    {
+        const std::string path = "/tmp/test_p54_b3.json";
+        std::filesystem::remove(path);
+        app_config cfg;
+        cfg.active_profile = "p54";
+        save_config(cfg, path);
+        EXPECT(!std::filesystem::exists(path + ".tmp"));
+        EXPECT(std::filesystem::exists(path));
+        EXPECT(std::filesystem::file_size(path) > 0);
+        std::filesystem::remove(path);
+    }
+
+    SECTION("P54-B4 — wrong-typed string fields fall back, no throw");
+    {
+        // All string fields get a non-string value; accel_args strings too.
+        // The loader must not throw — defaults keep the config loadable.
+        nlohmann::json j = {
+            {"version", std::string("bad") + "type"},
+            {"active_profile", 42},
+            {"use_raw_input", "yes"},
+            {"profiles", nlohmann::json::array({{
+                {"name", 42},
+                {"device_id", 456},
+                {"dpi", "900"},
+                {"profile", nlohmann::json{{"mode", 7}, {"gain", "yes"},
+                                 {"cap_mode", 3}, {"name", 42}}}
+            }})}
+        };
+        const std::string path = "/tmp/test_p54_b4.json";
+        {
+            std::ofstream f(path);
+            f << j.dump(4);
+        }
+        app_config cfg = load_config(path);   // no exception allowed
+        std::filesystem::remove(path);
+
+        EXPECT(cfg.active_profile == "default");
+        EXPECT(cfg.use_raw_input == true);
+        EXPECT(cfg.profiles.size() == 1);
+        EXPECT(cfg.profiles[0].name.empty());
+        EXPECT(cfg.profiles[0].device_id.empty());
+        EXPECT(cfg.profiles[0].dev_cfg.dpi == 800);
+        EXPECT(cfg.profiles[0].prof.accel_x.mode == accel_mode::noaccel);
+    }
+}
+
 static void test_lut_sort_json_roundtrip() {
     SECTION("LUT sort — unsorted JSON round-trip");
 
@@ -1940,8 +2010,8 @@ static void test_lut_sort_json_roundtrip() {
         dp.name = "lut_sort_test";
         dp.prof.accel_x.mode = accel_mode::lookup;
         dp.prof.accel_x.length = 6;
-        dp.prof.accel_x.data[0] = 15.0f; dp.prof.accel_x.data[1] = 1.6f;
-        dp.prof.accel_x.data[2] = 5.0f;  dp.prof.accel_x.data[3] = 1.2f;
+        dp.prof.accel_x.data[0] = 15.0f; dp.prof.accel_x.data[1] = 24.0f; // output speed (y = x · gain)
+        dp.prof.accel_x.data[2] = 5.0f;  dp.prof.accel_x.data[3] = 6.0f;
         dp.prof.accel_x.data[4] = 0.0f;  dp.prof.accel_x.data[5] = 1.0f;
 
         app_config cfg;
@@ -1960,20 +2030,68 @@ static void test_lut_sort_json_roundtrip() {
         EXPECT(ax.length == 6);
 
         // After load + sanitize, data must be sorted by X.
-        // Config written without a version → migrate_lookup_gain turns the
-        // old direct-gain y into velocity output speed: y_new = y_old · x.
+        // save_config always stamps the schema version, so on reload the
+        // current version is read back and migrate_config() is a no-op
+        // (P43-BF1). Stored y are OUTPUT SPEEDS (velocity mode):
+        // effective gain = y / speed.
         EXPECT_NEAR(ax.data[0], 0.0f,  1e-9);
         EXPECT_NEAR(ax.data[1], 1.0f,  1e-9);   // x=0 noktası dokunulmaz
         EXPECT_NEAR(ax.data[2], 5.0f,  1e-9);
-        EXPECT_NEAR(ax.data[3], 6.0f,  1e-9);   // 1.2 · 5  (yönlendirilmiş)
+        EXPECT_NEAR(ax.data[3], 6.0f,  1e-9);   // 5.0 noktasının output speed'i
         EXPECT_NEAR(ax.data[4], 15.0f, 1e-9);
-        EXPECT_NEAR(ax.data[5], 24.0f, 1e-9);   // 1.6 · 15
+        EXPECT_NEAR(ax.data[5], 24.0f, 1e-9);   // 15.0 noktası — migrate çalışmaz
 
         // Interpolation: velocity mode → geçerli gain = y/speed (özgün eğri geri gelir)
         lookup lut(ax);
         EXPECT_NEAR(lut(0.0,  ax), 0.0, 1e-6);
         EXPECT_NEAR(lut(5.0,  ax), 1.2, 1e-6);
         EXPECT_NEAR(lut(15.0, ax), 1.6, 1e-6);
+    }
+
+    SECTION("LUT — P43-BF1 regression: lookup+gain round-trip stays stable");
+    {
+        // BF1: app_config_from_json_obj read the schema version back from JSON.
+        // Before the fix, version was never read, so migrate_config() re-ran
+        // migrate_lookup_gain() on EVERY load, rescaling stored gain y by x
+        // each round trip (200 → 20000 → 2M → ...). Now the migration must run
+        // exactly once (only when the stored version is absent/stale).
+        device_profile dp;
+        dp.name = "bf1_rt";
+        dp.prof.accel_x.mode = accel_mode::lookup;
+        dp.prof.accel_x.gain = true;
+        dp.prof.accel_x.length = 4; // 2 points
+        dp.prof.accel_x.data[0] = 0.f;   dp.prof.accel_x.data[1] = 0.f;
+        dp.prof.accel_x.data[2] = 100.f; dp.prof.accel_x.data[3] = 200.f;
+
+        app_config cfg;
+        cfg.active_profile = "bf1_rt";
+        cfg.profiles.push_back(dp);
+
+        const char* tmp = "/tmp/test_bf1_rt.json";
+        save_config(cfg, tmp); // stamps version
+        for (int it = 0; it < 3; it++) {
+            app_config c = load_config(tmp);
+            double y = c.profiles[0].prof.accel_x.data[3];
+            EXPECT_NEAR(y, 200.0f, 1e-9); // no repeated rescaling on reload
+        }
+        std::remove(tmp);
+
+        // And a legacy versionless file must STILL be migrated exactly once
+        // (y_new = y · x) — one-shot migration behaviour is preserved.
+        const char* legacy = "/tmp/test_bf1_legacy.json";
+        {
+            std::ofstream of(legacy);
+            of << R"({ "active_profile": "bf1", "use_raw_input": true,
+  "profiles": [ { "name": "bf1", "device_id": "",
+      "profile": { "name": "bf1",
+          "accel_x": { "mode": "lookup", "gain": true,
+               "lut_data": [0.0,0.0,100.0,200.0], "lut_length": 4 },
+          "accel_y": { "mode": "lookup", "gain": true,
+               "lut_data": [0.0,0.0,100.0,200.0], "lut_length": 4 } } } ] })";
+        }
+        app_config cl = load_config(legacy);
+        std::remove(legacy);
+        EXPECT_NEAR(cl.profiles[0].prof.accel_x.data[3], 20000.0f, 1e-9); // 200 · 100
     }
 }
 
@@ -4080,7 +4198,208 @@ static void test_syn_dropped_reset_behavior() {
     EXPECT(total >= 0.0 && total < 1000.0);
 }
 
-// ── R10: Config edge cases ───────────────────────────────────────────────────
+// ── T24: SYN_DROPPED event-stream scenarios ──────────────────────────────
+//
+// Faithful unit-level mirror of the daemon's process_device() decision table
+// (daemon/daemon.cpp). Linux input protocol: ALL events between SYN_DROPPED
+// and the next SYN_REPORT are unreliable and must be discarded.
+//   - BUG-18: the dropped flag is device-state, so a SYN_DROPPED in one read
+//     batch is still active when the clearing SYN_REPORT arrives in a later
+//     invocation.
+//   - R12: non-SYN events while dropped are discarded (motion + buttons).
+//   - The clearing SYN_REPORT is consumed silently (not forwarded).
+//   - Motion is flushed only on SYN_REPORT; a batch ending without SYN loses
+//     its accumulated deltas (daemon's dx/dy are per-invocation locals).
+// No new feature: pure observation harness over the documented state machine.
+
+namespace t24syn {
+
+enum : unsigned short {
+    ev_syn = 0x00,
+    ev_key = 0x01,
+    ev_rel = 0x02,
+};
+enum : unsigned short {
+    syn_report = 0x00,
+    syn_dropped = 0x03,
+};
+enum : unsigned short {
+    rel_x = 0x00,
+    rel_y = 0x01,
+};
+enum : unsigned short {
+    btn_left = 0x110,
+    btn_right = 0x111,
+};
+
+struct evt {
+    unsigned short type, code;
+    int value;
+};
+
+struct sim {
+    bool dropped = false;
+    double dx = 0, dy = 0;
+    bool has_motion = false;
+    std::vector<evt> out;
+
+    void handle(unsigned short type, unsigned short code, int value) {
+        if (type == ev_syn) {
+            if (code == syn_dropped) {
+                dx = dy = 0;
+                has_motion = false;
+                dropped = true;
+                return;
+            }
+            if (dropped) {           // clearing SYN_REPORT: silent boundary
+                dropped = false;
+                return;
+            }
+            flush();
+            out.push_back({ev_syn, syn_report, 0});
+        } else if (dropped) {
+            return;                  // R12: discard all non-SYN while dropped
+        } else if (type == ev_rel) {
+            if (code == rel_x) dx += value;
+            else if (code == rel_y) dy += value;
+            has_motion = true;
+        } else {
+            out.push_back({type, code, value});   // buttons etc. forwarded
+        }
+    }
+
+    void end_batch() {
+        // Motion that never reached a SYN_REPORT is lost (daemon locals
+        // dx/dy live inside one process_device() invocation).
+        dx = dy = 0;
+        has_motion = false;
+    }
+
+    void flush() {
+        if (!has_motion) return;
+        out.push_back({ev_rel, rel_x, (int)dx});
+        out.push_back({ev_rel, rel_y, (int)dy});
+        dx = dy = 0;
+        has_motion = false;
+    }
+};
+
+bool has_rel(const std::vector<evt>& v, int x, int y) {
+    bool fx = false, fy = false;
+    for (const evt& e : v) {
+        if (e.type == ev_rel && e.code == rel_x && e.value == x) fx = true;
+        if (e.type == ev_rel && e.code == rel_y && e.value == y) fy = true;
+    }
+    return fx && fy;
+}
+
+} // namespace t24syn
+
+static void test_syn_dropped_event_stream() {
+    using namespace t24syn;
+
+    SECTION("T24 — SYN_DROPPED: baseline fresh motion is flushed on SYN");
+    {
+        sim s;
+        s.handle(ev_rel, rel_x, 5);
+        s.handle(ev_rel, rel_y, 7);
+        s.handle(ev_syn, syn_report, 0);
+        EXPECT(s.out.size() == 3);
+        EXPECT(has_rel(s.out, 5, 7));
+        EXPECT(s.out[2].type == ev_syn && s.out[2].code == syn_report);
+        EXPECT(!s.dropped && s.dx == 0 && s.dy == 0 && !s.has_motion);
+    }
+
+    SECTION("T24 — SYN_DROPPED mid-batch discards motion, buttons and clears on SYN");
+    {
+        sim s;
+        s.handle(ev_rel, rel_x, 5);
+        s.handle(ev_syn, syn_dropped, 0);
+        s.handle(ev_rel, rel_y, 20);
+        s.handle(ev_key, btn_left, 1);
+        s.handle(ev_syn, syn_report, 0);
+        EXPECT(s.out.empty());
+        EXPECT(!s.dropped);
+    }
+
+    SECTION("T24 — SYN_DROPPED persists across batches until SYN_REPORT (BUG-18)");
+    {
+        sim s;
+        s.handle(ev_rel, rel_x, 5);
+        s.handle(ev_syn, syn_dropped, 0);
+        s.end_batch();
+        EXPECT(s.dropped);
+        s.handle(ev_rel, rel_y, 7);      // next invocation: still dropped
+        s.handle(ev_syn, syn_report, 0);
+        EXPECT(s.out.empty());
+        EXPECT(!s.dropped);
+    }
+
+    SECTION("T24 — DOUBLE SYN_DROPPED keeps discarding until first SYN_REPORT");
+    {
+        sim s;
+        s.handle(ev_rel, rel_x, 5);
+        s.handle(ev_syn, syn_dropped, 0);
+        s.handle(ev_syn, syn_dropped, 0);
+        s.handle(ev_key, btn_left, 1);
+        s.handle(ev_syn, syn_report, 0);
+        EXPECT(s.out.empty());
+        EXPECT(!s.dropped);
+    }
+
+    SECTION("T24 — fresh motion after the clearing SYN_REPORT is flushed normally");
+    {
+        sim s;
+        s.handle(ev_rel, rel_x, 5);
+        s.handle(ev_syn, syn_dropped, 0);
+        s.handle(ev_syn, syn_report, 0);     // clears dropped, consumes SYN
+        s.handle(ev_rel, rel_x, 3);
+        s.handle(ev_rel, rel_y, 1);
+        s.handle(ev_syn, syn_report, 0);
+        EXPECT(has_rel(s.out, 3, 1));
+        EXPECT(s.out.size() == 3);
+        EXPECT(!s.dropped);
+    }
+
+    SECTION("T24 — buttons before a drop are kept, after a drop are discarded");
+    {
+        sim s;
+        s.handle(ev_key, btn_left, 1);
+        s.handle(ev_syn, syn_report, 0);
+        s.handle(ev_rel, rel_x, 2);
+        s.handle(ev_syn, syn_dropped, 0);
+        s.handle(ev_key, btn_right, 1);      // unreliable window
+        s.handle(ev_syn, syn_report, 0);
+        EXPECT(s.out.size() == 2);
+        EXPECT(s.out[0].type == ev_key && s.out[0].code == btn_left);
+        EXPECT(s.out[1].type == ev_syn && s.out[1].code == syn_report);
+    }
+
+    SECTION("T24 — motion without SYN_REPORT is lost at batch end (daemon locals)");
+    {
+        sim s;
+        s.handle(ev_rel, rel_x, 8);      // partial frame, no SYN yet
+        s.end_batch();                   // batch boundary: deltas dropped
+        s.handle(ev_syn, syn_report, 0); // nothing to flush; bare SYN forwarded
+        EXPECT(s.out.size() == 1);
+        EXPECT(s.out[0].type == ev_syn && s.out[0].code == syn_report);
+        EXPECT(!s.dropped && !s.has_motion);
+    }
+
+    SECTION("T24 — dropped flag does NOT leak into the next good batch window");
+    {
+        sim s;
+        s.handle(ev_syn, syn_dropped, 0);
+        s.handle(ev_syn, syn_report, 0);
+        s.handle(ev_rel, rel_x, 4);
+        s.handle(ev_syn, syn_report, 0);
+        EXPECT(has_rel(s.out, 4, 0));
+        EXPECT(s.out.size() == 3);
+        EXPECT(!s.dropped);
+    }
+}
+
+// ── Config edge cases ────────────────────────────────────────────────────
 
 static void test_config_empty_profiles() {
     SECTION("R10 — config: empty profiles array handling");
@@ -5787,6 +6106,7 @@ int main(int argc, char** argv) {
     test_subpixel_sign();
     test_sanitize_extremes();
     test_lut_sort_on_sanitize();
+    test_cfg_p54_guards();
     test_lut_sort_json_roundtrip();
     test_motion_math_overflow();
     test_accel_args_sanitize();
@@ -5840,6 +6160,7 @@ int main(int argc, char** argv) {
     test_speed_processor_all_distance_modes();
     test_speed_processor_smoothing();
     test_syn_dropped_reset_behavior();
+    test_syn_dropped_event_stream();
     test_config_empty_profiles();
     test_config_missing_active_profile();
     test_config_extreme_values();

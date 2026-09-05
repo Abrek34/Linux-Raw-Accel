@@ -93,8 +93,12 @@ static json accel_args_to_json(const accel_args& a) {
 
 static accel_args accel_args_from_json(const json& j) {
     accel_args a;
-    if (j.contains("mode"))             a.mode             = str_to_mode(j["mode"].get<std::string>());
-    if (j.contains("gain"))             a.gain             = j["gain"].get<bool>();
+    // B4 (P43): type-guard string fields so malformed JSON (wrong type) yields
+    // a default instead of a nlohmann::json::type_error exception.
+    if (j.contains("mode") && j["mode"].is_string())
+        a.mode = str_to_mode(j["mode"].get<std::string>());
+    if (j.contains("gain") && j["gain"].is_boolean())
+        a.gain = j["gain"].get<bool>();
     if (j.contains("input_offset"))     a.input_offset     = j["input_offset"].get<double>();
     if (j.contains("output_offset"))    a.output_offset    = j["output_offset"].get<double>();
     if (j.contains("acceleration"))     a.acceleration     = j["acceleration"].get<double>();
@@ -115,7 +119,8 @@ static accel_args accel_args_from_json(const json& j) {
             a.cap.y = cap[1].get<double>();
         }
     }
-    if (j.contains("cap_mode"))  a.cap_mode_val = str_to_cap(j["cap_mode"].get<std::string>());
+    if (j.contains("cap_mode") && j["cap_mode"].is_string())
+        a.cap_mode_val = str_to_cap(j["cap_mode"].get<std::string>());
     if (j.contains("lut_data") && j.contains("lut_length") &&
         a.mode == accel_mode::lookup) {
         // BUG-5: nlohmann::json::get<int>() invokes UB when the JSON value
@@ -128,8 +133,10 @@ static accel_args accel_args_from_json(const json& j) {
         if (raw > (double)LUT_RAW_DATA_CAPACITY) raw = LUT_RAW_DATA_CAPACITY;
         a.length = static_cast<int>(raw);
         auto& pts = j["lut_data"];
-        int n = std::min((int)pts.size(), a.length);
-        for (int i = 0; i < n; i++) {
+        // B5 (P43): do the min() in size_t so a pathological pts.size() cannot
+        // overflow via the `int` narrowing cast (theoretical UB).
+        size_t n = std::min(static_cast<size_t>(a.length), pts.size());
+        for (size_t i = 0; i < n; i++) {
             // Same defence on the LUT entries themselves.
             double v = pts[i].is_number() ? pts[i].get<double>() : 0.0;
             if (!std::isfinite(v)) v = 0;
@@ -178,7 +185,7 @@ static json profile_to_json_obj(const profile& p) {
 static profile profile_from_json_obj(const json& j) {
     profile p;
 
-    if (j.contains("name")) {
+    if (j.contains("name") && j["name"].is_string()) {
         auto s = j["name"].get<std::string>();
         std::strncpy(p.name, s.c_str(), MAX_NAME_LEN - 1);
         // strncpy doesn't write a null terminator when src ≥ N.  Default
@@ -282,6 +289,14 @@ static inline double finite_or(double v, double def) {
 }
 
 static void sanitize_accel_args(accel_args& a) {
+    // B2 (P43): LUT length must stay within the raw-data buffer.  The JSON
+    // path clamps already, but programmatically-built profiles (GUI/CLI and
+    // sanitize_device_profile()) can carry any int here, and sort_lut_data()
+    // iterates length/2 points as a.data[i*2]/[i*2+1] — out-of-range would
+    // be buffer UB.
+    if (a.length < 0) a.length = 0;
+    if (static_cast<size_t>(a.length) > LUT_RAW_DATA_CAPACITY) a.length = LUT_RAW_DATA_CAPACITY;
+
     // NaN / Inf guard: NaN silently passes comparison guards (NaN < 0 → false),
     // so we must replace non-finite values with safe defaults first.
     a.acceleration    = finite_or(a.acceleration, 0);
@@ -424,10 +439,25 @@ static int json_get_int_safe(const json& v, int fallback) {
     return static_cast<int>(d);
 }
 
+/// B4 (P43): read a string field with a type guard and a hard length cap so
+/// malformed input (number/array/null) or absurd lengths cannot throw
+/// type_error or balloon memory.
+static std::string json_get_string_limited(const json& v,
+                                           const std::string& fallback,
+                                           size_t maxlen) {
+    if (!v.is_string()) return fallback;
+    auto s = v.get<std::string>();
+    if (s.size() > maxlen) s.resize(maxlen);
+    return s;
+}
+
 static device_profile device_profile_from_json(const json& j) {
     device_profile dp;
-    if (j.contains("name"))         dp.name          = j["name"].get<std::string>();
-    if (j.contains("device_id"))    dp.device_id     = j["device_id"].get<std::string>();
+    // B4 (P43): type guard + length cap for the free-form string fields.
+    constexpr size_t MAX_DP_NAME = 256;
+    constexpr size_t MAX_DP_DEVICE_ID = 256;
+    if (j.contains("name"))       dp.name      = json_get_string_limited(j["name"], "", MAX_DP_NAME);
+    if (j.contains("device_id"))  dp.device_id = json_get_string_limited(j["device_id"], "", MAX_DP_DEVICE_ID);
     if (j.contains("dpi"))          dp.dev_cfg.dpi   = json_get_int_safe(j["dpi"], 800);
     if (j.contains("polling_rate")) dp.dev_cfg.polling_rate = json_get_int_safe(j["polling_rate"], 1000);
     if (j.contains("disable"))      dp.dev_cfg.disable = j["disable"].is_boolean()
@@ -446,9 +476,16 @@ static device_profile device_profile_from_json(const json& j) {
 static app_config app_config_from_json_obj(const json& j) {
     app_config cfg;
 
-    if (j.contains("active_profile"))
+    // P43-BF1 (critical): read the schema version back from JSON. Without this,
+    // cfg.version stays empty on every load, so migrate_config() re-runs
+    // migrate_lookup_gain() on each load->save round trip, re-scaling stored
+    // lookup+gain points by x every time (200 -> 20000 -> 2M -> ...).
+    if (j.contains("version") && j["version"].is_string())
+        cfg.version = j["version"].get<std::string>();
+
+    if (j.contains("active_profile") && j["active_profile"].is_string())
         cfg.active_profile = j["active_profile"].get<std::string>();
-    if (j.contains("use_raw_input"))
+    if (j.contains("use_raw_input") && j["use_raw_input"].is_boolean())
         cfg.use_raw_input = j["use_raw_input"].get<bool>();
 
     if (j.contains("profiles")) {
@@ -503,11 +540,25 @@ void save_config(const app_config& cfg, const std::string& path) {
     // whose pages were never committed → user finds an empty file after reboot.
     // Cure: fsync() the file before rename, then fsync() the parent directory
     // so the rename itself is durable.
-    std::string tmp_path = path + ".tmp";
+    // B3 (P43): deterministic `path + ".tmp"` allowed two races — (a) an
+    // attacker who can write the config directory could plant a symlink at
+    // that name and have the daemon (usually root) O_TRUNC/write through it;
+    // (b) two concurrent savers clobbered each other's temp file.  Use a
+    // process-scoped name plus O_NOFOLLOW|O_EXCL so we never follow a link
+    // and never touch a file we did not just create.
+    std::string tmp_path = path + "." + std::to_string(::getpid()) + ".tmp";
     {
         std::string content = j.dump(4) + "\n";
         int fd = ::open(tmp_path.c_str(),
-                        O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+                        O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0644);
+        if (fd < 0 && errno == EEXIST) {
+            // Stale temp from an earlier aborted save in this process — it is
+            // ours (pid-suffixed) and guaranteed non-symlink only if unlinked
+            // right here; retry once before giving up.
+            ::unlink(tmp_path.c_str());
+            fd = ::open(tmp_path.c_str(),
+                        O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0644);
+        }
         if (fd < 0)
             throw std::runtime_error("Cannot write temp config: " + tmp_path +
                                      " (" + std::strerror(errno) + ")");

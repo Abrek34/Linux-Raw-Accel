@@ -946,6 +946,13 @@ static bool flush_motion(mouse_device& dev, libevdev_uinput* uidev,
         if (iy != 0 && !uinput_write(uidev, EV_REL, REL_Y, iy)) return false;
         double lat_us = static_cast<double>(now_ns() - t_start) / 1000.0;
         dev.lat.record(lat_us);
+        // Live telemetry: raw-passthrough path (no modifier). Fill counters and
+        // deltas only — speeds are undefined without the speed pipeline.
+        dev.telem_dx = static_cast<double>(ix);
+        dev.telem_dy = static_cast<double>(iy);
+        dev.telem_wall_ms = now_ms();
+        dev.telem_samples->store(dev.telem_samples->load(std::memory_order_relaxed) + 1,
+                                 std::memory_order_release);
         return true;
     }
 
@@ -964,6 +971,22 @@ static bool flush_motion(mouse_device& dev, libevdev_uinput* uidev,
 
     if (out_x != 0 && !uinput_write(uidev, EV_REL, REL_X, out_x)) return false;
     if (out_y != 0 && !uinput_write(uidev, EV_REL, REL_Y, out_y)) return false;
+
+    // Live telemetry (T30): last-motion sample. IPS = magnitude(delta counts) *
+    // (dpi_factor / time_ms) — same normalization the modifier uses. Stores are
+    // plain doubles; the IPC reader flakes them against the monotonic sample
+    // counter (seqlock-style) so a torn read is detected, not acted on.
+    double ips_factor = dev.dpi_factor / time_ms;
+    double in_ips     = magnitude({ dx, dy }) * ips_factor;
+    double out_ips    = magnitude({ static_cast<double>(out_x), static_cast<double>(out_y) }) * ips_factor;
+    dev.telem_speed_ips = in_ips;
+    dev.telem_out_ips   = out_ips;
+    dev.telem_gain      = in_ips > 0 ? out_ips / in_ips : 0;
+    dev.telem_dx        = dx;
+    dev.telem_dy        = dy;
+    dev.telem_wall_ms   = now;
+    dev.telem_samples->store(dev.telem_samples->load(std::memory_order_relaxed) + 1,
+                             std::memory_order_release);
 
     // Record processing latency (µs): time from flush_motion entry to last write.
     // This covers: modifier math + uinput write (does NOT include kernel→user round-trip).
@@ -1192,6 +1215,9 @@ struct DevSnap {
         int dpi, poll_rate, detected_dpi, detected_polling_rate, detected_battery;
         uint64_t lat_count = 0;
         double lat_avg = 0, lat_p50 = 0, lat_p95 = 0, lat_p99 = 0, lat_max = 0;
+        bool     telem_ok = false;   // counters matched under seqlock read
+        double   telem_speed_ips = 0, telem_out_ips = 0, telem_gain = 0;
+        double   telem_dx = 0, telem_dy = 0, telem_wall_ms = 0;
     };
 
     std::string cfg_path_snap;
@@ -1217,6 +1243,33 @@ struct DevSnap {
                 s.lat_p95   = dev.lat.percentile(95);
                 s.lat_p99   = dev.lat.percentile(99);
                 s.lat_max   = dev.lat.max_us;
+            }
+
+            // Live telemetry (seqlock-style read): flush_motion() stores the six
+            // doubles then bumps telem_samples (release).  Read the counter, copy
+            // the doubles, re-read the counter — if they match, no tear happened
+            // on flue.  spin a few times under the device lock; the writer path
+            // has no lock so it cannot deadlock us here.
+            for (int attempts = 0; attempts < 8; attempts++) {
+                const uint64_t s1 = dev.telem_samples->load(std::memory_order_acquire);
+                if (s1 == 0) break; // no motion yet
+                const double t_speed = dev.telem_speed_ips;
+                const double t_out   = dev.telem_out_ips;
+                const double t_gain  = dev.telem_gain;
+                const double t_dx    = dev.telem_dx;
+                const double t_dy    = dev.telem_dy;
+                const double t_wall  = dev.telem_wall_ms;
+                const uint64_t s2 = dev.telem_samples->load(std::memory_order_acquire);
+                if (s1 == s2) {
+                    s.telem_ok = true;
+                    s.telem_speed_ips = t_speed;
+                    s.telem_out_ips   = t_out;
+                    s.telem_gain      = t_gain;
+                    s.telem_dx        = t_dx;
+                    s.telem_dy        = t_dy;
+                    s.telem_wall_ms   = t_wall;
+                    break;
+                }
             }
             snaps.push_back(s);
         }
@@ -1247,6 +1300,14 @@ struct DevSnap {
             o << ",\"lat_p95_us\":"  << s.lat_p95;
             o << ",\"lat_p99_us\":"  << s.lat_p99;
             o << ",\"lat_max_us\":"  << s.lat_max;
+        }
+        if (s.telem_ok) {
+            o << std::fixed << std::setprecision(3);
+            o << ",\"telem_in_ips\":" << s.telem_speed_ips;
+            o << ",\"telem_out_ips\":" << s.telem_out_ips;
+            o << ",\"telem_gain\":"    << s.telem_gain;
+            o << ",\"telem_dx\":"      << s.telem_dx;
+            o << ",\"telem_dy\":"      << s.telem_dy;
         }
         o << "}";
     }

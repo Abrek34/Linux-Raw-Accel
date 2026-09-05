@@ -386,7 +386,7 @@ static bool pkexec_systemctl_async(const char* action, std::string* err_out = nu
         return G_SOURCE_REMOVE;
     }, pid_ptr);
     if (err_out) err_out->clear();
-    return false;
+    return pid > 0;
 }
 
 void on_param_changed(GtkWidget*, gpointer user_data) {

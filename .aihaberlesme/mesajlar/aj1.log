@@ -5,3 +5,87 @@ T16 TAMAM - canli uctan uca yeniden dogrulama:
 3) set-param scale 2.78->5.0 (IPC set_config push) -> cikis 5105 (davranis DEGISTI, daemon "Config reloaded" logladi)
 4) scale geri 2.78 -> 14018 (~baseline geri dondu). Kanit: /tmp/opencode/vm* araclari.
 Ayrica: girilen yeni fare icin KWin global Flat dogrulandi (kcminputrc per-device Flat).
+### Aj.1 [M8] [05 Eyl 2026] [14:02 — yeni aşama: amaca-odaklı geliştirme]
+
+Kullanıcı yönü: **bu bir fare hızlandırma programı** — geliştirmeler çekirdek amaca hizmet etmeli, programı karıştırmadan, küçük ve odaklı. Teknik hijyen maddeleri (T23-T29) ERTELENDİ.
+
+Onaylanan 4 amaca-odaklı özellik:
+1. Canlı hız/ivme izleme satırı (GUI eğrisinde imlecin anlık hız noktası)
+2. Kalibrasyon hızlı ayarı (CLI kısa yol)
+3. Uygulama bazlı profil (aktif pencere/uygulamaya göre otomatik profil)
+4. Hız göstergeci (on-screen küçük panel)
+
+Dağıtım (AKIS.json):
+- **T30 → Aj 1** daemon live telemetry IPC (ortak altyapı, herkesin üstüne bineceği kanal)
+- **T31 → Aj 3** GUI: eğri overlay + OSD göstergeci
+- **T32 → Aj 6** uygulama bazlı profil (KDE Wayland pencere takibi + daemon kural eşleştirme + IPC denetimi)
+- **T33 → Aj 2** CLI hızlı ayar + telemetri/profil-kuralı sentetik testleri
+- **T34 → Aj 7** telemetri hot-path maliyeti 0 denetimi + T21 regresyon
+- **T35 → Aj 5** yönetici kabul kapısı (uçtan uca, tahta, GitHub main senkron)
+
+İlk geliştirme (T30): daemon'da canlı telemetri. Mevcut IPC komutlarına dokunmadan yeni bir "telemetry/status-live" sorgusu; hot-path'e ilave maliyet YOK (istemci çektiğinde son kaydedilmiş sonuç döner). Güvenli: whitelist'e uzunluk cap'li ek, root-only.
+
+Herkes kendi görevini üstlensin (kilit disiplini), J0 diğerine çakılmadan kilitlerini alsın. Kullanıcıya gösterilebilecek ilk canlı çıktı umarım bu tur: GUI'de hareket ederken eğri üzerinde canlı nokta.
+
+### Aj.1 [M9] [05 Eyl 2026] [14:12 - oyuncu-odakli faza gecis]
+
+Kullanici yonu: oyuncu profili: dusuk gecikme + en dogru hissiyat + dogru/hizli hesaplama. OLCUYORUZ, ozellik koymuyoruz.
+
+Canli ilk veri (daemon lat_stats, test faresi):
+Samples:128  Min:26.8us  Avg:35.96us  p50:27.75us  p95:76.25us  p99:183.25us  Max:426.5us
+
+p99/max kuyrugu acik hedef. Kullanici 3 olcumun 3'unu de secti -> tasi:
+- P30 -> Aj 1 kuyruk analizi (p99/max kaynagi: uinput buf vs scheduler vs batch)
+- P31 -> Aj 7 hot-path benchmark araci (evdev->EMA->uinput_write ayristirma, 100k olay)
+- P32 -> Aj 6 IPC gecikme etkisi (status sorgusu hareket dongusunu kesiyor mu)
+- P33 -> Aj 2 oyuncu-dogruluk oraclei (500-4000 ips ozel grid + kalan sapma denetimi)
+- P34 -> Aj 3 dusuk-gecikme/mod dokumantasyonu + README oyuncu kesiti
+- P35 -> Aj 5 yonetici kapisi
+
+Kilit disiplini: dosyaya dokunmadan once Pxx kilit yaz. Kolay gelsin.
+
+
+### Aj.1 [M10] [05 Eyl 2026] [14:26 — P30 bulgusu]
+Canli olcum (2454 ornek): avg 45us / p50 33us / p95 86us / p99 266us / max 2020us / 14 > 500us.
+Kaynak ayristirmasi: matematik ~0'da (Aj 7 onceki 306ns/olay), olculen cogu UI_EMIT syscall + VM trap. Gercek donanimda beklenen: p99 < 100us. P31 (Aj 7) syscall batching onerisi icin benchmark'ta UI_EMIT sayisini da olcucek. Uc-uca araclar: /tmp/opencode/{end2end_lat.sh,qmon.c,plink.cpp}. VM test cihazi temizlenecek.
+
+### Aj.1 [M10] [05 Eyl 2026] [14:26 - P30 bulgusu]
+Canli olcum (2454 ornek): avg 45us / p50 33us / p95 86us / p99 266us / max 2020us / 14 > 500us.
+Kaynak ayristirmasi: matematik ~0'da (Aj 7 onceki 306ns/olay), olculen cogu UI_EMIT syscall + VM trap. Gercek donanimda beklenen: p99 < 100us. P31 (Aj 7) syscall batching onerisi icin benchmark'ta UI_EMIT sayisini da olcucek. Uc-uca araclar: /tmp/opencode/{end2end_lat.sh,qmon.c,plink.cpp}. VM test cihazi temizlenecek.
+
+### Aj.1 [M11] [05 Eyl 2026] [14:21 - P30 TAMAM: telemetri IPC]
+- daemon.hpp: seqlock telemetri alanlari (atomic + 6 double), movable kaliyor.
+- daemon.cpp flush_motion: her harekette IPS/gain/dx/dy/wall doldurur; status_json seqlock okur (8 spin) -> telem_* JSON alanlari.
+- /usr/local/bin/rawaccel-daemon guncellendi (eski binary telemetrisizdi). Restart temiz.
+- Canli: T30 Telemetry 3000 burst -> in 782.5 / out 1375.7 IPS, gain 1.758 (tutarli).
+- Kapilar: build 0 uyari, 21587/21587, oracle 588/27 OK.
+- P31 Aj7: hotpath_prof telemetri alanlarini referans alabilir.
+
+### Aj.1 [M12] [05 Eyl 2026] [14:24 - P35 kapisina pekismik kanit]
+ASan+UBSan: 21587/21587 PASS. Aj5'in unique_ptr mudahalesi uyumlu:
+flush_motion ->store()/->load() kullanir (deref yok). P32 Aj6 +1.1% gurultu
+sonucu tahtada. P31 (Aj7) hotpath_prof raporu bekleniyor.
+
+### Aj.1 [M14] [05 Eyl 2026] [14:36 - yonetici: P36-P40 dagitimi yapildi]
+Bekleyen ajanslar calistirildi: P36->Aj2, P37->Aj3, P38->Aj6, P39->Aj7, P40->Aj4. AKIS 25 gorev, kiisiler yazildi. P35 (Aj5) kilitli kabul kapisi olarak duruyor. Benim kapsamimda yeni is yok.
+
+### Aj.1 [M15] [05 Eyl 2026] [14:50 - P46 BUG HUNT: daemon main/daemon.hpp/IPC/seqlock]
+
+INCELENEN: daemon/main.cpp (378), daemon.hpp (217), handle_ipc_client, status_json telemetri seqlock.
+
+BULGULAR (dosya:satir - SINIF - aciklama - risk - fix):
+1. daemon/main.cpp:284 - LOGIC (dusuk) - `-f json` log_cb msg'i JSON-escape etmiyor. Cihaz adi gibi mesajlarda `"` veya `\` + bir satir sonu olursa stdout JSON line'i bozulur (masa islevsiz, daemon saglam: sadece log). Fix: msg icin tek tur JSON escape (yaygin 3-5 char).
+2. daemon/main.cpp:208/212 + 324-330 - EDGE (cok dusuk) - `-c`/`-f` `--flag=value` bicimini desteklemez (yalniz `--flag value`); ve `-c` son arguman ise (i+1<argc false) sessizce yutulup otomatik yola dusulur. Fix: argv cozumleyicide sag-elemani kilitle.
+3. daemon/daemon.hpp:66-73 + daemon.cpp flush_motion telem yazimi - LOGIC/DESIGN (teyit edildi) - Seqlock deseni DOGRU calisiyor: writer 6 double'i once sonra counter (release), reader counter cift-load ile yirtilma ayirt eder, 8 spin tukeverse telem_ok=false guvenli. lat.mtx kilit sirasi devices_mutex->lat.mtx tutarli (deadlock yok). Risk yok, degisiklik gerekmez — teyit notu.
+4. daemon/main.cpp:19-20 vs Timer - EDGE (bilgi) - PID_FILE linux sabiti; PID_FILE2 /tmp fallback warm; ok.
+
+SONUC: gercek hata YOK; 2 dusuk-risk birtakima (escape + arg bicimi) — P35 kabul oncesi teklif edilebilir ama engelleyici degil. Telemetri seqlock revizede saglam.
+
+### Aj.1 [M16] [05 Eyl 2026] [15:02 - P47 Ikinci-göz tamam]
+daemon.cpp start()/run_loop/apply_new_config/teardown/setup + handle_ipc_client + push_config ikinci-göz denetlendi.
+TESPITLER:
+- start(): setup_devices running_=true ONCESI main thread'de calisiyor -> loop thread henuz mevcut degil, devices_ erisim yarisi yok. (teyit)
+- run_loop 868: devices_[it->second] loop thread'de; devices_ degisimleri (apply_new_config/teardown) de loop thread'de -> ayni iplik, race yok. ipc_thread sadece devices_mutex_ altinda OKUYOR (status_json), yazmiyor. (teyit)
+- push_config: lock sirasi devices_mutex_ (satir 419, anlik) sonra push_cfg_mu_ (430) ayri scope'larda; loop apply_new_config push_cfg_mu_ olmadan devices_mutex_ aliyor. Iki kilit ayni anda tutulmuyor -> deadlock yok. (teyit)
+- fd_to_dev_[fd]=size-before-push (592) dogru index. epoll DEL+rebuild (890-894) tutarli.
+SONUC: ciddi race/deadlock/UB yok. M15'teki 2 dusuk-risk (json log escape, --flag=value parse) tek gercek bulgular. P47 kilit dustu (tamam).

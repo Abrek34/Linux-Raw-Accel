@@ -68,34 +68,46 @@ struct lookup {
         int lo = 0;
         int hi = size - 2;
 
-        if (hi < capacity - 1) {
-            // Binary search for the bracketing segment
-            while (lo <= hi) {
-                int mid = (lo + hi) / 2;
-                double px = static_cast<double>(pts[2 * mid]);
+        // Binary search for the bracketing segment.
+        // O3 (P55): the former `hi < capacity - 1` wrapper was always true
+        // (hi <= size - 2 <= capacity - 2) and the fall-through path below
+        // already handles the degenerate (size <= 1) tables via lo == 0.
+        while (lo <= hi) {
+            int mid = (lo + hi) / 2;
+            double px = static_cast<double>(pts[2 * mid]);
 
-                if (x < px) {
-                    hi = mid - 1;
-                } else if (x > px) {
-                    lo = mid + 1;
-                } else {
-                    double y = static_cast<double>(pts[2 * mid + 1]);
-                    if (velocity) y /= x;
-                    return y;
-                }
-            }
-
-            if (lo > 0) {
-                double ax = static_cast<double>(pts[2 * (lo - 1)]);
-                double ay = static_cast<double>(pts[2 * (lo - 1) + 1]);
-                double bx = static_cast<double>(pts[2 * lo]);
-                double by = static_cast<double>(pts[2 * lo + 1]);
-
-                double t = (x - ax) / (bx - ax);
-                double y = lerp(ay, by, t);
+            if (x < px) {
+                hi = mid - 1;
+            } else if (x > px) {
+                lo = mid + 1;
+            } else {
+                double y = static_cast<double>(pts[2 * mid + 1]);
                 if (velocity) y /= x;
                 return y;
             }
+        }
+
+        if (lo > 0) {
+            double ax = static_cast<double>(pts[2 * (lo - 1)]);
+            double ay = static_cast<double>(pts[2 * (lo - 1) + 1]);
+            double bx = static_cast<double>(pts[2 * lo]);
+            double by = static_cast<double>(pts[2 * lo + 1]);
+
+            // O2 (P55): a zero-width segment (duplicate X from hand-edited
+            // JSON) made t = ±Inf → lerp produced ±Inf → modify() zeroed the
+            // output (silent no-motion).  Return the later point's value —
+            // bounded, deterministic, and identical to reference for valid
+            // strictly-increasing tables.
+            double denom = bx - ax;
+            if (denom == 0) {
+                double y = by;
+                if (velocity) y /= x;
+                return y;
+            }
+            double t = (x - ax) / denom;
+            double y = lerp(ay, by, t);
+            if (velocity) y /= x;
+            return y;
         }
 
         // x below the first point (or degenerate table): constant first output.

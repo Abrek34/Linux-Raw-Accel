@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <limits.h>
 #include <cerrno>
+#include <cstdio>
 #include <pwd.h>
 #include <vector>
 
@@ -199,20 +200,53 @@ int main(int argc, char* argv[]) {
     std::string log_format = "text"; // "text" or "json"
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+        const std::string arg(argv[i]);
+        // Accept both "--name value" and "--name=value" conventions; the
+        // two-token forms are kept for compatibility with the systemd unit
+        // ("-c /etc/rawaccel/settings.json").
+        auto eq_val = [&arg](const char* name) -> const char* {
+            const std::string p = std::string(name) + "=";
+            if (arg.rfind(p, 0) != 0) return nullptr;
+            return arg.c_str() + p.size(); // may be "" (empty value)
+        };
+        if (arg == "-h" || arg == "--help") {
             print_usage(argv[0]);
             return 0;
-        } else if (strcmp(argv[i], "-V") == 0 || strcmp(argv[i], "--version") == 0) {
+        } else if (arg == "-V" || arg == "--version") {
             std::cout << "rawaccel-daemon " << VERSION << "\n";
             return 0;
-        } else if ((strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--config") == 0) && i + 1 < argc) {
+        } else if (arg == "-c" || arg == "--config") {
+            if (i + 1 >= argc) {
+                std::cerr << "[rawaccel] Option '" << arg << "' requires a path argument.\n";
+                return 1;
+            }
             config_path = argv[++i];
-        } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
+        } else if (const char* v = eq_val("--config")) {
+            if (v[0] == '\0') {
+                std::cerr << "[rawaccel] Option '--config' requires a path argument.\n";
+                return 1;
+            }
+            config_path = v;
+        } else if (arg == "-v" || arg == "--verbose") {
             verbose = true;
-        } else if ((strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--log-format") == 0) && i + 1 < argc) {
+        } else if (arg == "-f" || arg == "--log-format") {
+            if (i + 1 >= argc) {
+                std::cerr << "[rawaccel] Option '" << arg << "' requires a format argument.\n";
+                return 1;
+            }
             log_format = argv[++i];
             if (log_format != "text" && log_format != "json") {
-                std::cerr << "Invalid log format: " << log_format << " (expected 'text' or 'json')\n";
+                std::cerr << "[rawaccel] Invalid log format: " << log_format << " (expected 'text' or 'json')\n";
+                return 1;
+            }
+        } else if (const char* v = eq_val("--log-format")) {
+            if (v[0] == '\0') {
+                std::cerr << "[rawaccel] Option '--log-format' requires a format argument.\n";
+                return 1;
+            }
+            log_format = v;
+            if (log_format != "text" && log_format != "json") {
+                std::cerr << "[rawaccel] Invalid log format: " << log_format << " (expected 'text' or 'json')\n";
                 return 1;
             }
         }
@@ -273,7 +307,35 @@ int main(int argc, char* argv[]) {
 
     // Always log to stdout (systemd journal captures it), verbose = also show debug
     bool json_logs = (log_format == "json");
-    auto log_cb = [verbose, json_logs](const std::string& msg) {
+    // Escape a message for embedding in a JSON string literal.  Device names,
+    // paths and errno strings can legitimately contain '"' or '\' (and
+    // control characters); emitting them raw tears the {"message": ...} line
+    // and silently corrupts the JSON log stream.
+    auto json_escape = [](const std::string& s) -> std::string {
+        std::string out;
+        out.reserve(s.size() + 8);
+        for (unsigned char c : s) {
+            switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            case '\b': out += "\\b";  break;
+            case '\f': out += "\\f";  break;
+            default:
+                if (c < 0x20) {
+                    char buf[7];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out += buf;
+                } else {
+                    out += static_cast<char>(c);
+                }
+            }
+        }
+        return out;
+    };
+    auto log_cb = [verbose, json_logs, json_escape](const std::string& msg) {
         if (json_logs) {
             // Simple JSON line: {"timestamp": "...", "level": "info", "message": "..."}
             // Use a basic ISO8601 timestamp
@@ -282,7 +344,7 @@ int main(int argc, char* argv[]) {
             char timebuf[32];
             strftime(timebuf, sizeof(timebuf), "%Y-%m-%dT%H:%M:%S", gmtime(&ts.tv_sec));
             std::cout << "{\"timestamp\":\"" << timebuf << "." << std::setfill('0') << std::setw(3) << (ts.tv_nsec / 1000000)
-                      << "Z\",\"level\":\"info\",\"message\":\"" << msg << "\"}" << std::endl;
+                      << "Z\",\"level\":\"info\",\"message\":\"" << json_escape(msg) << "\"}" << std::endl;
         } else {
             std::cout << "[rawaccel] " << msg << std::endl;
         }
@@ -322,8 +384,10 @@ int main(int argc, char* argv[]) {
         // resolve_config_path() was called; we re-scan argv to check.
         bool explicit_path = false;
         for (int i = 1; i < argc; i++) {
-            if ((strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--config") == 0)
-                && i + 1 < argc) {
+            const std::string t(argv[i]);
+            // Detect both "(-c|--config) PATH" and "--config=PATH" so an
+            // explicitly-supplied --config= path still gets validated.
+            if (t == "-c" || t == "--config" || t.rfind("--config=", 0) == 0) {
                 explicit_path = true;
                 break;
             }

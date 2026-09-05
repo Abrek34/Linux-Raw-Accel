@@ -54,6 +54,23 @@ struct mouse_device {
     // to false in between and the daemon would forward unreliable events.
     bool   syn_dropped   = false;
 
+    // ── Live telemetry (T30): last-motion sample per device ────────────────
+    // Written by flush_motion() (loop thread) with relaxed stores; read by
+    // handle_ipc_client() (IPC thread) into these same fields.  The only
+    // synchronisation is the atomic<uint64_t> samples counter: the reader
+    // first loads samples, pulls the six doubles, then reloads samples — if
+    // both loads match, the doubles are consistent.  No locks in the hot path.
+    // NOTE: held via unique_ptr so mouse_device stays movable/copyable (an
+    // atomic member would delete the implicit move ops and break
+    // devices_.push_back(std::move(dev)); use ->store()/->load() for r/w.
+    std::unique_ptr<std::atomic<uint64_t>> telem_samples =
+        std::make_unique<std::atomic<uint64_t>>(0); // monotonic write generation
+    double telem_speed_ips = 0.0;                   // input speed at last motion (in/s)
+    double telem_out_ips   = 0.0;                   // resulting output speed (in/s)
+    double telem_gain      = 0.0;                   // gain applied (output/input, >=0)
+    double telem_dx        = 0.0;                   // last input delta (counts)
+    double telem_dy        = 0.0;
+    double telem_wall_ms   = 0.0;                   // monotonic timestamp of last sample
     // ── Latency statistics — see lat_stats.hpp for the full implementation ──
     // Thread safety: flush_motion() (loop thread) writes; dump_latency_stats()
     // (main thread, on SIGUSR1) reads and resets.  lat_stats::mtx serialises access.

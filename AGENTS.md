@@ -109,7 +109,7 @@ Test file: `tests/test_accel.cpp`
 - No external dependencies (standard C++20 + project headers)
 - Each `SECTION()` is an independent test group
 - Assertions use `EXPECT` / `EXPECT_NEAR` macros
-- 99 test functions, 783 runtime assertions covering: algorithms, JSON round-trips,
+- 132 test groups, 21627 runtime assertions covering: algorithms, JSON round-trips,
   file I/O, input validation, multi-profile round-trip, atomic write, IPC JSON,
   config error paths, LUT sort, int overflow guard, NaN/Inf remainder guard,
   accel_args sanitize, fuzz tests, extreme speeds, EMA stability, subpixel
@@ -119,7 +119,8 @@ Test file: `tests/test_accel.cpp`
   1M-iteration subpixel drift, classic monotonicity, natural gain formula,
   EMA smoother half-life/convergence, linear EMA smoother, NaN propagation all
   modes, pathological params, event batching accumulation/split, speed processor
-  distance modes + smoothing, SYN_DROPPED reset, config empty profiles / missing
+  distance modes + smoothing, SYN_DROPPED event-sequence machine
+  (clean flush / drop-sustained / clear / button discard / leak-free), config empty profiles / missing
   active profile / extreme values / duplicate device IDs,
   sanitize NaN/Inf in all fields, subnormal time guard,
   classic sign flip (io cap.y < 1), classic linear path (exp<=1) cap,
@@ -129,7 +130,11 @@ Test file: `tests/test_accel.cpp`
   speed clamp min/max, dir mul negative direction, synchronous power<1 guard,
   natural legacy (non-gain) mode, output_dpi NaN sanitize,
   lat_stats move semantics, dpi_factor pre-compute consistency,
-  magnitude hypot overflow safety
+  magnitude hypot overflow safety, lookup LUT length clamp to capacity,
+  atomic config save (pid-suffix + O_NOFOLLOW/O_EXCL), config type/boolean
+  guards + 256-char name/device_id caps, version-stamped config migration
+  runs exactly once, lookup zero-width segment denominator guard,
+  lat_stats non-finite/negative-sample guard
 
 ## Fuzz Testing
 
@@ -151,7 +156,9 @@ GitHub Actions workflow: `.github/workflows/ci.yml`
 
 Three jobs run on every push/PR (Ubuntu 24.04):
 - **build-and-test** — portable build (`RAWACCEL_PORTABLE=1`), warning-as-failure gate
-  via `grep -E "warning:|error:"`, then `tests/run_tests.sh`.
+  via `grep -E "warning:|error:"`, then `tests/run_tests.sh`, then the differential
+  oracle (`bash tests/oracle/run_oracle.sh`) which fails if any gain row drifts
+  outside `tests/oracle/known_deviations.txt`.
 - **sanitizers** — rebuilds tests with `-fsanitize=address,undefined` and runs them
   with `halt_on_error=1` so any leak/UB fails CI.
 - **fuzz-smoke** — 60 s per harness via `tests/run_fuzz.sh 60`. Skipped on PRs to
@@ -194,7 +201,7 @@ daemon, CLI, and GUI at build time) and must be mirrored in `CMakeLists.txt` →
 | `gui/widgets_sync.inl` | Widget ↔ profile sync, GTK callbacks |
 | `gui/profile_mgr.inl` | Profile CRUD dialogs |
 | `gui/ui_builder.inl` | Layout helpers, build_ui(), window-close, on_activate() |
-| `tests/test_accel.cpp` | Unit + integration tests (783 assertions, 99 functions) |
+| `tests/test_accel.cpp` | Unit + integration tests (21627 assertions, 132 groups) |
 | `tests/fuzz_config.cpp` | libFuzzer harness — config JSON parsing |
 | `tests/fuzz_accel.cpp` | libFuzzer harness — acceleration pipeline |
 | `tests/run_fuzz.sh` | Fuzz test runner (both harnesses) |
@@ -205,7 +212,27 @@ daemon, CLI, and GUI at build time) and must be mirrored in `CMakeLists.txt` →
 | `tests/run_tr_coverage.sh` | Translation coverage runner (exit 1 on MISSING) |
 | `scripts/build.sh` | Quick build script |
 | `setup.sh` | Canonical one-shot installer (all deps + build + system install + KDE fix) |
-| `.github/workflows/ci.yml` | GitHub Actions CI (build + tests + sanitizers + fuzz smoke) |
+| `.github/workflows/ci.yml` | GitHub Actions CI (build + tests + oracle + sanitizers + fuzz smoke) |
+
+## Live Telemetry & Seqlock
+
+Per-device last-motion telemetry is published by the daemon in the `status` JSON:
+`telem_in_ips`, `telem_out_ips`, `telem_gain`, `telem_dx`, `telem_dy` (updated on every
+motion event; `telem_wall_ms` is kept in the struct but not serialized). Design keeps
+the hot path lock-free:
+
+- **Writer** — `flush_motion()` (loop thread): relaxed stores to the six doubles, then an
+  atomic release-bump of `telem_samples`. No allocation, no extra syscall.
+- **Reader** — `status_json()` (IPC thread, under `devices_mutex_`): seqlock-style — load
+  `telem_samples`, copy the six doubles, reload the counter; a match means a consistent
+  sample, otherwise bounded retry (fields omitted via `telem_ok=false` if it never stabilizes).
+- **Movability** — `telem_samples` is `std::unique_ptr<std::atomic<uint64_t>>` (T30 fix) so
+  `mouse_device` stays movable for the `devices_` vector (copy/move ops in `daemon.cpp`).
+- **Semantics** — `telem_in_ips` = |(dx,dy)| · dpi_factor / dt using the same normalization
+  as `modifier::modify()`; `telem_gain` = out/in (0 when in == 0). Raw-passthrough fills
+  the sample counter and deltas only.
+- **Cross-check** — live fields vs the P31 `hotpath_prof` synthetic results validate the
+  per-event pipeline end to end on real hardware.
 
 ## Key Design Decisions
 
@@ -213,26 +240,34 @@ daemon, CLI, and GUI at build time) and must be mirrored in `CMakeLists.txt` →
 - **Signal safety**: signal handler only sets an atomic flag (`request_stop()`), never joins threads
 - **Sub-pixel accumulation**: `remainder_x/y` carries fractional movement so no micro-moves are lost
 - **Float comparisons**: use epsilon (`1e-9`) instead of `!= 0` / `!= 1`
-- **Atomic config write**: tmp file → `rename()` so the daemon never reads a half-written JSON
+- **Atomic config write**: tmp file → `rename()` so the daemon never reads a half-written JSON; `save_config` uses a PID-suffixed temp name opened with `O_NOFOLLOW|O_EXCL` (no symlink clobber, no two-writer race)
 - **Live reload (R5 fix)**: config reload updates settings in-place without releasing the mouse grab — no dropout window
 - **Stable device IDs**: GUI and daemon both resolve `eventN` → `/dev/input/by-id/...` for reboot-stable profile assignment
-- **Input validation**: `sanitize_device_profile()` clamps DPI (1–32 000), polling rate (125–8 000 Hz), rotation (0–360°), snap (0–45°), output DPI, speed_max ≥ speed_min, accel_args fields (acceleration, scale, decay_rate, exponent_power ≥ 1e-4, offsets ≥ 0, limit ≥ 0, sync_speed ≥ 1e-4, smooth ≥ 0, motivity/gamma ≥ 0, cap ≥ 0), domain/range weights ≥ 0, smooth halflifes ≥ 0 — called on every JSON load
-- **Systemd hardening**: `NoNewPrivileges`, `MemoryDenyWriteExecute`, `RestrictNamespaces`, `RestrictAddressFamilies=AF_UNIX AF_NETLINK`, `ProtectKernelModules/Tunables/ControlGroups`, `LockPersonality`, `RestrictRealtime`
-- **Verbose log**: `daemon -v` shows device open/uinput creation details
+- **Input validation**: `sanitize_device_profile()` clamps DPI (1–32 000), polling rate (125–8 000 Hz), rotation (0–360°), snap (0–45°), output DPI, speed_max ≥ speed_min, accel_args fields (acceleration, scale, decay_rate, exponent_power ≥ 1e-4, offsets ≥ 0, limit ≥ 0, sync_speed ≥ 1e-4, smooth ≥ 0, motivity/gamma ≥ 0, cap ≥ 0), domain/range weights ≥ 0, smooth halflifes ≥ 0, LUT `length` 0..max capacity — called on every JSON load
+- **Systemd hardening**: `NoNewPrivileges`, `MemoryDenyWriteExecute`, `RestrictNamespaces`, `RestrictAddressFamilies=AF_UNIX`, `ProtectKernelModules/Tunables/ControlGroups`, `LockPersonality`, `RestrictRealtime` (netlink açıkça yok: daemon hot-plug için udev/netlink DEĞİL inotify kullanıyor — `daemon.cpp` `inotify_init1`)
+- **Verbose log**: `daemon -v` shows device open/uinput creation details; `-f text|json` selects the log format (one JSON object per line when `json`)
 - **uinput_write error handling**: all `libevdev_uinput_write_event()` calls are wrapped by `uinput_write()` which checks the return value and marks the device as disconnected on failure
 - **SYN_DROPPED handling**: when kernel reports `SYN_DROPPED` (event buffer overflow), a `syn_dropped` flag is set; ALL subsequent events (motion, buttons, etc.) are discarded until the next `SYN_REPORT` clears the flag — per the Linux input protocol, events between SYN_DROPPED and SYN_REPORT are unreliable
 - **IPC reload command**: `"reload\n"` via Unix socket schedules config reload (alternative to SIGHUP); GUI prefers IPC then falls back to SIGHUP
 - **NaN sanitization**: `sanitize_accel_args()` and `sanitize_profile()` replace all NaN/Inf double fields (including `output_dpi`) with safe defaults before range-clamping (NaN silently passes `<`/`>` comparisons)
+- **Version-stamped config migration**: every `save_config` stamps the current schema version; migration steps (`migrate_lookup_gain`, renamed fields) run only when a stored version is missing/stale — reloading a current file is a no-op (P43-BF1)
+- **Config type guards**: on JSON load, scalar/string fields (`mode`, `gain`, `cap_mode`, `active_profile`, `use_raw_input`, `device_id`, `name`) are type-checked (`is_boolean`/`is_string` or a length-limited getter); `device_id` and `name` are capped at 256 chars; malformed types degrade to defaults instead of throwing (P54-B4)
+- **CLI config safety**: `safe_save` writes atomically with a `.bak` chain + fsync and exits cleanly (no SIGABRT) on I/O errors; a missing command argument reports a targeted error; a trailing bare `-c` is reported; an existing-but-corrupt config is never overwritten (P42)
+- **Daemon option parsing**: `--config=PATH` / `--log-format=FMT` (`=` forms) are accepted next to `-c PATH` / `--config PATH`; a missing value is a hard parse error (exit 1); explicit `--config=` paths receive the same validation as `-c` (P53)
+- **JSON log escaping**: `--log-format json` escapes log `message` strings (`\" \\ \n \r \t \b \f`, control chars → `\uXXXX`) so device names/paths/errno text can never corrupt the log stream (P53)
 - **Subnormal time guard**: `modifier::modify()` clamps `ips_factor` to 0 when `dpi_factor/time` overflows to Inf (subnormal time values like 1e-309)
 - **Modify output guard**: defense-in-depth `isfinite()` check at the end of `modifier::modify()` ensures no NaN/Inf escapes to motion_math
 - **Duplicate device_id warning**: GUI warns on startup and on save if multiple profiles share the same device_id (first-match-wins in daemon)
 - **lat_stats move safety**: move constructor/assignment lock the source mutex before copying data (defense-in-depth against concurrent record() during vector reallocation)
+- **lat_stats finite guard**: non-finite latency samples are dropped and negative samples clamped to 0 before histogram insertion (P55-O1)
+- **Lookup zero-width segment guard**: a duplicated X (denominator 0) falls through to the next point's `by` instead of producing ±Inf; valid strictly-increasing tables are unaffected (P55-O2)
 - **Pre-computed dpi_factor**: `mouse_device::dpi_factor` is computed once in `apply_profile()` instead of dividing on every mouse event — eliminates a floating-point division from the hot path
 - **Overflow-safe magnitude**: `magnitude()` uses `std::hypot(x,y)` instead of `sqrt(x*x+y*y)` — prevents intermediate overflow/underflow for extreme delta values
 - **Unified clock source**: both `now_ms()` and `now_ns()` use `CLOCK_MONOTONIC_RAW` — eliminates drift between timing sources and reduces syscalls per event from 3 to 2
 - **Y-axis unlinked field sync**: when X/Y axes are unlinked, fields without dedicated Y widgets (cap_mode, exponent_power, decay_rate, scale, output_offset, motivity, gamma, smooth, sync_speed) are copied from X to prevent stale values
 - **Widget sensitivity refactor**: raw passthrough grey-out logic extracted to `update_raw_sensitivity()` — single source of truth for 18 widget enable/disable calls
 - **GUI language resolution**: header-bar dropdown persists `auto`/`en`/`tr` to `<config_dir>/gui_lang`; an explicit preference wins (`load_lang_override`), otherwise `LANG`/`setlocale` decides (`sys_locale_is_turkish`). `tr()` returns the Turkish rendering only when the resolved language is Turkish — English is the dictionary key itself, so missing entries degrade to the source string. `refresh_language()` re-applies every registered widget in place on switch.
+- **Low-latency motion contract (player focus)**: one loop thread processes every motion event synchronously (evdev read → modifier → uinput write); the epoll 10 ms timeout only serves housekeeping (hot-plug, IPC, signals). No per-event allocation; `mouse_device::dpi_factor` is pre-computed; both timers use `CLOCK_MONOTONIC_RAW`. Measure with the per-device `lat_stats` histogram (µs) via `rawaccel-cli latency` (SIGUSR1 → `snapshot_and_reset`); Min/Avg/p50/p95/p99/Max come from histogram bucket midpoints. p50/avg ≈ 1/3 of a 125 µs frame budget on hardware today; the rare p99/max queue spikes are the P-round analysis target.
 
 ## Known Limitations
 

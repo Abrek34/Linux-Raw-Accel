@@ -177,6 +177,21 @@ static int finite_double_to_int(double v) {
     return static_cast<int>(v);
 }
 
+/// save_config() throws std::runtime_error on any I/O failure (temp write,
+/// fsync, rename, fs::create_directories).  An uncaught exception reaches
+/// main() and hits std::terminate() — the CLI dies with SIGABRT (exit 134,
+/// core dump) instead of a clean diagnostic.  Wrap every mutation call site.
+/// @return  false if the save failed (message already printed to stderr).
+static bool safe_save(const app_config& cfg, const std::string& path) {
+    try {
+        save_config(cfg, path);
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to save config: " << e.what() << "\n";
+        return false;
+    }
+}
+
 // ── Profile display ────────────────────────────────────────────────────────────
 
 static void print_accel_args(const accel_args& a, const std::string& prefix = "  ") {
@@ -291,7 +306,7 @@ static int cmd_set(app_config& cfg, const std::string& config_path, const std::s
     for (auto& dp : cfg.profiles) {
         if (dp.name == name) {
             cfg.active_profile = name;
-            save_config(cfg, config_path);
+            if (!safe_save(cfg, config_path)) return 1;
             std::cout << "Active profile set to: " << name << "\n";
             // Push the new config to the daemon (IPC set_config) so it takes
             // effect even when the daemon reads a different file (systemd /etc).
@@ -329,7 +344,7 @@ static int cmd_create(app_config& cfg, const std::string& config_path, const std
     dp.prof.accel_x.mode = accel_mode::noaccel;
     dp.prof.accel_y.mode = accel_mode::noaccel;
     cfg.profiles.push_back(dp);
-    save_config(cfg, config_path);
+    if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Created profile: " << name << "\n";
     if (daemon_apply_config(cfg))
         std::cout << "Daemon reloaded.\n";
@@ -347,7 +362,7 @@ static int cmd_delete(app_config& cfg, const std::string& config_path, const std
     // If we just deleted the active profile, fall back to the first remaining one.
     if (cfg.active_profile == name && !cfg.profiles.empty())
         cfg.active_profile = cfg.profiles[0].name;
-    save_config(cfg, config_path);
+    if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Deleted profile: " << name << "\n";
     if (cfg.active_profile != name)
         std::cout << "Active profile is now: " << cfg.active_profile << "\n";
@@ -389,7 +404,7 @@ static int cmd_duplicate(app_config& cfg, const std::string& config_path,
     // to a device if desired.  This avoids accidental device_id collision.
     dst.device_id.clear();
     cfg.profiles.push_back(std::move(dst));
-    save_config(cfg, config_path);
+    if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Duplicated profile: '" << src_name << "' → '" << dst_name << "'\n";
     if (daemon_apply_config(cfg))
         std::cout << "Daemon reloaded.\n";
@@ -478,7 +493,7 @@ static int cmd_create_preset(app_config& cfg, const std::string& config_path,
         return 1;
     }
     cfg.profiles.push_back(dp);
-    save_config(cfg, config_path);
+    if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Created profile '" << profile_name << "' from preset '" << preset_name << "'\n";
     if (daemon_apply_config(cfg))
         std::cout << "Daemon reloaded.\n";
@@ -844,7 +859,7 @@ static int cmd_set_param(app_config& cfg, const std::string& config_path,
 
     // Sanitize after setting — clamps DPI, polling rate, rotation, etc. to safe ranges
     sanitize_device_profile(*dp);
-    save_config(cfg, config_path);
+    if (!safe_save(cfg, config_path)) return 1;
     // Print the post-sanitize value actually stored (sanitize may have clamped
     // e.g. `dpi 999999` → 32000, or resolved speed_min/speed_max ordering).
     std::cout << "Set " << key << " = " << stored_value_str(*dp, key)
@@ -970,7 +985,7 @@ static int cmd_rename(app_config& cfg, const std::string& config_path, const std
         std::cerr << "Profile not found: " << old_name << "\n";
         return 1;
     }
-    save_config(cfg, config_path);
+    if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Renamed profile: '" << old_name << "' → '" << new_name << "'\n";
     if (daemon_apply_config(cfg))
         std::cout << "Daemon reloaded.\n";
@@ -1210,7 +1225,13 @@ int main(int argc, char* argv[]) {
     std::vector<std::string> args;
 
     for (int i = 1; i < argc; i++) {
-        if ((strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--config") == 0) && i + 1 < argc) {
+        if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--config") == 0) {
+            // Trailing "-c" with no value used to be pushed into `args` and then
+            // reported as "Unknown command: -c".  Say what's actually wrong.
+            if (i + 1 >= argc) {
+                std::cerr << "Option '" << argv[i] << "' requires a path argument.\n";
+                return 1;
+            }
             config_path = argv[++i];
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_help();
@@ -1249,11 +1270,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Load config (create default if missing)
+    // Load config (create default only if the file is genuinely missing).
+    // Overwriting on *any* load failure would silently destroy a config that
+    // is merely corrupt (bad JSON) or unreadable — a preventable data loss.
+    const bool config_exists = ::access(config_path.c_str(), F_OK) == 0;
     app_config cfg;
-    try {
-        cfg = load_config(config_path);
-    } catch (...) {
+    if (!config_exists) {
         // Create minimal default
         device_profile dp;
         dp.name = "default";
@@ -1266,22 +1288,59 @@ int main(int argc, char* argv[]) {
         } catch (...) {
             std::cerr << "Warning: could not save default config.\n";
         }
+    } else {
+        try {
+            cfg = load_config(config_path);
+        } catch (const std::exception& e) {
+            std::cerr << "Config is unreadable or invalid: " << config_path << "\n"
+                      << "  (" << e.what() << ")\n"
+                      << "  Refusing to overwrite it — run `rawaccel-cli validate` for details.\n";
+            return 1;
+        } catch (...) {
+            std::cerr << "Config is unreadable or invalid: " << config_path << "\n"
+                      << "  Refusing to overwrite it — run `rawaccel-cli validate` for details.\n";
+            return 1;
+        }
     }
 
     const std::string& cmd = args[0];
 
+    // Targeted arity errors instead of silently falling through to
+    // "Unknown command: X" (which is misleading when the command exists but
+    // just needs more arguments).
+    int state = 0;
+    if      (cmd == "show" || cmd == "set"   || cmd == "create" || cmd == "delete")
+        state = 2 - static_cast<int>(args.size());
+    else if (cmd == "rename" || cmd == "duplicate" || cmd == "create-preset" || cmd == "import")
+        state = 3 - static_cast<int>(args.size());
+    else if (cmd == "set-param")
+        state = 4 - static_cast<int>(args.size());
+    if (state > 0) {
+        std::cerr << "Command '" << cmd << "' is missing " << state << " argument(s).\n";
+        std::cerr << "Usage: rawaccel-cli " << cmd;
+        if      (cmd == "show" || cmd == "set" || cmd == "create" || cmd == "delete")
+            std::cerr << " <profile>";
+        else if (cmd == "rename")          std::cerr << " <old> <new>";
+        else if (cmd == "duplicate")       std::cerr << " <src> <dst>";
+        else if (cmd == "create-preset")   std::cerr << " <preset> <name>";
+        else if (cmd == "set-param")       std::cerr << " <profile> <key> <value>";
+        else if (cmd == "import")          std::cerr << " <file.json>";
+        std::cerr << "\n";
+        return 1;
+    }
+
     if (cmd == "list")   return cmd_list(cfg);
-    if (cmd == "show"  && args.size() >= 2) return cmd_show(cfg, args[1]);
-    if (cmd == "set"   && args.size() >= 2) return cmd_set(cfg, config_path, args[1]);
-    if (cmd == "create" && args.size() >= 2) return cmd_create(cfg, config_path, args[1]);
-    if (cmd == "delete" && args.size() >= 2) return cmd_delete(cfg, config_path, args[1]);
-    if (cmd == "rename" && args.size() >= 3) return cmd_rename(cfg, config_path, args[1], args[2]);
-    if (cmd == "duplicate" && args.size() >= 3) return cmd_duplicate(cfg, config_path, args[1], args[2]);
-    if (cmd == "create-preset" && args.size() >= 3) return cmd_create_preset(cfg, config_path, args[1], args[2]);
+    if (cmd == "show")   return cmd_show(cfg, args[1]);
+    if (cmd == "set")    return cmd_set(cfg, config_path, args[1]);
+    if (cmd == "create") return cmd_create(cfg, config_path, args[1]);
+    if (cmd == "delete") return cmd_delete(cfg, config_path, args[1]);
+    if (cmd == "rename") return cmd_rename(cfg, config_path, args[1], args[2]);
+    if (cmd == "duplicate") return cmd_duplicate(cfg, config_path, args[1], args[2]);
+    if (cmd == "create-preset") return cmd_create_preset(cfg, config_path, args[1], args[2]);
     if (cmd == "validate") return cmd_validate(config_path);
-    if (cmd == "set-param" && args.size() >= 4) return cmd_set_param(cfg, config_path, args[1], args[2], args[3]);
+    if (cmd == "set-param") return cmd_set_param(cfg, config_path, args[1], args[2], args[3]);
     if (cmd == "export") return cmd_export(cfg, args.size() >= 2 ? args[1] : "");
-    if (cmd == "import" && args.size() >= 2) return cmd_import(cfg, config_path, args[1]);
+    if (cmd == "import") return cmd_import(cfg, config_path, args[1]);
 
     std::cerr << "Unknown command: " << cmd << "\n";
     print_help();

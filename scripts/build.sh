@@ -46,8 +46,25 @@ fi
 #                                (vector::operator[], std::string ops, ...)
 #   -fPIE -pie                 : full ASLR for the binary
 #   -Wformat -Wformat-security : catch printf-style format-string mistakes
-HARDENING="-fstack-protector-strong -fstack-clash-protection -fcf-protection=full \
--D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS -fPIE -Wformat -Wformat-security"
+
+# -fcf-protection is x86-specific (mirrors CMakeLists.txt) so non-x86
+# portable builds (-march=native disabled) still compile.
+case "$(uname -m)" in
+    x86_64|amd64|i[3-6]86) FCF="-fcf-protection=full" ;;
+    *) FCF="" ;;
+esac
+
+# If the environment already defines _FORTIFY_SOURCE (e.g. makepkg.conf
+# -D_FORTIFY_SOURCE=3), DON'T re-define =2 — that trips a "redefined"
+# warning. Mirrors the CMakeLists.txt check.
+FORTIFY="-D_FORTIFY_SOURCE=2"
+if echo 'int main(){return 0;}' | $CXX -dM -E -x c++ - 2>/dev/null \
+        | grep -q '^#define _FORTIFY_SOURCE'; then
+    FORTIFY=""
+fi
+
+HARDENING="-fstack-protector-strong -fstack-clash-protection $FCF \
+$FORTIFY -D_GLIBCXX_ASSERTIONS -fPIE -Wformat -Wformat-security"
 # -z,noexecstack : kernel refuses to execute the stack page (defence in depth
 #                  beyond the GNU_STACK PT_LOAD permissions).
 # -z,separate-code: keep .text and .rodata in separate PT_LOAD segments so

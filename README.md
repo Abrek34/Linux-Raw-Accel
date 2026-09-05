@@ -123,8 +123,15 @@ the translation-coverage tool (`tests/run_tr_coverage.sh`) enforces this.
 # List all profiles
 rawaccel-cli list
 
-# Create a new profile
-rawaccel-cli create gaming
+# Show a profile's details
+rawaccel-cli show gaming
+
+# Create / clone / rename profiles
+rawaccel-cli create gaming                # new profile with defaults
+rawaccel-cli create-preset gaming pro1    # from preset (gaming, office, precision, disable)
+rawaccel-cli duplicate gaming backup      # clone (clears device_id)
+rawaccel-cli rename gaming fps            # rename
+rawaccel-cli delete fps                   # delete
 
 # Set parameters
 rawaccel-cli set-param gaming mode classic
@@ -132,17 +139,29 @@ rawaccel-cli set-param gaming acceleration 0.005
 rawaccel-cli set-param gaming exponent_classic 2
 rawaccel-cli set-param gaming limit 1.8
 rawaccel-cli set-param gaming dpi 800
+rawaccel-cli set-param gaming yx_ratio 1.0    # Y-axis output DPI ratio (vs X)
+# Full key list: rawaccel-cli --help (mode, gain, acceleration, exponent_*,
+# limit, decay_rate, motivity, gamma, input/output_offset, scale, sync_speed,
+# smooth, cap_x/cap_y/cap_mode, rotation, snap, dpi, polling_rate,
+# speed_min/max, output_dpi, lr_ratio, ud_ratio, yx_ratio, device_id)
 
 # Switch active profile (signals daemon to reload)
 rawaccel-cli set gaming
 
 # Live status: profiles + per-device detected DPI / polling rate / battery,
-# and which profile each connected mouse resolves to
+# which profile each connected mouse resolves to, plus per-device live last-motion
+# telemetry (telem_in_ips / telem_out_ips / telem_gain / telem_dx / telem_dy)
 rawaccel-cli status
 
 # Export/import as JSON
 rawaccel-cli export gaming > backup.json
 rawaccel-cli import backup.json
+
+# Config validation, reload, control
+rawaccel-cli validate            # check config for errors/warnings
+rawaccel-cli reload              # reload daemon config (SIGHUP)
+rawaccel-cli stop                # stop daemon (SIGTERM)
+rawaccel-cli latency             # per-device processing latency stats (SIGUSR1)
 ```
 
 ### Daemon
@@ -153,6 +172,10 @@ sudo rawaccel-daemon
 
 # Verbose mode: shows device open/uinput creation details
 sudo rawaccel-daemon -v
+
+# Custom config file / JSON log format (--config=PATH form is also accepted)
+sudo rawaccel-daemon --config /etc/rawaccel/settings.json
+sudo rawaccel-daemon --log-format json -v    # one JSON object per log line
 
 # Run as a systemd service (also enables start-on-boot)
 sudo systemctl enable --now rawaccel
@@ -399,35 +422,51 @@ rawaccel-linux/
 ├── include/
 │   ├── math-vec2.hpp          # Vector math
 │   ├── rawaccel-base.hpp      # Core types, structs, RAWACCEL_VERSION
-│   ├── accel-classic.hpp      # Classic acceleration
-│   ├── accel-power.hpp        # Power acceleration
-│   ├── accel-natural.hpp      # Natural acceleration
-│   ├── accel-jump.hpp         # Jump (sigmoid) acceleration
-│   ├── accel-synchronous.hpp  # Synchronous acceleration
-│   ├── accel-lookup.hpp       # Lookup table acceleration
-│   ├── accel-union.hpp        # Union of all accel modes
+│   ├── config.hpp             # Config structs
+│   ├── accel-*.hpp            # Acceleration algorithms (classic, power, natural, jump, synchronous, lookup, noaccel, union)
 │   ├── rawaccel.hpp           # Main modifier + EMA smoother engine
-│   └── config.hpp             # Config structs
+│   └── nlohmann/              # Vendored nlohmann/json
 ├── src/
 │   └── config.cpp             # JSON serialization (nlohmann/json)
 ├── daemon/
-│   ├── daemon.hpp             # AccelDaemon class declaration
-│   ├── daemon.cpp             # evdev/uinput implementation, hot-plug
-│   └── main.cpp               # Daemon entry point, PID file, signal handling
+│   ├── daemon.hpp/.cpp        # AccelDaemon: evdev/uinput + hot-plug
+│   ├── main.cpp               # Daemon entry point, PID file, signal handling
+│   ├── motion_math.hpp        # Speed/IPS computation
+│   └── lat_stats.hpp          # Per-device latency stats
 ├── cli/
 │   └── main.cpp               # rawaccel-cli
 ├── gui/
-│   └── main.cpp               # rawaccel-gui (GTK4); UI split across *.inl
+│   ├── main.cpp               # rawaccel-gui entry point
+│   ├── app_state.hpp          # AppState + shared state
+│   ├── tr.inl                 # Localization dictionary (tr()/trf()), language switch
+│   ├── ui_builder.inl         # Layout / UI construction
+│   ├── devices.inl            # Mouse discovery + hot-plug (inotify)
+│   ├── daemon_comm.inl        # Daemon PID lookup, IPC, status display
+│   ├── graph.inl              # Cairo curve rendering, LUT editor
+│   ├── profile_mgr.inl        # Profile CRUD dialogs
+│   └── widgets_sync.inl       # Widget ↔ profile sync, GTK callbacks
 ├── scripts/
 │   ├── build.sh               # Quick build script
 │   ├── install.sh             # Thin wrapper → setup.sh
-│   ├── rawaccel.service       # systemd service
-│   └── rawaccel.desktop       # .desktop file
+│   ├── uninstall.sh           # Remove installed files
+│   ├── rawaccel.service       # systemd service (boot start, hardening)
+│   ├── rawaccel.desktop       # .desktop file
+│   ├── rawaccel.quirks        # libinput quirk (mouse resolution)
+│   ├── 99-rawaccel.rules      # udev rule (keeps /dev/uinput accessible)
+│   ├── polkit/                # PolicyKit rules
+│   └── kde-fix-accel.sh       # Plasma flat-acceleration fix
 ├── tests/
-│   ├── test_accel.cpp         # Unit + integration tests (~90 functions)
+│   ├── test_accel.cpp         # Unit + integration tests
 │   ├── tr_coverage.cpp        # Translation coverage audit (find strings)
 │   ├── run_tests.sh           # Unit test runner
-│   └── run_tr_coverage.sh     # Translation coverage runner
+│   ├── run_tests_asan.sh      # Unit test runner under ASan/UBSan
+│   ├── run_tr_coverage.sh     # Translation coverage runner
+│   ├── run_fuzz.sh            # libFuzzer runner
+│   ├── fuzz_accel.cpp         # Fuzz harness — acceleration pipeline
+│   ├── fuzz_config.cpp        # Fuzz harness — config JSON parsing
+│   ├── corpus_config/         # Fuzz seed corpus
+│   └── oracle/                # Differential oracle + vendored RawAccel ref
+├── .github/workflows/ci.yml   # GitHub Actions CI (build + tests + oracle + sanitizers + fuzz)
 ├── setup.sh                   # Canonical one-shot installer
 └── CMakeLists.txt
 ```
@@ -444,13 +483,17 @@ bash tests/run_tests_asan.sh
 # Translation coverage: every UI string must have a Turkish entry
 bash tests/run_tr_coverage.sh
 
+# Differential check: local port vs the OFFICIAL RawAccel reference (vendored)
+bash tests/oracle/run_oracle.sh   # exit 0 = matches, outside known deviations
+
 # Fuzz harnesses (libFuzzer, 60 s per harness)
 bash tests/run_fuzz.sh
 ```
 
 Expected: `=== Sonuç: N/N geçti ===` (exits 1 on any FAIL). The translation
 coverage tool exits 1 if any translatable UI string is missing from the Turkish
-dictionary (see `tests/run_tr_coverage.sh`).
+dictionary (see `tests/run_tr_coverage.sh`). The oracle runs automatically in
+CI and must not drift outside `tests/oracle/known_deviations.txt`.
 
 ## GUI Keyboard Shortcuts
 
@@ -462,21 +505,83 @@ dictionary (see `tests/run_tr_coverage.sh`).
 | `Ctrl+R` | Reload daemon config |
 | `F5`     | Refresh device list |
 
+## Player profile (oyuncu profili)
+
+Built-in **`gaming`** preset (FPS / aim-focused, classic acceleration):
+
+| Param | Value |
+|-------|-------|
+| mode | classic (X + Y) |
+| gain | on (both axes) |
+| acceleration | 0.005 |
+| exponent_classic | 2.0 |
+| limit | 1.8 |
+| output_dpi | 1000 |
+| device dpi / polling | 800 / 1000 Hz |
+
+```bash
+# Create from preset (CLI)
+rawaccel-cli create-preset gaming fps
+rawaccel-cli set fps
+```
+
+Or in the GUI: create a profile, set both axes to **Classic**, enable **Gain mode**
+and start from the values above. Use the **Ham Geçiş** (Raw Passthrough) toggle to
+A/B-test raw vs accelerated until the curve *feels* right (param meanings in `## Parameters`).
+
+Tips:
+- Set `dpi` / `polling_rate` to your mouse's real values — ips math is only accurate
+  when these are correct.
+- Lower `exponent_classic` → subtler curve; higher `limit` → more speed at high motion.
+- Other presets: `office` (natural, light), `precision` (low accel), `disable` (raw passthrough).
+
 ## Performance
 
 RawAccel Linux processes mouse events with sub-microsecond latency in the daemon's hot path:
 
 - **Processing latency** (modifier math + uinput write): typically **< 5 µs** per event
-- **Event loop**: epoll-based, 10 ms timeout — no busy-wait, minimal CPU usage
+- **Event loop**: epoll-based 10 ms timeout — that timeout is for *housekeeping only*
+  (hot-plug, IPC, signals); motion events are processed synchronously as they arrive
 - **Algorithm overhead**: all algorithms are header-only, compiler-inlined
 - **Subpixel accumulation**: no micro-movements are silently lost
+- **Hot path contract**: single loop thread, no per-event allocations; `dpi_factor`
+  pre-computed per device; single `CLOCK_MONOTONIC_RAW` source → 2 syscalls per event
+- **Grab safety**: `EVIOCGRAB` takes raw input; live config reload never releases the
+  grab → no dropout window; `SYN_DROPPED` discards events until the next `SYN_REPORT`
+  so nothing partially-read reaches uinput; uinput write failure marks the device
+  disconnected instead of wedging the grab
 
-To measure live latency statistics, send `SIGUSR1` to the daemon:
+### Latency statistics
+
+Per-device histogram (µs) snapshot via `rawaccel-cli latency` (sends `SIGUSR1`):
 
 ```bash
-kill -USR1 $(cat /run/rawaccel.pid)
-# Output appears in journald: journalctl -u rawaccel -f
+rawaccel-cli latency
 ```
+
+Measured on this machine (n=2454, synthetic input, Aj 1 live data — the basis of the
+P-round queue analysis):
+
+| Metric | Value |
+|--------|-------|
+| Min    | 26 µs |
+| Avg    | 45 µs |
+| p50    | 33 µs |
+| p95    | 86 µs |
+| p99    | 266 µs |
+| Max    | 2020 µs (14 samples > 500 µs) |
+
+p50/avg run at ~1/3 of a 125 µs (8 kHz) frame budget — interactive feel is fine; the
+rare **p99/max queue spikes** felt behind "flicks" are under investigation (P-round).
+
+### Safe defaults
+
+Everything ships safe out of the box:
+- Default profile: raw input on, output normalized to 1000 DPI, speed processor on
+- Every loaded profile passes range validation + NaN/Inf sanitisation — no bad value
+  and no overflow escapes the pipeline
+- Config writes are atomic (tmp + rename + fsync) — the daemon never reads a half-written file
+- systemd unit is hardened; GUI/CLI talk to the daemon over a dedicated Unix socket
 
 ## KDE Plasma Setup
 
@@ -605,4 +710,4 @@ RawAccel Linux works at the kernel input layer (evdev + uinput), **below** the d
 **Config file location:**
 - Default: `~/.config/rawaccel/settings.json`
 - When run with `sudo`: resolves to the real user's home via `$SUDO_USER`
-- Override: `rawaccel-daemon -c /path/to/settings.json`
+- Override: `rawaccel-daemon -c /path/to/settings.json` (or `rawaccel-daemon --config=/path/to/settings.json`)

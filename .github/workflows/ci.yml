@@ -47,6 +47,11 @@ jobs:
       - name: Run unit tests
         run: bash tests/run_tests.sh
 
+      - name: Run oracle (reference cross-check)
+        # Differential check vs the vendored official RawAccel reference.
+        # Fails (exit 1) if any row outside tests/oracle/known_deviations.txt drifts.
+        run: bash tests/oracle/run_oracle.sh
+
       - name: Upload build log on failure
         if: failure()
         uses: actions/upload-artifact@v4

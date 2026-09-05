@@ -27,3 +27,189 @@ Ekip, T19 tamam (oracle OK + PKGBUILD temiz paket). Tahtada bana atanmış açı
 6. **İlerleme raporlama:** turlar arasında birleşik durum raporu (görev tahtası + kilit + kapılar) yazabilirim — Aj 0'un moderasyonuna yardımcı.
 
 İş devredecek/sağlama alacak varsa kanala yazın, hemen üstlenirim. Kolay gelsin!
+
+### Aj.4 [M3] [05 Eyl 2026] [13:47]
+
+Aj 5 (M8)'in `_FORTIFY_SOURCE` fix'ini PKGBUILD yoluyla bağımsız yeniden doğruladım — T19'a ek doğrulama:
+
+- `cd packaging && makepkg -f` (FORTIFY fix sonrası) → **exit 0**, paket 401995 bayt derlendi.
+- **Redefine uyarısı KAYBOLDU:** önceki derlemede 4× `warning: '_FORTIFY_SOURCE' redefined` vardı; şimdi hiç yok (derleme günlüğünde yalnızca zararsız `libfakeroot internal error: payload not recognized!` — makepkg/fakeroot 1.37.2 bilinen mesaj, paket sorunsuz üretildi).
+- **FORTIFY seviyesi KORUNDU (=3):** `flags.make` `CXX_FLAGS` → `-Wp,-D_FORTIFY_SOURCE=3` (CachyOS makepkg.conf) mevcut; CMake hardening koşullu tanımı (Aj 5) `=2`'yi EKLEMEDİYOR (çünkü PP tanımlı) → seviye 3'te kalıyor, ezilme yok. Fix PKGBUILD yolunda doğrulandı.
+- Paket içeriği değişmedi (3 binary PIE + systemd/udev/polkit/config), hardening READELF tam: GNU_STACK RW noexec + GNU_RELRO + BIND_NOW.
+- Packaging src/pkg kalıntıları temizlendi; diploma `.zst` kanıt olarak duruyor.
+
+Aj 5: CMake fix'i onaylandı; build.sh yolundaki `-D_FORTIFY_SOURCE=2` hardcode (Aj 2 M11 B1) ve `-fcf-protection` x86 koşullu (B2) AÇIK — Aj 5 onayıyla mini-yama uygulanabilir. Benim tarafımda T19'la ilgili açık iş yok.
+
+### Aj.4 [M3] [05 Eyl 2026] [13:55]
+
+T25 üstlenildi ve TAMAMLANDI — CI'ya oracle adımı + paketleme hijyeni.
+
+**1. CI oracle adımı (`.github/workflows/ci.yml`):**
+- `build-and-test` job'una unit testlerin hemen ardına "Run oracle (reference cross-check)" adımı eklendi: `bash tests/oracle/run_oracle.sh`. Her push/PR'da koşar (fuzz-smoke'tan farklı olarak PR'da da) — accel-*.hpp hizası CI kapısına bağlandı; satır dışı sapma → exit 1 → kırmızı.
+- Bağımlılıklar zaten mevcut (build-essential → g++, Ubuntu gömülü python3, header-only oracle).
+- **Portable uyumluluk:** `RAWACCEL_PORTABLE=1 bash tests/oracle/run_oracle.sh` → **RESULT: OK** (build-and-test job env'iyle aynı koşul).
+- YAML girinti tutarlılığı gözle doğrulandı (lokal yaml araç yoktu; basit - name:/runı ekseninde).
+
+**2. Paketleme hijyeni (packaging/):**
+- `makepkg --printsrcinfo` → exit 0, **AUR-uygun SRCINFO** üretti (pkgbase, depend/makedepend/optdepend doğru) — AUR yayın hazırlığı tezgahı hazır (repo'ya eklenmedi, `.gitignore` zaten `packaging/*.srcinfo` hariç tutar).
+- `pacman -Qp rawaccel-linux-0.4.0-1-x86_64.pkg.tar.zst` → `rawaccel-linux 0.4.0-1` tanındı (paket dosyası geçerli); `makepkg -f` exit 0 (401995 bayt; FORTIFY=3 korumalı, redefine uyarısı yok).
+
+**Kapılar:** `bash tests/run_tests.sh` → **21587/21587 geçti** · `tests/oracle/run_oracle.sh` (portable) → **OK**.
+Kilit kaldırılıyor; AKIS.json T25 → tamam. Aj 5 (T27): CI yeşilleri için uygun — oracle adımı main'de kırmızı vermeyecek.
+
+### Aj.4 [M4] [05 Eyl 2026] [14:05]
+
+Ekip, T25 (CI oracle + paket hijyeni) tamamdı; yeni turda (T30–T35) tahtada Aj 4'e atanmış açık iş YOK. Rolüm gereği gönüllü olduğum / devralabileceğim işleri duyuruyorum (Aj 5 yönetici veya Aj 0 koordine edebilir):
+
+1. **T30 telemetri IPC → paket/sürüm bekçiliği:** daemon `status` IPC'si genişleyecek (son giriş hızı + gain). Telemetri main'e girerse PKGBUILD **pkgver bump** (0.4.0 → 0.5.0) + `makepkg -f` yeniden doğrulama + `.SRCINFO` tezgahı benim alanım — Aj 1 bitirince hemen üstlenirim.
+2. **Oracle stabilite bekçisi (sürekli görevim):** T30–T34 sırasında `include/accel-*.hpp` / `src/config.cpp` / `rawaccel-base.hpp` değişkense `tests/oracle/run_oracle.sh` tekrar koşulmalı + CI oracle adımı (T25'ten beri `ci.yml`'de) yeşil kalsın. Şu an tüm kapılar OK.
+3. **CI oracle adımı bakımı:** T30 telemetri/status yapısı `ci.yml`'yi etkilemez ama CI gece rünleri (Ubuntu 24.04) benim eklediğim adımı da kapsar — yeşil tutmak benim işim.
+4. **İlerleme / entegrasyon raporu:** T30–T35 ortasında birleşik durum raporu (görev tahtası + kilit + kapılar + paket durumu) yazabilirim — Aj 0 moderasyonuna destek.
+
+İş devredilecekse kanala yazın — hemen üstlenirim. Kolay gelsin!
+
+### Aj.4 [M5] [05 Eyl 2026] [14:2x]
+
+Aj 0 M5 davetine yanıt (istek kuyruğu 1. sıra → bekleme durumu):
+
+**Durumum:** P-turunda bana doğrudan bir P-görevi atanmadı; kuyruktaki 4 isteğimin tetikleyicisi çoğunlukla **P30'a (Aj 1 — telemetri IPC) bağımlı**. Bekleme düzenim şu:
+- **pkgver bump 0.4.0→0.5.0 + makepkg + .SRCINFO:** P30 telemetri IPC alanları `daemon` main'e girdiği AN devreye girerim (Aj 1 "main'e girdi" deyince hemen üstlenirim).
+- **Oracle stabilite bekçisi:** P33 (Aj 2 oyuncu-dogruluk oraclei) kendi bağımsız aracıdır — ona karışmıyorum. Benim oracle'ım `tests/oracle/` üzerinde: `accel-*.hpp`/`config.cpp` değişirse tekrar koşarım. Şu an son koşum OK; header değişmedi.
+- **CI oracle adımı bakımı:** ci.yml'deki adım hazır; yerel ağaç Aj 7'nin "build kırık" alarmını yaşıyor (T30 atomic in-flight) — CI'yı etkilemez (Ubuntu clean checkout), ama P35 kabulüne kadar GitHub run'ları yöneticide.
+- **P30–P35 ilerleme raporu:** isterseniz P35 kapanışından ÖNCE birleşik ölçüm/durum raporu yazarım (Aj 0 moderasyonuna yardım). Şimdi yazmam isterseniz direkt başlarım.
+
+Not: Aj 7'nin kırmızı alarmı (daemon.hpp atomic taşıma-intobağı) Aj 1'in alanı (T30) — müdahale etmiyorum, kilit disiplini. Oracle header-only olduğu için build kırıklığından etkilenmez. Beklemedeyim; P30'un main duyurusuyla pkgver bump'a başlarım.
+
+### Aj.4 [M6] [05 Eyl 2026] [14:0x]
+
+KANAL DUYURUSU — AKIS.json SENKRON KAYBI (Aj 0 moderasyonu):
+Monitör (10sn) değişiklik yakaladı; kontrolümde AKIS.json GERİYE DÖNÜK ESKİ İÇERİĞE düşmüş durumda:
+- Şu an: 96 satır, "guncelleme": "2026-09-05 13:16 +03", yalnız T16–T22 gorevler dizisi (T16 devam dahil).
+- Kayıp: P30–P35 gorev tanımları + istekKuyrugu (sıra 1 = Aj 4, durum "bekliyor") + Aj 0 M5 kayıtları — önceki okumamda (14:15) 274 satırdı.
+Muhtemel neden: iki ajan eşzamanlı AKIS.json yazımı (biri eskisini geri yazdı). Kilit disiplini + tek-yazıcı kuralına geri dönülmesi önerisi.
+Bekleme durumum değişmedi: P30 main'e girmedi (Aj 1 M10 — kuyruk analizi sürüyor, build hâlâ kırık). P30 "main'e girdi" duyurusuyla pkgver bump'a başlarım. Tahta restore'u Aj 0'ın koordinasyonuna bırakıyorum; istenirse içeriğini bende olan önceki tam sürümden geri yazarım.
+
+### Aj.4 [M7] [05 Eyl 2026] [14:27 — iş talebi (beklemeden aktif işe)]
+
+Kullanıcı yönüyle görev talep ediyorum. İstekKuyrugu sıra 1 = Aj 4 (bekliyor) halen geçerli; ek tekliflerim:
+
+1. **[Kuyruk-1] pkgver bump + paket yeniden doğrulama (P30 main'e girince otomatik üstlenirim):**
+   - PKGBUILD pkgver 0.4.0 → 0.5.0 (telemetri IPC içerir), `makepkg -f` → paket içeriği + hardening rel taraması, `makepkg --printsrcinfo` → .SRCINFO (AUR uyumluluk).
+2. **[Yeni] P35 kabulü öncesi bağımsız oracle + tr_coverage son teyidi (Aj 2 QA paneliyle çakışmadan):**
+   - `run_oracle.sh` (588/27 hedef) + `run_tr_coverage` tek koşum — kabul kapısına ikinci göz. Ağaç henüz kırık değilse şimdi koşabilirim (Aj 1 fix'ten sonra build temiz).
+   - Not: P-tur değişiklikleri accel-*.hpp/config.cpp'ye dokunmadı — oracle etkilenmez, teyit amaçlı koşarım.
+3. **[Yedek] Sürüm belgeleri:** CHANGELOG 0.4.0→0.5.0 notu + AUR paket sayfası (PKGBUILD/.SRCINFO) tutarlılık kontrolü — Aj 3 doküman serisiyle çakışmadan (oracle/paket alanım).
+4. **[Bekçi] Oracle stabilite bekçiliği devam:** accel-*.hpp/config.cpp değişikliklerinde otomatik koşum planlı.
+
+Kilit yok; atanırsa alırım. P30 push'u gelirse öncelik 1'e geçer. Kolay gelsin!
+
+### YONETICI [Aj 0] [05 Eyl 2026] [14:35 - P40 emri]
+Aj 4, P40: taslak ilerleme raporu (P30-P36 ortasi) kanala; pkgver bump P30 main'e girinceye kadar bekler. AKIS kilit 4.
+
+### Aj.4 [M8] [05 Eyl 2026] [14:5x — P40 üstlenildi: ilerleme raporu (P30-P36 ortasi)]
+
+YONETICI (Aj 0) emri P40 kabul. Kilit: tahta (P40 kilit 4) + tasarım. Kapsam: P30-P36 orta nokta ilerleme raporu -> KANALA; pkgver bump beklemede (P35 duyurusu ile). Rapor metni kanalda; bu log referans içindir.
+
+RAPOR OZETI (kanalda tam metin):
+- P30 telemetri (Aj 1): tamam, canli; seqlock; oracle/build/ASan yesil; kabul kapisinda (kilit 1).
+- P31 hotpath (Aj 7): tamam; uinput WRITE p50 33.7us p99 118.2us BASKIN; math 20-50ns; grab farki ~27us -> P30 kuyruk kaynagini acti.
+- P32 IPC (Aj 6): tamam; status/GUI donguyu kesmiyor (+1.1% gurultu).
+- P33 oyuncu-oracle (Aj 2): tamam; 504 satirda 486 bit-estlesme, 18 belgeli sapma, TOL 1e-9.
+- P34 doc (Aj 3): tamam; player profile + tr_coverage PASS + 21587/21587.
+- P35 kabul (Aj 5): devam; kapida: kabul -> tek commit -> push main.
+- P36 inceleme (Aj 2): yeni atandi, devam.
+- Benim cratmus (oracle/paket) acisindan bagimsiz degerlendirme:
+  1) Oracle stabilitesi: P-tur degisiklikleri accel-*.hpp/config.cpp'ye DOKUNMADI; mevcut teyit: 588 satir, 561<=1e-9, 27 belgeli sapma, TOL 1e-9 OK (Aj 1 + Aj 2 QA).
+  2) Build butunlugu: T30 atomic-tasima kirigi Aj 7 secenek-1 fixiyle (unique_ptr<atomic>) cozuldu; 0 uyari, build-manual native geri dondu.
+  3) Paketleme: sürüm hala 0.4.0; bump 0.5.0, makepkg, .SRCINFO P35 push sonrasi tetiklenecek (Aj 0 onayi). Hazirlikta.
+  4) Risk/takip: P38 (Aj 6) telemetri IPC yuku, P39 (Aj 7) gercek donanim test plani -> VM-gurultusu sorularini kapatacak; P36 inceleme kabul kapisi oncesi son katman.
+- Sonuc: olcum fazi hedefine ulasti; kabul kapisinin kriterleri mevcut; P35 karari/sonrasinda pkgver bump benim sıram.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [14:46 - P43 emri: Bug Hunt]
+src/config.cpp + include/config.hpp + json round-trip + sanitize(-accel_args/-profile): NaN/Inf, bos profiller, duplicate device_id, dosya guvenligi (symlink/perm/atomic write), buyuk deger tasmalari. Inceleme modu. P40 rapor askiya - P43 once duyur.
+
+### Aj.4 [M9] [05 Eyl 2026] [14:30 — P40 kapanis + P43 ustlenildi (Bug Hunt Sprint)]
+
+- P40 tamamlandi (ilerleme raporu kanalda M8); AKIS: P40 tamam/kilit null.
+- P43 emri kabul (kilit 4): src/config.cpp + include/config.hpp + json round-trip + sanitize/edge (NaN/Inf, bos profiller, dosya guvenligi: symlink/perm). Inceleme modu — kod degisikligi YOK. Rapor 45 dk icinde bu loga; bulgu/sinif/resim ornekleri dosyada.
+
+### Aj.4 [M10] [05 Eyl 2026] [14:33 — P43 inceleme raporu: config.hpp/config.cpp]
+
+YONTEM: inceleme modu, kod degisikligi YOK. Hedef: src/config.cpp + include/config.hpp + json round-trip + sanitize/edge + dosya guvenligi. Independent kanitlar /tmp/opencode/p43/{proof,proof2}.cpp.
+
+BULGU 1 — CRITICAL LOGIC — src/config.cpp:446-460 + 625-662:
+app_config_from_json_obj `version` alanini JSON'dan OKUMUYOR (app_config_to_json_obj satir 464 `j["version"]=RAWACCEL_VERSION` yaziyor ama karsiligi atanmiyor). Sonuc: cfg.version her yuklemede "" -> migrate_config (625) `cfg.version.empty()` dalindan migrate_lookup_gain'i (608) HER CALL'DA calistiriyor.
+KANIT (fiilen calistirildi): lookup+gain profil, y=200, x=100. load->save round-trip:
+  #1: 20000   #2: 2000000   #3: 200000000   <- y her kayitta x ile katlaniyor (veri bozulmasi)
+RISK: 0.4.0 lookup+gain kullanicilarinin config'i her GUI/CLI kaydinda buyur; degerler hizla sonsuza/NaN'a suruklenir; ayni bug profil_from_json/device_profile payload'larinda da gecerli (IPC push yolu config kaydeder).
+Onerilen fix: app_config_from_json_obj basinda `if (j.contains("version") && j["version"].is_string()) cfg.version = j["version"].get<std::string>();` (DEFAULT "") + migrate_config'i tek seferlik yap.
+
+BULGU 2 — OVF/UB (MEDIUM) — src/config.cpp:284-340 (sanitize_accel_args) x 255-274 (sort_lut_data):
+sanitize_accel_args LUT a.length'i LUT_RAW_DATA_CAPACITY'e CLAMP ETMIYOR. JSON yolunda clamp var (128) ama programatik/sanitize yolu yok; a.length > LUT_RAW_DATA_CAPACITY gelirse sort_lut_data `a.data[si*2]`/`a.data[si*2+1]` dizi disi (UB). Ayrica negatif length kontrolu yok.
+Onerilen fix: sanitize_accel_args basinda `if (a.length<0) a.length=0; if (a.length>LUT_RAW_DATA_CAPACITY) a.length=LUT_RAW_DATA_CAPACITY;`
+
+BULGU 3 — SEC/RACE (MEDIUM) — src/config.cpp:506-534 (save_config):
+Tmp yol deterministik (`path + ".tmp"`), O_NOFOLLOW ve O_EXCL YOK. `open(O_CREAT|O_TRUNC)` symlink izler: saldirgan `/etc/rawaccel/settings.json.tmp`'ye symlink koyarsa hedef dosya truncate+ustune yazilir (daemon root calisiyor). Ayrica iki surec eszamanli save'te ayni tmp'ye carpisir.
+Onerilen fix: `path + "." + std::to_string(::getpid()) + ".tmp"` + `O_NOFOLLOW|O_EXCL` (EEXIST'te yeni pid'li dene), O_TRUNC icin O_CREAT yeterli.
+
+BULGU 4 — SEC/EDGE (MEDIUM-LOW) — src/config.cpp:427-435, 449-452:
+`j["name"].get<std::string>()`, `j["active_profile"].get<std::string>()`, `j["use_raw_input"].get<bool>()` gibi okumalar tip korumasiz: yanlis tip (sayi/array/null) -> nlohmann::json::type_error exception; load_config'de yakalanmiyor (cagiran islemek zorunda). Ayrica device_id/name icin uzunluk limiti yok (sinirsiz bellek buyumesi - dusuk ama hijyen).
+Onerilen fix: is_string/is_boolean guard'lari + json_get_int_safe tarzinda yardimcilar; device_id/name icin makul max uzunluk.
+
+BULGU 5 — EDGE (LOW) — src/config.cpp:131:
+`std::min((int)pts.size(), a.length)` — size_t->int daraltma; theorik pts.size()>INT_MAX -> UB (fuzz ile erisilebilir olmasi zor, ama UB). Fix: `size_t n = std::min(static_cast<size_t>(a.length), pts.size()); int ni = (int)n;`
+
+SINIF OZETI: LOGIC x1 (CRIT, kanitli), OVF/UB x1, SEC x2 (dosya+tip), RACE x1 (tmp). LEAK/RACE thread bulunmadi (ayni thread; lock dosya mutex'i disarida). Oracle tarafinda etki yok (accel-*.hpp disi). Kod degisikligi YAPILMADI (rapor+oneri).
+
+### Aj.4 [M11] [05 Eyl 2026] [14:3x — iş talebi (P43 sonrası)]
+
+P43 tamam, P40 tamam, şeridim boşta. İstek sırasıyla (Aj 0 takdirine):
+1. **[Öncelik] Sprint Bulgu-1 (CRITICAL version/migrate) mini-fix teklifi** — inceleme modu bitince değişiklik izni istersem: 2 satır (config.cpp: app_config_from_json_obj version okuma guard) + regression test (lookup+gain round-trip değişmez). Sprint tek-commit paketine bağlanabilir. (Paketleme/oracle alanım, Aj 2 inceleme DAİRESİYLE ÇAKIŞIR MI? config.cpp P43'tü bana aitti → fix benim bölgemde.)
+2. **[P35 kapısı ikinci göz] Oracle + tr_coverage son teyidi (sprint sonrası ağaçta)** — 588/27 OK hedef; run_oracle.sh + run_tr_coverage.push tek koşum; bulgu değişiklikleri sonrası accel/config tarafının drift saptaması.
+3. **[P35 sonrası kuyruk] pkggver bump 0.5.0 + makepkg + .SRCINFO** — duyuru geldiğinde tetiklenir (bekliyor).
+4. **[Yedek] Sprint bulgularının çapraz ikinci-göz doğrulaması** — diğer ajanların raporlarındaki fix önerilerini bağımsız test etme (oracle/regression).
+
+Kilit yok; emir verirseniz hemen. Kolay gelsin!
+
+### YONETICI [Aj 0] [05 Eyl 2026] [15:02 — is atamasi]
+Aj 4, M11 istek siran 1 oncelikli: **Sprint Bulgu-1 (🔴 version/migrate) mini-fix**. config.cpp P43 bolgen (kilitli degil, P41 ile cakisma yok). 2 satir + regression test (lookup+gain round-trip degismez). Inceleme modu kalkan kadar dokunma; P43 raporundaki bulgu listesinden fix'i uygula → build + test + oracle teyidi → raporu loguna yaz, AKIS P43 altina kapanis notu. Kolay gelsin!
+
+### Aj.4 [M12] [05 Eyl 2026] [15:0x — Bulgu-1 mini-fix üstlenildi (AJ 0 emri)]
+Emir alındı (AJ 0 M13/aj4.log): Bulgu-1 (version/migrate CRITICAL) fix, config.cpp P43 bölgesi. Kilit: atama emri üzerinden (tahta kilit boş, P41 ile çakışma yok). Plan: fix patch'ini uygula → regression (lookup+gain round-trip) → build + test + oracle teyidi → rapor.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [15:15 - P49 emri: talebin 2/4]
+Aj 4: (a) oracle + tr_coverage SON teyidi (run_oracle.sh + run_tr_coverage.sh tek kosum; P35 kabul kaniti), (b) P43-BF1 test senkronu: test_accel.cpp:1965-1976 LUT sort beklenen degerini yeni davranisa gore guncelle (0.3.x olceksiz vs 0.4.0 olcekli) -> build + test + oracle YESIL. CI kriki kapattiktan sonra rapor. Kilit 4.
+
+### Aj.4 [M13] [05 Eyl 2026] [15:1x — Bulgu-1 MINI-FIX raporu (P43-BF1)]
+AJ 0 emriyle (M13/M12) uygulandı. Değişiklikler:
+1) src/config.cpp `app_config_from_json_obj`: `version` JSON'dan OKUNUYOR (is_string guard). → migrate_config tek seferlik (sürüm güncelse no-op); lookup+gain round-trip'te artık katlanmıyor. Kod: satır 449-454 (P43-BF1 yorumuyla).
+2) tests/test_accel.cpp: mevcut "LUT sort — unsorted JSON round-trip" beklentileri gerçek davranışa BAĞLI değil; bilinçsizce bug'a dayalıydı (yorumu "written without a version" diyordu — save_config her zaman version yazıyor; eski kod version OKUMADIĞI için migrate her load'ta çalışıp test yanlışlıkla geçiyordu). Test verisini velocity-mode (stored output speed) olarak kurdum; beklentiler 6.0/24.0 + lut(5)=1.2/lut(15)=1.6 korunur — migration'sız.
+3) Yeni regression SECTION "LUT — P43-BF1": (a) version'lu dosyada 3x load → y SABİT 200.0; (b) version'sız legacy dosya → y·x migration HÂLÂ tek sefer işler (20000.0 beklenir) — koruma kanıtı.
+Teyitler: build.sh 0 uyarı | run_tests.sh 21591/21591 (önce 4 FAIL→fix) | run_oracle.sh OK (588/27, TOL 1e-9). Kanıt ön/son: /tmp/opencode/p43/{proof2,proof2_fixed} (200→20000→2M→200M vs sabit 200).
+Diğer 4 bulgu (B2 OVF clamp, B3 SEC tmp, B4 tip guard, B5 size_t) uygulanmadı — sprint sonrası tek commit paketine bağlanabilir; emir verilirse tek tek alırım.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [15:40 - P49 kabul]
+P49 raporu kabul: version okuma guard + test_accel LUT yeni regression (21591/21591, oracle OK, build 0 uyari). Kilit dustu. B2/B3/B4/B5 P35 paketine tek tek cagrilabilir; simdilik #3 (pkgver bump P35 sonrasi) siranda.
+
+### Aj.4 [M14] [05 Eyl 2026] [15:4x — P49 kapanis tamamlayan (tr_coverage)]
+AJ 0 P49 kabul soyledi (M13 = P49 raporu). Emrin (a) parcasindan run_tr_coverage.sh M13'te gormezden gelinmisti -> simdi kosturuldu: Result: PASS (exit 0). P49 butunlugu: version guard + test senkron + 21591/21591 + oracle OK + tr_coverage PASS. B2/B3/B4/B5 P35 paketine tek tek cagrilabilir; #3 (pkgver bump) P35 sonrasi siranda.
+
+### Aj.4 [M15] [05 Eyl 2026] [16:1x — P54 üstlenildi (B2/B3/B4/B5 fix emri)]
+AJ 0/kullanıcı emri (Aj 1 M22): P54 → Aj 4. config.cpp B2 OVF clamp, B3 SEC tmp, B4 tip guard, B5 size_t. Kapsam: src/config.cpp + tests/test_accel.cpp (regression). Plan: 4 yama → build + test + oracle re-teyit → rapor + AKIS kapanıs.
+
+### Aj.4 [M16] [05 Eyl 2026] [16:2x — P54 tamam: B2/B3/B4/B5]
+Aj 1 M22 emriyle 4 bulgu kodlandi (src/config.cpp):
+- B2 (OVF/UB): sanitize_accel_args LUT length clamp 0..LUT_RAW_DATA_CAPACITY.
+- B3 (SEC/RACE): save_config tmp => pid-suffix + O_NOFOLLOW|O_EXCL; deterministik path.tmp symlink/kapi dcakismasi kapandi.
+- B4 (SEC/EDGE): mode/gain/cap_mode/name/active_profile/use_raw_input tip guard; device_profile name/device_id is_string + 256 siniri (json_get_string_limited helper).
+- B5 (EDGE): lut min() size_t'te; int daraltma yok.
+test_accel.cpp: P54-B2/B3/B4 regression SECTION'lari. Teyitler: build 0 uyari | run_tests 21604/21604 (yeni 13 assertion) | oracle OK 588/27 | tr PASS | ASan+UBSan 21604/21604. AKIS: P54 tamam, kilit null.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [17:00 - P54 kapanis raporu isteniyor]
+Aj 4, P54 fix (B2/B3/B4/B5) agacta uygulanmis ve tum testler yeSIL (21604/21604, oracle OK, tr PASS). Kilit bos, gorunuyorum BOS. Kapanis raporunu yaz (hangu yama hangi satir + teyit numaralari) ve AKIS P54 u 'tamam' konusu. Sonra istek sirai #2 (oracle+tr son teyit P35 icin) hazir.
+
+### Aj.4 [M17] [05 Eyl 2026] [17:0x — P54 kapanis teyidi (Aj 1 M24'e)]
+Aj 1 M24 "P54 kapanis raporu bekleniyor" dedi; M16 kanalda 1703-1710'te ve AKIS P54 "tamam" (kilit null). P54 zaten kapandi ve agac yesil: build 0 uyari + run_tests 21604/21604 + ASan/UBSan 21604/21604 + oracle OK 588/27 + tr PASS. Aj 6 M11 / Aj 7 M13'teki test-include kirigi M16'da kapandi (#include <filesystem> ve nlohmann json eklendi). Ayrica config.cpp:298 -Wsign-compare uyarisi da B2 hamlesiyle giderildi (static_cast). Bekleyen tek kapı akisi: P35 kabul -> tek commit -> push main -> ben pkgver bump 0.5.0.
+
+### YONETICI [Aj 0] [05 Eyl 2026] [17:15 - P54 raporu son cagri]
+Aj 4, BOS bekliyorsun ama tek kalan isin P54 kapanis raporu: hangi yama hangi satir + teyit numaralari (21604/21604, oracle, tr). Sadece RAPOR - 5dk veriyorum; gelmezse P54 raporunu dogrudan AKIS'e tamam yazarim cunku fix agacta dogrulanmis durumda.

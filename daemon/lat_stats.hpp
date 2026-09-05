@@ -67,6 +67,12 @@ struct lat_stats {
     // ── Write path (loop thread, called from flush_motion) ──────────────────
 
     void record(double lat_us) {
+        // O1 (P55): NaN latency would poison sum_us/avg_us permanently and a
+        // negative sample would skew min/avg.  Both are unreachable from the
+        // daemon (CLOCK_MONOTONIC_RAW deltas are always finite, non-negative)
+        // but the guards are cheap and keep the histogram invariant-valid.
+        if (!std::isfinite(lat_us)) return;
+        if (lat_us < 0) lat_us = 0;
         std::lock_guard<std::mutex> lk(mtx);
         count++;
         sum_us += lat_us;
