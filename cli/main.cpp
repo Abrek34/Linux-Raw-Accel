@@ -509,7 +509,8 @@ static device_profile make_preset(const std::string& preset_name, const std::str
         dp.prof.output_dpi = 1000;
     } else if (preset_name == "apex") {
         // Apex Legends: tracking-heavy + verticality. Power mode ramps fast for
-        // 180° flicks while light smoothing keeps track. Slightly higher limit.
+        // 180° flicks while light smoothing keeps track. output_offset floor ~0.9
+        // keeps slow micro-aim close to 1:1 (avoid sub-1:1 muddy feel at 2-10 mm/s).
         dp.prof.accel_x.mode = accel_mode::power;
         dp.prof.accel_y.mode = accel_mode::power;
         dp.prof.accel_x.gain = true;
@@ -520,8 +521,8 @@ static device_profile make_preset(const std::string& preset_name, const std::str
         dp.prof.accel_y.exponent_power = 0.8;
         dp.prof.accel_x.input_offset = 0.02;
         dp.prof.accel_y.input_offset = 0.02;
-        dp.prof.accel_x.output_offset = 0.2;
-        dp.prof.accel_y.output_offset = 0.2;
+        dp.prof.accel_x.output_offset = 0.9;
+        dp.prof.accel_y.output_offset = 0.9;
         dp.prof.accel_x.cap = { 28.0, 2.2 };
         dp.prof.accel_y.cap = { 28.0, 2.2 };
         dp.prof.accel_x.cap_mode_val = cap_mode::out;

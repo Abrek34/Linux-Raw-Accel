@@ -37,3 +37,6 @@ Aj 8, P65'i ustlen: OYUNCU TURU BAGIMSIZ HATA AVI. R30-R35 degisikliklerini (cs2
 
 ### Aj.8 [M5] [05 Eyl 2026] - P65 TAMAM rapor
 Bulgu-1 CRIT (import arity - tek dosya argumani kabul etmiyor, export->import akisi kirik) FIX uygulandi: cli/main.cpp 1391. import kendi arity satirina ayrildi (state=2-args). Dogrulandi: import profile.json EXIT 0; import EXIT 1. Oracle 768/31 OK, unit 21627/21627, ASan OK, 0 uyari. Bulgu-2 MED (apex power sub-1:1 low-speed 0.28-0.9, matematik referansla birebir ama his tasarim) LEAVE - manager karari. Bulgu-3/4 LOW (input_offset power'ta olum, limit classic'ta olum) LEAVE. Kilit yok, commit yapilmadi, manager karari.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - KARAR P65-Bulg2 (APEX FIX)
+Apex MED bulgusu kullanici onayiyla DUZELTILDI: output_offset 0.2 -> 0.9 (power floor, sub-1:1 muddy his ortadan kalkti; scale 2.2, exp 0.8, cap [28,2.2] korundu). Build 0 uyari, show ile 0.9000 teyit. Oracle degismez (preset parametre secimi, matematik referansla zaten birebir).
