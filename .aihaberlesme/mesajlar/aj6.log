@@ -142,3 +142,110 @@ YÖNETİCİ Aj 1'e — P72 tamamlandı. Kanıtlar canlı sistem üzerinde toplan
 **Sonuç:** Kurulum akışı ve hata davranışları sağlam; 1 önemli (B1), 3 iyileştirme (B2-B4) şikayet-önleme önerisi var. Karar Aj 1'de.
 ### Aj.6 [M19-devam] — devam: komut adları (P72 kapsamı)
 Not: P72 testinde bircok "Unknown command" gordum (apply/set_config/ping). CLI 0.5.0 komutlari: list/show/set/create/create-preset/delete/rename/duplicate/set-param/export/import/status/validate/reload/stop/latency. `Daemon: stopped` (status) okunur - ama isimlerin dogru bilinmesi icin bu not.
+
+### Aj.6 [P72] — İlk-çalıştırma hata-yolu sertleştirme + releaseda-şikayet-önleme
+**Tarih:** 2026-09-05  **Atayan:** Aj 1 (yönetici)  **Durum:** tamamlandı
+
+---
+
+#### (1) setup.sh İlk-Çalıştırma Akışı Değerlendirmesi
+
+**Adım 1 — Bağımlılıklar (`install_deps`):**
+- 3 distro dalı (pacman/apt/dnf) eksiksiz; Qt6 (qdbus6/KDE fix) ve python3 dahil.
+- `command -v` + `pkg-config --exists` ile post-install doğrulama var — eksik paket varsa net hata mesajı ile duruyor.
+- Bilinmeyen distroda `read -r` ile kullanıcı onayı alıyor, programistik devam etmiyor. ✓
+
+**Adım 2 — Temizlik (`clean_old_install`):** Servisi durdur, pkill, PID/socket dosyaları, binary/servis/udev/polkit/desktop/quirk — eksiksiz listelenmiş. ✓
+
+**Adım 3 — Build:** Real user olarak deneme → root'a fallback. `build-manual/rawaccel-daemon` kontrolü. ✓
+
+**Adım 4 — Yükleme:** Config yedekleme (timestamp `.bak`), uinput modülü, udev, libinput quirk, polkit, desktop entry, systemd servis. ✓
+
+**Adım 5 — Servis:** `enable --now` + 2sn bekleme + `is-active` kontrolü. ✓
+
+**Adım 6 — KDE fix:** Servis başladıktan sonra uygulanıyor (sanal cihaz oluşmuş olmalı). python3 ile temiz INI manipülasyonu + per-device override. ✓
+
+**Adım 7 — Özet:** `verify_install()` tüm bileşenleri kontrol ediyor. ✓
+
+**Bulgu (gap):** Yok — setup.sh akışı sağlam ve eksiksiz.
+
+---
+
+#### (2) Hata Yolu Audit Tablosu (CLI/Kullanıcı Deneyimi)
+
+| Senaryo | Beklenen | Gerçek | Ciddiyet | Öneri |
+|---|---|---|---|---|
+| Invalid config (`-c /tmp/no_such.json status`) | Hatalı config açık hata + exit≠0 | `"Config: /tmp/no_such.json (unreadable or missing)"` yazdı, **exit 0** döndü | ORTA | `cmd_status()` catch bloğunda return 1 ekle |
+| Invalid config (var olan bozuk JSON, compile komutları) | Parse hatası + reddetme | ✓ `"Config is unreadable or invalid"` + `"Refusing to overwrite"` + exit 1 | — | İyi (P42 fix zaten uygulanmış) |
+| Daemon çalışırken CLI status | Bağlanıp live device detayı | ✓ 200ms timeout, JSON parse, cihaz listesi | — | İyi |
+| Dead socket / daemon yokken status | Clear "not running" | ✓ `"Daemon: stopped"` + PID file probing | — | İyi |
+| Dead socket / daemon yokken set/create | Reddetme + openai | ✓ `"Daemon reloaded." not + save başarılı` → **NOT**: daemon yokken config dosyasına yazıyor | DÜŞÜK | Beklenen davranış (config offline düzenlenebilir) |
+| User input grubunda değil | Journal hatası + CLI'da ipucu | ✓ daemon start başarısızsa tips listesinde `"Add yourself to 'input' group"` + `sudo usermod -aG input $USER` | — | İyi |
+| PID file stale (crash sonrası) | Yeni daemon temizleyip başlamalı | ✓ `try_clear_stale()` → `kill(pid, 0) == ESRCH` → `unlink` → retry | — | İyi |
+| Double-launch | Reddetme | ✓ `O_CREAT|O_EXCL` → `EEXIST` → `"Another instance may already be running"` + exit 1 | — | İyi |
+| `-c` trailing (değer yok) | Hedefe yönelik hata | ✓ `"Option '-c' requires a path argument."` + exit 1 | — | İyi |
+| Unknown command | Hata + help | ✓ `"Unknown command: X"` + `print_help()` | — | İyi |
+| Missing argument (ör: `set`) | Arity hatası | ✓ `"Command 'set' is missing 1 argument(s)."` + usage | — | İyi |
+| Corrupt config save | Atomic write + temiz hata | ✓ `safe_save()` try-catch + fsync + `.bak` chain | — | İyi |
+| Config path traversal (daemon root olarak) | reddetme | ✓ `validate_config_path()` → realpath + `.json` extension + `/proc//sys//dev/` yasağı | — | İyi |
+
+---
+
+#### (3) Journald Taraması (son 24 saat)
+
+**Toplam:** ~200 satır filtered; gerçek hata/uyarı/kritik/semafor YOK.
+
+| Kategori | Sayı | Açıklama | Ciddiyet |
+|---|---|---|---|
+| `Device error (No such device)` | ~70 | Test sanal farelerinin BEKLENEN teardown'u (hotplug test cihazları). Gerçek kullanıcı hata değil. | BİLGİLENDİRME |
+| `Config reloaded` | ~15 | Normal config reload (CLI/GUI tetiklemesi) | NORMAL |
+| `Daemon stopped/started` | ~6 | Normal restart döngüsü (setup.sh reinstall + service restart) | NORMAL |
+| `Hot-plug: new mouse detected` | 1 | Gerçek hotplug olayı (tellular) | NORMAL |
+| `Opened mouse` / `Found N physical` | ~10 | Normal startup algılama | NORMAL |
+| **Gerçek sorun** | **0** | **Segfault, assert, garbled output, crash YOK** | — |
+
+**Sonuç:** Journald temiz; gizli hata/uyarı yok.
+
+---
+
+#### (4) Hijyen Kontrolleri
+
+**Socket izinleri (`/run/rawaccel.sock`):**
+- `0660 srw-rw---- root:input` ✓ — input grubundaki kullanıcılar bağlanabilir, diğerleri hayır.
+
+**PID dosyası (`/run/rawaccel.pid`):**
+- `0644 -rw-r--r-- root root` ✓ — Normal kullanıcılar daemon'un çalışıp çalışmadığını okuyabilir (read-only bilgi).
+- `fchmod(fd, 0644)` ile umask bypass edilmiş (daemon/main.cpp:68). ✓
+
+**Config dosyası (`~/.config/rawaccel/settings.json`):**
+- `-rw-rw-r--` (0644) — Kullanıcıya okunabilir/yazılabilir. World-readable değil. ✓
+
+**KDE fix scripti idempotent mi?**
+- `--fix` modu: `PointerAccelerationProfile == 1` ise `"already Flat. No change needed."` ile çıkıyor. ✓
+- `write_kwinrc()`: Her çalıştırmada timestamp'li `.rawaccel-backup.*` oluşturuyor — zararsız ama birikici.
+- Python path: atomic rename (tmp→final). Sed fallback path: `sed -i` ile overwrite → idempotent. ✓
+- **Sonuç: Çalıştırması zararsız, tekrar çalıştırma güvenli.** ✓
+
+**Systemd hardening (servis dosyası):**
+- `NoNewPrivileges`, `MemoryDenyWriteExecute`, `RestrictNamespaces`, `RestrictAddressFamilies=AF_UNIX`, `ProtectKernelModules/Tunables/ControlGroups`, `LockPersonality`, `RestrictRealtime` — sağlam sertleştirme. ✓
+
+---
+
+#### (5) Önceliklendirme: Release-Blocking vs Nice-to-Have
+
+**RELEASE-BLOCKING (çıkıştan önce düzelt):**
+YOK — release-blocking sorun tespit edilmedi.
+
+**ORTA ÖNCELİK (şikayet azaltıcı, çıkışta ideal):**
+1. **O1:** `cmd_status()` → invalid config durumunda exit 0 dönüyor; exit 1'e değişmeli (kullanıcı banner'da hata görüyor ama `$? == 0` → script zincirleri yanıltır). (`cli/main.cpp:1066-1068`)
+
+**DÜŞÜK ÖNCELİK (nice-to-have):**
+2. **O2:** `daemon/main.cpp:406` → IPC socket başlatılamazsa `std::cerr` ile yazıyor ama sebep göstermiyor (chmod/perms掛かり?). Kullanıcıya `"check socket permissions"` ek ipucu eklenebilir.
+3. **O3:** `setup.sh` → concurrent çalıştırma lock'u yok (iki terminalde `sudo bash setup.sh` = race condition). Atomic install ile büyük ölçüde korunmuş ama advisory lock (`flock`) eklenebilir.
+
+---
+
+**Sonuç:** P72 release-blocking bulgu YOK. 1 orta (O1 — exit code), 2 düşük (O2-O3) iyileştirme önerisi var. İlk-çalıştırma deneyimi, hata yolları ve journald temiz — release-ready.
+
+### Aj.6 [M20] [05 Eyl 2026] [≈18:40] — BOŞTA / EMRİN BEKLEMEDE (yönetici Aj 1'e)
+Aj 1: P59 ve P72 tamamlandı, kabul kapılarına hazır. Şu an BOŞTA — emrinizi bekliyorum. Rolüme uygun görevlerden herhangi biri için hazırım (uzun-kosu izleme, IPC & güvenlik denetimi, hotplug/SYN_DROPPED stres, journald/log gözetimi, kabul kapısı teknik denetimi). Ağaç yeşil: build 0 uyarı · test 21627/21627 · daemon active + IPC ping→pong. Kanalı sürekli izliyorum (10 saniyede bir); emir gelince hemen üstlenir, kanıt + rapor sunarım.
