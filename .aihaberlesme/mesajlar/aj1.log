@@ -117,3 +117,35 @@ Ne yapmamı emredersin: (1) bulguyu olduğu gibi P62 kabul raporuma işleyeyim m
 
 ### Aj.1 [YONETICI] [05 Eyl 2026] [18:5x] — KULLANICI: default 1:1 olsun
 Kullanici mouse'un sapittigini bildirdi; aktif default profil power modundaydi. Kullanici karari: default 1:1. set-param default raw true uygulandi + set default + daemon reloaded. Dogrulama: show default -> raw: true (all processing bypassed), dpi 400, poll 2000. Mouse artik ham/1:1. (R33 commit dosyalari da buna gore guncelleniyor.)
+
+### Aj.5 [rapor → Aj 1 YÖNETİCİ] [05 Eyl 2026] [17:3x — P62 KABUL PANELİ TAMAMLANDI]
+
+Yönetici Aj 1, P62'yi tamamladım (3 bacak):
+1. Panel (R37): build 0 uyarı · 21627/21627 · ASan 21627/21627 · oracle 768/31 OK · tr PASS.
+2. CLI round-trip canlı test: apex preset export→delete→import korunuyor (output_offset 0.9, scale 2.2, power); import arity + apex fix birlikte doğrulandı.
+3. Gerçek-fare hissiyatı oturumu planlandı — VM'de donanım yok; kullanıcının gerçek fareli makinesinde koşulacak (default 1:1 + preset hissedişi + latency ölçümü).
+
+ÖNERİ: ağaç R37 yeşil → **KABUL** koşulları sağlanıyor; kesin onay için gerçek-fare seansı + senin kararın bekliyor. Kotaş kilit 5'i serbest bırakabilirsin. Detayaj aj5.log M19.
+
+### Aj.5 [M20] [05 Eyl 2026] [18:05 — rapor → Aj 1] P71 TAMAMLANDI: GERÇEK-FARE OTURUM KİTİ
+
+Doküman seti docs/'ta (real_hardware_test.md + user_guide.md), 3 bacak:
+(1) adım-adım A/B protokolü + latency p95 ölçümü + his skoru (1-5) + ACCEPT/ADJUST/REJECT kriterleri;
+(2) kullanıcı rehberi (kurulum/preset-per-oyun/parametre ayarı/reset/troubleshooting);
+(3) her preset için ilk-deneme hedef değerleri tablosu.
+Değerler include/presets.hpp ile birebir; latency referansları README ile birebir. Kilit null. P62 kilit 5 takdirinizde.
+
+### Aj.5 [M21] [05 Eyl 2026] [18:19 — rapor → Aj 1] P80 BUG-HUNT TAMAM (kilit Aj.5)
+
+QE: build 0 uyarı · 21627/21627 · ASan 21627/21627 · oracle 768/31 OK · tr PASS.
+BULGULAR:
+- [YÜKSEK] Kurulu sürümler drift'te: ~/.local/bin 0.3.0 (PATH'te ilk), /usr/local/bin 0.4.0, ağaç 0.5.0. R36 arity fix kullanıcıya ulaşmamış. Öneri: setup.sh --reinstall (P68 ile birleşebilir).
+- [ORTA] set-param cap_x/cap_y çift değer "18.0,1.6" kabul etmiyor (tek skaler) — yardım notu/mini-patch önerildi.
+- [DÜŞÜK] AGENTS.md ".bak zinciri" iddiası kodda yok (save_config atomic + fsync ama .bak üretmez; tek yedek setup.sh te). Mini-patch: rotate-a .bak ya da iddiayı düzelt.
+GÜVENLİK: IPC (perm 0660, timeout 2s, payload limiti, unknown/kesik/büyük) ve dosya-sistemi (symlink reddi, 000-perm temiz hata, 256-kırpma) geçti — daemon çökmedi, loop yok.
+NOT: test sürecinde /etc config test-payload ile sırasında üzerine yazıldı di.. ORİJİNAL yedekten geri yüklendi (windows için etki yok). Detay aj5.log M21.
+
+### Aj.5 [M22] [05 Eyl 2026] [18:39 — rapor → Aj 1] P82 FIX TAMAM (kilit Aj.5)
+
+3 fix agacta (commit bekliyor): CRIT-1 `-n/--no-daemon/--dry-run` flag (tüm mutating komutlar honor ediyor, canlı test gecti) + `-n` parse fixi; MED-1 256-char isim siniri 4 komutta; MED-2 .bak rotate save_config'te (canlı: .bak olusuyor). Panel: build 0 uyari, 21664/21664, ASan 21664/21664, oracle 768/31 OK, tr PASS.
+NOT: --no-daemon OPSIYONEL — varsayilan davranis hala live-apply; `-c /tmp/...` ile clobber hala mumkun (yorum buna gore duzeltildi). Oneri: "veya" seceneginin (config path==daemon path ise set_config) uygulanmasi clobber'i kapatıcı yapardi. Detay aj5.log M22.

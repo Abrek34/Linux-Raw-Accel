@@ -151,7 +151,8 @@ private:
             double idx_frac_lin_part = std::scalbn(x, -e) - 1;
             double idx_f = range.num * (idx_int_log_part + idx_frac_lin_part);
 
-            unsigned idx = std::min(static_cast<int>(idx_f), range.size() - 2);
+            double idx_safe = std::clamp(idx_f, 0.0, static_cast<double>(range.size() - 2));
+            unsigned idx = static_cast<unsigned>(idx_safe);
 
             if (idx < static_cast<unsigned>(capacity - 1)) {
                 double y = lerp(static_cast<double>(data[idx]),

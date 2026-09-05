@@ -1,5 +1,104 @@
 // ── Profile management: CRUD dialogs (new / rename / delete / duplicate / reset) ──
 
+#include "../include/presets.hpp"
+
+// "New Profile" dialog: name entry + optional build-in preset dropdown. A
+// chosen preset seeds the profile via make_preset() (single source shared with
+// the CLI); "None (blank)" keeps the current behaviour (defaults).
+void show_new_profile_dialog(AppState* S) {
+    GtkWidget* dlg  = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(dlg), tr("New Profile"));
+    gtk_window_set_transient_for(GTK_WINDOW(dlg), GTK_WINDOW(S->window));
+    gtk_window_set_modal(GTK_WINDOW(dlg), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(dlg), 340, -1);
+
+    GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_start(vbox, 16);
+    gtk_widget_set_margin_end(vbox, 16);
+    gtk_widget_set_margin_top(vbox, 16);
+    gtk_widget_set_margin_bottom(vbox, 16);
+    gtk_window_set_child(GTK_WINDOW(dlg), vbox);
+
+    GtkWidget* entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), tr("Profile name (e.g. gaming)"));
+    gtk_entry_set_max_length(GTK_ENTRY(entry), 256); // match CLI/load 256-char cap
+    gtk_box_append(GTK_BOX(vbox), entry);
+
+    GtkWidget* preset_label = gtk_label_new(tr("Preset"));
+    gtk_widget_set_halign(preset_label, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(vbox), preset_label);
+
+    GtkStringList* sl = gtk_string_list_new(nullptr);
+    gtk_string_list_append(sl, tr("None (blank)"));
+    for (int i = 0; i < rawaccel::PRESET_COUNT; ++i)
+        gtk_string_list_append(sl, rawaccel::PRESET_NAMES[i]);
+    GtkWidget* combo = gtk_drop_down_new(G_LIST_MODEL(sl), nullptr);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(combo), 0);
+    g_object_unref(sl); // dropdown holds its own reference
+    gtk_box_append(GTK_BOX(vbox), combo);
+
+    GtkWidget* hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_halign(hbox, GTK_ALIGN_END);
+    gtk_box_append(GTK_BOX(vbox), hbox);
+
+    GtkWidget* cancel_btn = gtk_button_new_with_label(tr("Cancel"));
+    GtkWidget* ok_btn     = gtk_button_new_with_label(tr("OK"));
+    gtk_widget_add_css_class(ok_btn, "suggested-action");
+    gtk_box_append(GTK_BOX(hbox), cancel_btn);
+    gtk_box_append(GTK_BOX(hbox), ok_btn);
+
+    struct NewProfileCtx {
+        std::function<void(const std::string&, const std::string&)> cb;
+        GtkWidget* entry;
+        GtkWidget* combo;
+    };
+    auto* ctx = new NewProfileCtx{};
+    ctx->entry = entry;
+    ctx->combo = combo;
+    ctx->cb = [S](const std::string& name, const std::string& preset) {
+            for (auto& p : S->config.profiles)
+                if (p.name == name) { set_status(S, tr("A profile with that name already exists.")); return; }
+            device_profile dp;
+            if (!preset.empty())
+                dp = rawaccel::make_preset(preset, name);
+            else {
+                dp.name = name;
+                dp.dev_cfg.dpi = 800;
+                dp.dev_cfg.polling_rate = 1000;
+            }
+            S->config.profiles.push_back(dp);
+            S->current_profile_idx = (int)S->config.profiles.size() - 1;
+            S->config.active_profile = name;
+            rebuild_profile_combo(S);
+            save_config_now(S);
+        };
+    g_object_set_data_full(G_OBJECT(dlg), "ctx", ctx,
+                           [](gpointer p) { delete (NewProfileCtx*)p; });
+
+    auto do_ok = +[](GtkWidget*, gpointer dlg_ptr) {
+        GtkWidget* d = GTK_WIDGET(dlg_ptr);
+        auto* ctx = static_cast<NewProfileCtx*>(g_object_get_data(G_OBJECT(d), "ctx"));
+        std::string name = gtk_editable_get_text(GTK_EDITABLE(ctx->entry));
+        int idx = gtk_drop_down_get_selected(GTK_DROP_DOWN(ctx->combo));
+        std::string preset =
+            (idx > 0 && idx <= rawaccel::PRESET_COUNT) ? rawaccel::PRESET_NAMES[idx - 1] : "";
+        if (!name.empty() && ctx->cb) ctx->cb(name, preset);
+        gtk_window_destroy(GTK_WINDOW(d));
+    };
+
+    g_signal_connect(ok_btn,     "clicked", G_CALLBACK(do_ok), dlg);
+    g_signal_connect(cancel_btn, "clicked",
+        G_CALLBACK(+[](GtkWidget*, gpointer d){ gtk_window_destroy(GTK_WINDOW(d)); }), dlg);
+    g_signal_connect(entry, "activate", G_CALLBACK(do_ok), dlg);
+
+    gtk_window_present(GTK_WINDOW(dlg));
+}
+
+void on_new_profile(GtkButton*, gpointer user_data) {
+    auto* S = static_cast<AppState*>(user_data);
+    show_new_profile_dialog(S);
+}
+
 void rebuild_profile_combo(AppState* S) {
     // Block on_profile_changed while we rebuild the model to avoid double-update
     S->updating = true;
@@ -13,6 +112,7 @@ void rebuild_profile_combo(AppState* S) {
         gtk_string_list_append(sl, label.c_str());
     }
     gtk_drop_down_set_model(GTK_DROP_DOWN(S->profile_combo), G_LIST_MODEL(sl));
+    g_object_unref(sl); // drop our ref — the dropdown keeps the model alive
 
     int idx = S->current_profile_idx;
     if (idx >= (int)S->config.profiles.size())
@@ -44,6 +144,7 @@ void show_input_dialog(AppState* S,
 
     GtkWidget* entry = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry), placeholder);
+    gtk_entry_set_max_length(GTK_ENTRY(entry), 256); // match CLI/load 256-char cap
     if (initial && strlen(initial) > 0)
         gtk_editable_set_text(GTK_EDITABLE(entry), initial);
     gtk_box_append(GTK_BOX(vbox), entry);
@@ -81,25 +182,6 @@ void show_input_dialog(AppState* S,
     g_signal_connect(entry, "activate", G_CALLBACK(do_ok), dlg);
 
     gtk_window_present(GTK_WINDOW(dlg));
-}
-
-void on_new_profile(GtkButton*, gpointer user_data) {
-    auto* S = static_cast<AppState*>(user_data);
-    show_input_dialog(S, tr("New Profile"), tr("Profile name (e.g. gaming)"), "",
-        [S](const std::string& name) {
-            // Check duplicate
-            for (auto& p : S->config.profiles)
-                if (p.name == name) { set_status(S, tr("A profile with that name already exists.")); return; }
-            device_profile dp;
-            dp.name = name;
-            dp.dev_cfg.dpi = 800;
-            dp.dev_cfg.polling_rate = 1000;
-            S->config.profiles.push_back(dp);
-            S->current_profile_idx = (int)S->config.profiles.size() - 1;
-            S->config.active_profile = name;
-            rebuild_profile_combo(S);
-            save_config_now(S);
-        });
 }
 
 void on_rename_profile(GtkButton*, gpointer user_data) {

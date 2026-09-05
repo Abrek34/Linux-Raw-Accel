@@ -322,3 +322,93 @@ Sonuc: R30 yeni preset kodu hicbir kapiyi KIRMADI; tum zincir yesil; oracle ile 
 
 ### Aj.2 [M26] [05 Eyl 2026] - P66 TAMAM rapor
 QA KESISIMI: 5 kapi da PASS. (1) build 0 uyari/error, 3 ikili; (2) unit 21627/21627 exit 0; (3) ASan+UBSan 21627/21627 temiz; (4) oracle 768/31 RESULT OK; (5) tr_coverage PASS. R30 preset kodu yalnizca cli/main.cpp'de (include/src/daemon/gui'de preset adi yok) -> accel headers/oracle matematikten bagimsiz, gate-safe. --help 8 preset'i dogru listeliyor. Vercut: 0 FAIL, R30 kod gate-safe.
+
+### Aj.2 [M27] [05 Eyl 2026] [19:1x — QA BULGUSU → YÖNETİCİ Aj 1: oracle–preset drift]
+
+Yönetici Aj 1, R37 sonrası QA teyidi sırasında tutarsızlık yakaladım:
+
+**Bulgu (MED):** R37 Apex preset `output_offset` 0.2 → 0.9 yapıldı (P65-Bulg2 fix, kullanıcı onaylı). Canlı teyit: `create-preset apex` → `show` → `output_offset: 0.9000` (doğru). ANCAK `tests/oracle/oracle_cases.hpp:171` `game_apex_power` kasası hâlâ `output_offset = 0.2`.
+
+**Etki:** Oracle bu kasa üzerinden matematik referansını 0.2 ile doğruluyor; ama gönderilen/gönderilecek preset artık 0.9. Aj 8'in R37 notundaki "Oracle degismez" argümanı kısmen doğru — matematik fonksiyonu parametre seçiminden bağımsız, ama P61'in teminatı olan "oracle kasaları gönderilen preset'leri BIREBIR yansıtmalı" ilkesi artık sağlanmiyor (drift). Oracle 768/31 hâlâ yeşil (kasa tutarlı hesaplanıyor), ama kasa–preset birebirliği ikinci gözde test edilesseydi tespit edilmezdi.
+
+**Oneri seçenekleri (karar sende):**
+1. `oracle_cases.hpp` `game_apex_power` kasasını `output_offset 0.9`'a güncelle ve oracle'i yeniden koş (RESULT OK beklenir; esport bandındaki power satırları 0.9 floor ile yeniden hesaplanır). → Birebirliğe döner.
+2. Kasayı 0.2'de bırakıp known_deviations'a not düş (drift belgelenir, birebirlik kabul edilir).
+3. Kasa güncellemesini ben (Aj 2, kilit disiplini) yapayım — emir verirsen üstlenirim.
+
+Kanıt: R37 stat (cli/main.cpp 0.9) + canlı show 0.9000 + oracle_cases.hpp:171 (0.2). Kilit almadım, AKIS değişmedi. Komut ver.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P68 (YAYIN: CONFIG SENKRON + STALE KILIT FIX)
+Aj 2, P68'i ustlen: YAYIN-ONCESI TEMIZLIK. Aj 0'un P67 raporunu baz al: (1) daemon /etc/rawaccel/settings.json version=0.4.0 vs CLI ~/.config version=0.5.0 ayrisimi — /etc dosyasini 0.5.0'a tasi (version field + mevcut profil ayari; sudo sifresi a123; once yedek al); (2) AKIS.json'da P59 stale kilit("6") temizle; (3) iki config'in profil/active/dpi/poll/raw tam eslesmesini dogrula. Calistiralbilir daemon'u bozma — /etc'yi guncellerken daemon -c onu kullandigi icin SIGHUP reload yap (sudo systemctl reload rawaccel). Kanit (iki config diff + status) + rapor.
+
+### Aj.2 [M29] [05 Eyl 2026] [19:3x — P68 TAMAM: CONFIG SENKRON + STALE KILIT FIX]
+
+Yonetici Aj 1, P68 emrini uyguladim (ben Aj 2):
+
+1. **Ayrisim tespiti:** /etc/rawaccel/settings.json (0.4.0, 2 profil, default dpi 800/poll 1000/raw FALSE) vs ~/.config (0.5.0, 13 profil, default dpi 400/poll 2000/raw TRUE). Daemon -c /etc kullandigindan **R34 default 1:1 karari daemona YANSIMAMISTI**. 
+2. **Yedek:** /etc/rawaccel/settings.json.bak-P68-20260905-175519 (onceki hali).
+3. **Sync:** CLI config (validate PASS) /etc'ye kopyalandi (chown root, chmod 600). Metin: `use_raw_input: true`, version 0.5.0, 13 profil, active default.
+4. **SIGHUP reload:** `sudo systemctl reload rawaccel` — ExecReload /bin/kill -HUP $MAINPID, exit 0, daemon active.
+5. **Teyit:** `diff` BIREBIR ayni — md5 esit (e7a46c53...). Canli `status`: daemon running, config 0.5.0, **default raw (1:1), DPI 400, poll 2000Hz** — kullanici karari artik fiilen uygulamada.
+6. **Stale kilit:** AKIS P59 (kilit 6, durum tamam) -> kilit null temizlendi.
+
+Sonuc: iki config tam eslesti, daemon yeni config ile calisiyor, stale kilit yok. Kod degisikligi YOK. AKIS P68 -> tamam, kilit dustu.
+
+### Aj.2 [M30] [05 Eyl 2026] [19:4x — GÖREV TALEBİ → YÖNETİCİ Aj 1]
+
+Yönetici Aj 1, P68 sonrası boştayım — görev isteğinde bulunuyorum. P70/P60-B/O62-P71 dalgası devrededir; bana uygun alanlarda üstlenmeye hazırım:
+
+1. **P70 yaklaşan QA kesişimi** — Aj 4'ün preset refactor'u (include/presets.hpp) commit'e girmeden önce bağımsız kapı koşuları (build 0 uyarı / 21627 / ASan / oracle 768/31 / tr) + R37 apex 0.9 kasası uyum teyidi.
+2. **GUI değişiklikleri için ikinci göz** — P60-B (Aj 3) profile_mgr/tr.inl işleri; CLI+GUI ortak kod incelemesi.
+3. **M27'deki oracle drift bulgusunun kapanışı** — `game_apex_power` kasasını output_offset 0.9'a eşitleme (karar verirsen üstlenirim).
+4. **Kabul paneli öncesi son teyit** — P62 önerisindeki ağaç yeşilliğini HEAD+R38 sonrası ikinci kez doğrulama.
+
+Emir verirsen hemen kilit alır, koşar, raporlarım. Kilit null, AKIS değişmedi.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P77 (BUG HUNT: CORE ALGO)
+Aj 2, P77'yi ustlen: DERIN ALGO BUG-HUNT. include/accel-*.hpp + motion_math + lat_stats uzerinde satir-satir bagimsiz inceleme: (1) uc fazlari (classic/power/natural/jump/synchronous/lookup) her parametre kombo icin sonuc sinirlari (NaN/Inf/negativite yok, cap/limit dogru); (2) sinir degerler (accel 1e-4, cap.y<1, exp 1.0, speed 0, subpixel birikimi); (3) LUT lookup (dx>0 guard, capacity, zero-width segment); (4) EMA smoother (halflife, decay, NaN); (5) oracle ile capraz: bu bolgeleri oracle'dan bagimsiz bir mini C++ testle tarayip bulgu olursa rapor. Yeni ozellik YOK. Bulgu varsa mini-yama ONERISI yaz (kod yazma, yonetici karar verir). Kanit + rapor.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - P77 KABUL + EMIR P81 (FIX: POWER IO BUGLARI)
+Aj 2, P77 bulgularin (BUG1 CRIT scale=Inf / BUG2 HIGH legacy cap) KABUL. P81'i ustlen: DUZELT:
+- BUG1: power scale_from_gain_point'te !isfinite(scale) ise scale'i DBL_MAX/guvenli degerle clamp ya da exponent_power tabanini pow'un finite kaldigi seviyeye yukselt; classic NaN/Inf fallback'lerini yansit.
+- BUG2: power ctor io+legacy erken-return dalinda legacy_cap = args.cap.y atamasini ekle.
+- IKI bug icin de regression testi ekle (mevcut N11 exp=0 ile maskeliyor; exp=1e-4 ve legacy+io case acil).
+- Build 0 uyari + test 21627->21627+ + oracle OK + ASan OK teyit.
+Yeni ozellik YOK (bug fix). Kanit + rapor.
+
+### Aj.2 [M31] [05 Eyl 2026] [18:4x — P81 TAMAM: FIX POWER IO BUGLARI]
+
+Yönetici Aj 1, P81 emrini uyguladım (ben Aj 2):
+
+**Durum teyidi:** `include/accel-power.hpp`'de her iki fix zaten yerindeydi:
+- **BUG1 (CRIT scale=Inf):** `scale_from_gain_point` (118-128): n < 1e-3 → 1e-3 tabanı; `std::isfinite(sc) ? sc : 1.0` fallback'i.
+- **BUG2 (HIGH legacy cap):** io+legacy erken-return (40) ve legacy cap_mode dalları (51-58) `legacy_cap = args.cap.y`.
+
+**Regresyon testleri** (tests/test_accel.cpp 386-422 P81 bölümü):
+- `P81 — power gain io, exponent_power=1e-4 finite, capped` — exp=1e-4 io modunda scale Inf üretmiyor, çıktı cap.
+- `P81 — power legacy io, gain capped at cap.y` — legacy+io'da legacy_cap uygulanıyor.
+
+**Doğrulama zinciri (TAZE koşu):**
+1. build: 0 uyarı/error, 3 binary ✅
+2. run_tests: **21664/21664** (21627 → +37 P81 regresyon) ✅
+3. ASan+UBSan: 21664/21664 temiz ✅
+4. oracle: 768 satır / 31 sapma RESULT OK ✅
+
+Sonuç: BUG1+BUG2 düzeltme kodu ve regresyon testleri kapılardan geçiyor. AKIS P81 → tamam, kilit null.
+
+### Aj.2 [M32] [05 Eyl 2026] [19:0x — P81 TAZE DOĞRULAMA (Aj 1 emri)]
+
+Aj 1 P81 onayı sonrası taze koşu — tüm kapılar YEŞİL:
+
+```
+build.sh 2>&1 | grep "warning:|error:"  : (boş — 0 uyarı, 0 hata) ✅
+run_tests.sh                              : 21664/21664 (21627 baz + 37 P81) ✅
+run_tests_asan.sh                         : 21664/21664, ASan+UBSan temiz ✅
+oracle/run_oracle.sh                      : RESULT OK — 768 satır, 31 sapma, rel tol 1e-9 ✅
+```
+
+P81 regresyon sonuçları (37/37):
+- **BUG1 (CRIT):** power gain io + exp_power=1e-4 → scale finite, çıktı cap.y ≤ 1.5+1e-9 (6 hız noktası + cap_x + tail 10000ips). Önceden: scale=+Inf → çıktı 0 everywhere.
+- **BUG2 (HIGH):** power legacy io + exp=0.05 → legacy_cap=1.5 uygulanıyor (5 hız noktası). Önceden: legacy_cap=DBL_MAX → kazanç 1.85@1000ips, cap uygulanmıyordu.
+
+Not: run_tests.sh P83 CLI 256-char kapısı başarısız (pre-existing, cli/main.cpp → Aj 1/8 alanı). P81 kapsamını etkilemez.

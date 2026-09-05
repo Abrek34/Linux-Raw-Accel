@@ -383,6 +383,55 @@ static void test_power() {
     EXPECT(std::isfinite(g_io));
 }
 
+// ── P81: power io degradation regressions ────────────────────────────────────
+
+static void test_p81_power_io_fixes() {
+    // P81 BUG 1: power + gain + cap_mode=io with the sanitized minimum
+    // exponent_power (1e-4). scale_from_gain_point computed pow(gain/(n+1), 1/n)
+    // with n=1e-4 → pow(·,10000) overflowed to Inf, silently zeroing the whole
+    // output curve. Must now be finite with a reasonable gain (≤ the io cap.y).
+    SECTION("P81 — power gain io, exponent_power=1e-4 finite, capped");
+    {
+        accel_args args = make_args(accel_mode::power);
+        args.exponent_power = 1e-4; // sanitized minimum (N11 masked this with 0)
+        args.cap            = { 15.0, 1.5 };
+        args.cap_mode_val   = cap_mode::io;
+        power p(args);
+        for (double s : { 0.1, 1.0, 5.0, 15.0, 100.0, 1000.0 }) {
+            double g = p(s, args);
+            EXPECT(std::isfinite(g));
+            EXPECT(g >= 0.0);
+            EXPECT(g <= args.cap.y + 1e-9); // io gain point caps at cap.y
+        }
+        // The base curve rises smoothly from ~1 toward the io cap; it must stay
+        // finite and below cap.y everywhere, never spiking to Inf.
+        double g_cap = p(args.cap.x, args);
+        EXPECT(std::isfinite(g_cap));
+        EXPECT(g_cap >= 1.0);
+        EXPECT(g_cap <= args.cap.y + 1e-9);
+        EXPECT_NEAR(p(10000.0, args), args.cap.y, 1e-3); // tail converges to cap.y
+    }
+
+    // P81 BUG 2: power + legacy + cap_mode=io. The io+legacy early-return branch
+    // left legacy_cap at DBL_MAX, so the hard cap was never applied and gain
+    // diverged past cap.y. Must now be capped at cap.y.
+    SECTION("P81 — power legacy io, gain capped at cap.y");
+    {
+        accel_args args = make_args(accel_mode::power);
+        args.gain        = false; // legacy
+        args.exponent_power = 0.05;
+        args.cap            = { 15.0, 1.5 };
+        args.cap_mode_val   = cap_mode::io;
+        power p(args);
+        for (double s : { 5.0, 100.0, 500.0, 1000.0, 10000.0 }) {
+            double g = p(s, args);
+            EXPECT(std::isfinite(g));
+            EXPECT(g <= args.cap.y + 1e-9); // hard-capped at cap.y
+            EXPECT(g >= 0.0);
+        }
+    }
+}
+
 // ── Test 8: accel_union dispatch ─────────────────────────────────────────────
 
 static void test_accel_union() {
@@ -6022,6 +6071,35 @@ static void test_synchronous_edge_cases() {
     }
 }
 
+// ── P86: synchronous gain_apply float→int cast UB with huge speed ─────────────
+
+static void test_synchronous_huge_speed_no_ub() {
+    SECTION("P86 — synchronous gain_apply: huge speed (1e300) → finite, no UB");
+
+    accel_args args = make_args(accel_mode::synchronous);
+    args.gain = true;
+    args.smooth = 0;
+    synchronous s(args);
+
+    // Huge speed (simulating domain_weights=1e300 applied upstream).
+    // Before P86 fix, static_cast<int>(idx_f) was UB for idx_f > INT_MAX.
+    double g_huge = s(1e300, args);
+    EXPECT(std::isfinite(g_huge));
+
+    // Also test the edge that originally triggers the bug path:
+    // x huge enough that ilogb(x) >> range.stop, so scalbn(x,-e) stays huge.
+    double g_1e15 = s(1e15, args);
+    EXPECT(std::isfinite(g_1e15));
+
+    double g_4e133 = s(4.54e133, args);
+    EXPECT(std::isfinite(g_4e133));
+
+    // Normal speeds must still work identically.
+    double g_normal = s(10.0, args);
+    EXPECT(std::isfinite(g_normal));
+    EXPECT(g_normal > 0.0);
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 
 static void print_usage(const char* argv0) {
@@ -6075,6 +6153,7 @@ int main(int argc, char** argv) {
     test_synchronous();
     test_lookup();
     test_power();
+    test_p81_power_io_fixes();
     test_accel_union();
     test_json_roundtrip();
     test_json_roundtrip_lut();
@@ -6207,6 +6286,9 @@ int main(int argc, char** argv) {
     test_all_modes_sanitize_init_apply();
     test_config_unicode_names();
     test_synchronous_edge_cases();
+
+    // P86 — synchronous gain_apply UB fix regression
+    test_synchronous_huge_speed_no_ub();
 
     if (g_list_only) return 0;
 

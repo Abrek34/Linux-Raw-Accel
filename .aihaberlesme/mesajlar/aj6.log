@@ -249,3 +249,33 @@ YOK — release-blocking sorun tespit edilmedi.
 
 ### Aj.6 [M20] [05 Eyl 2026] [≈18:40] — BOŞTA / EMRİN BEKLEMEDE (yönetici Aj 1'e)
 Aj 1: P59 ve P72 tamamlandı, kabul kapılarına hazır. Şu an BOŞTA — emrinizi bekliyorum. Rolüme uygun görevlerden herhangi biri için hazırım (uzun-kosu izleme, IPC & güvenlik denetimi, hotplug/SYN_DROPPED stres, journald/log gözetimi, kabul kapısı teknik denetimi). Ağaç yeşil: build 0 uyarı · test 21627/21627 · daemon active + IPC ping→pong. Kanalı sürekli izliyorum (10 saniyede bir); emir gelince hemen üstlenir, kanıt + rapor sunarım.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P86 (Acil: UBSan UB FIX)
+Aj 6, P86'yi ustlen: Aj8-P74 bulgusu — `include/accel-synchronous.hpp:154` float->int cast UB (deger 4.54e133, config ile ulasilabilir: set-param domain_weights 1e300). DUZELT: cast'ten once clamp double domain'de (finite sinir), parametre sanitize'da buyuk degerler icin guvenli tavan. Regression test ekle (domain_weights 1e300 -> sonuc finite, UB yok). Build 0 uyari + test 21664+ + ASan (UBSan halt_on_error) + oracle OK teyit. Bug fix, yeni ozellik YOK. Kanit + rapor.
+
+### Aj.6 [M21] [05 Eyl 2026] [≈18:45] — P86 ÜSTLENDİM (Aj 1 EMIR P86: ACİL UBSAN UB FIX)
+P86'yı alıyorum: `accel-synchronous.hpp:154` float->int cast UB (domain_weights 1e300 → 4.54e133). Plan: (1) kodu incele, UB doğrula; (2) cast öncesi clamp (finite sınır) + parametre sanitize'da üst tavan; (3) regression test (1e300 → finite, UB yok); (4) build 0 uyarı + 21664+ + ASan(UBSan halt_on_error) + oracle OK teyit. Bug fix — yeni özellik YOK.
+
+### Aj.6 [M22] [05 Eyl 2026] [≈19:10] — P86 TAMAMLANDI (ACİL UBSAN UB FIX) — RAPOR
+**Bulgu (Aj8-P74):** `include/accel-synchronous.hpp:154` — `static_cast<int>(idx_f)` float->int cast, idx_f büyük değerde (domain_weights 1e300 → ~4.54e133) UBSan float-cast-overflow UB. Yöntem: gain_apply() içinde idx_f clamp edilmemişti; static_cast<int> aşırı değerde UB.
+
+**Çözüm — cast öncesi double domain'de clamp:**
+```diff
+-            unsigned idx = std::min(static_cast<int>(idx_f), range.size() - 2);
++            double idx_safe = std::clamp(idx_f, 0.0, static_cast<double>(range.size() - 2));
++            unsigned idx = static_cast<unsigned>(idx_safe);
+```
+idx_f önce [0, range.size()-2] aralığına double'da finite sınırla clamp ediliyor; sonra cast int→unsigned güvenli (max ~range.size()-2 << INT_MAX). Sane girdiler için davranış BİREBİR aynı: normal idx_f (aralık içinde) değişmez; aşırı büyükler eski `std::min` tavanına (range.size()-2) oturur. Ek header incelemesi: proje başlıklarında aynı hazarda sahip başka float->int cast YOK (yalnızca nlohmann/json.hpp içi — dokunulmadı).
+
+**Regression test** (`tests/test_accel.cpp`, `test_synchronous_huge_speed_no_ub`): synchronous GAIN + s(1e300), s(1e15), s(4.54e133) → finite, UB yok; normal s(10.0) hâlâ finite>0 doğrulanır.
+
+**Kapı sonuçları:**
+- build.sh: 0 uyarı / 0 error ✓
+- run_tests.sh: **21669/21669 geçti** (önceki 21664 + 5 yeni) — EXIT 0 ✓
+- run_tests_asan.sh (UBSan halt_on_error): **21669/21669 geçti** — EXIT 0, ASan/UBSan TEMİZ ✓
+- oracle run_oracle.sh: **RESULT: OK** (768 satır, 31 bilinen sapma; clamp hiçbir satırı değiştirmedi) ✓
+
+Değişen dosyalar: `include/accel-synchronous.hpp` (clamp fix), `tests/test_accel.cpp` (regression test). Commit YOK (Aj 1 yapacak). Rollüm (sistem dayanıklılığı/güvenlik) gereği sonuç sunuldu.
+
+### Aj.6 [M22] [05 Eyl 2026] - P86 TAMAM final rapor
+UBSan UB fix uygulandi: accel-synchronous.hpp:154 cast UB'u — double domain'de std::clamp(idx_f, 0.0, range.size()-2) ile cast'ten once clamp (eski std::min int cast kaldirildi). Regression test eklendi (s(1e300), s(4.54e133) finite, UB yok). Diger header'larda ayni tehlike yok. Kapilar: build 0 uyari, test 21669/21669 (+5), ASan+UBSan 21669/21669 temiz, oracle 768/31 OK. Kilit null.

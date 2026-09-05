@@ -8,6 +8,27 @@ The canonical version string lives in `include/rawaccel-base.hpp`
 
 ## [0.5.0] — 2026-09-05
 
+### Player round (oyuncu turu, R29–R37)
+- **`rawaccel-cli create-preset`**: research-based game presets `cs2`, `valorant`,
+  `apex`, `fps` (plus existing `gaming`/`office`/`precision`/`disable`) map onto
+  the acceleration engine with per-game parameter choices; a `.tar`/file import
+  arity fix (`import` with a single file) closes a CRIT round-trip gap (P65).
+- **Default profile is 1:1 raw passthrough** (no acceleration by default — user
+  decision, R34); acceleration is opt-in per profile.
+- **Apex preset tuning** (`output_offset 0.2 → 0.9`): fixes the sub-1:1 "muddy"
+  feel on the power curve while keeping the fast 180° flick ramp (R37, user
+  approved).
+- **Player guide** in README: game-specific preset tutorial / tuning workflow
+  for CS2, Valorant, Apex, generic FPS.
+- **Oracle esport grid** (`tests/oracle/`): the speed sweep now covers the
+  tournament band `2000 / 3000 / 4000` ips between the previously sampled
+  `1000/5000`; the four game presets are mirrored as dedicated cases. The
+  differential oracle now compares **768 gain rows** (31 documented intentional
+  deviations) vs the official reference.
+- **Virtmouse live harness** (`scripts/virtmouse-game.c`, R35/P64): injects
+  synthetic game-speed mouse motion (uinput virtual mouse) for live end-to-end
+  latency / hot-path verification.
+
 ### Live telemetry (IPC `status`)
 - Per-device motion telemetry published in the `status` JSON from the daemon:
   `telem_in_ips`, `telem_out_ips`, `telem_gain`, `telem_dx`, `telem_dy`.
@@ -73,9 +94,9 @@ The canonical version string lives in `include/rawaccel-base.hpp`
 
 ### Tooling / QA / packaging
 - Differential oracle (`tests/oracle/run_oracle.sh`) vs the vendored official
-  RawAccel reference: 588 gain rows — 561 matched at REL 1e-9 + 27 documented
-  intentional deviations; wired into CI (`ci.yml`) so accel-math drift fails
-  the build.
+  RawAccel reference: 768 gain rows — 737 matched at REL 1e-9 + 31 documented
+  intentional deviations (expanded with the R35 esport grid); wired into CI
+  (`ci.yml`) so accel-math drift fails the build.
 - Translation coverage suite (`tests/run_tr_coverage.sh`): every translatable
   UI string must have a Turkish entry (0 MISSING = PASS).
 - SYN_DROPPED event-sequence machine tests (8 scenarios) added — 132 test

@@ -518,6 +518,9 @@ CI and must not drift outside `tests/oracle/known_deviations.txt`.
 
 ## Player profile (oyuncu profili)
 
+> New-user onboarding: see [docs/user_guide.md](docs/user_guide.md).
+> Real-hardware feel validation: see [docs/real_hardware_test.md](docs/real_hardware_test.md).
+
 RawAccel Linux ships game-specific presets for common competitive titles. These
 are tuned starting points — research-backed, then adjust by feel:
 
@@ -526,7 +529,7 @@ are tuned starting points — research-backed, then adjust by feel:
 | `gaming` | classic | General FPS / aim trainers: classic curve, limit 1.8 |
 | `cs2` | classic | Tactical shooter (pro eDPI band 560–1000): early kick-in, cap 1.6 |
 | `valorant` | natural | Smooth entry/exit (TenZ-style base): light gain, high cap 2.0 |
-| `apex` | power | Tracking + verticality: fast 180° flicks, output offset 0.2 |
+| `apex` | power | Tracking + verticality: fast 180° flicks, output offset 0.9 |
 | `fps` | classic | Balanced FPS starting point (moderate accel + cap 1.8) |
 | `office` | natural | Light desktop acceleration (limit 1.3) |
 | `precision` | classic | CAD / design work (low accel 0.002) |

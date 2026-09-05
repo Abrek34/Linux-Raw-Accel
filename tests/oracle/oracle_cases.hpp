@@ -165,10 +165,10 @@ inline std::vector<Case> cases() {
         c.push_back(x);
     }
     {
-        Case x; // apex
+        Case x; // apex (R37: output_offset 0.2 -> 0.9, sub-1:1 muddy fix)
         x.name = "game_apex_power"; x.mode = "power"; x.gain = true;
         x.scale = 2.2; x.exponent_power = 0.8;
-        x.input_offset = 0.02; x.output_offset = 0.2;
+        x.input_offset = 0.02; x.output_offset = 0.9;
         x.cap_x = 28; x.cap_y = 2.2; x.cap_mode = 2;
         x.speeds = S;
         c.push_back(x);

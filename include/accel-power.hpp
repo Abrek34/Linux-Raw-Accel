@@ -37,6 +37,7 @@ struct power {
             offset = {};
             constant = 0;
             scale = scale_from_output_point(args.cap.x, args.cap.y, n, constant);
+            legacy_cap = args.cap.y; // P81: cap the legacy curve at cap.y (io mode)
             return;
         }
 
@@ -116,7 +117,14 @@ private:
 
     static double scale_from_gain_point(double input, double gain, double power) {
         if (input <= 0) return 0; // guard: prevent NaN in io mode when cap.x=0
-        return std::pow(gain / (power + 1), 1.0 / power) / input;
+        // P81: for a tiny exponent (sanitized floor 1e-4) the exponent
+        // 1/power is ~1e4, so pow(gain/(power+1), 1/power) overflows to Inf,
+        // which propagates to gain = Inf and silently zeroes the output.
+        // Floor the exponent so the io gain point stays finite, and fall back
+        // to identity scale (1) if a pathologically large gain still overflows.
+        double n  = power < 1e-3 ? 1e-3 : power;
+        double sc = std::pow(gain / (n + 1), 1.0 / n) / input;
+        return std::isfinite(sc) ? sc : 1.0;
     }
 
     static double scale_from_output_point(double input, double output, double power, double C) {

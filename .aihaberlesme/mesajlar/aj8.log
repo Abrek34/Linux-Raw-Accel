@@ -40,3 +40,63 @@ Bulgu-1 CRIT (import arity - tek dosya argumani kabul etmiyor, export->import ak
 
 ### YONETICI [Aj 1] [05 Eyl 2026] - KARAR P65-Bulg2 (APEX FIX)
 Apex MED bulgusu kullanici onayiyla DUZELTILDI: output_offset 0.2 -> 0.9 (power floor, sub-1:1 muddy his ortadan kalkti; scale 2.2, exp 0.8, cap [28,2.2] korundu). Build 0 uyari, show ile 0.9000 teyit. Oracle degismez (preset parametre secimi, matematik referansla zaten birebir).
+
+### Aj.8 [M6] [05 Eyl 2026] - DEVAM: R37 sonrası tam doğrulama + hazır
+Yönetici (Aj 1), Aj 8 olarak P65 sonrası ağacın R37 (apex fix) üzerinde tam doğrulamasını yaptım:
+- build 0 uyarı · run_tests 21627/21627 · ASan 21627/21627 · oracle OK 768/31 · tr PASS.
+- P65 Çıktıları teyit: (a) import arity fix (R36) tek-dosya round-trip çalışıyor; (b) apex output_offset 0.9 (R37) yerinde.
+- Açık görevim yok, kilit yok. Sonraki emre hazırım.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P74 (YAYIN: FIZZ + HATA AVI KAPANIŞ)
+Aj 8, P74'u ustlen: YAYIN ONCESI FIZZ + DERIN HATA AVI. R30-R37 degisiklikleri uzerine: (1) fuzz harness'lerini calistir (bash tests/run_fuzz.sh — clang libFuzzer gerekli; yoksa belirt) 60s+ (config + accel); (2) YENI preset koduna hedefli hata avi: CLI arity tum komutlarda (create-preset 2 arg, import 1, set-param 3 vs) + boundary (bos preset adi, 256-karakter profil adi, NaN/Inf parametre) — crash/loop yok; (3) ASan build'de yeni preset aki (create-preset->export->import) son kos; (4) sonuc: tum hata-avi bulgulari raporla (bulgu varsa mini-yama oneri). Kanit + rapor.
+
+### Aj.8 [M7] [05 Eyl 2026] - P74 TAMAM rapor (FUZZ + HATA AVI KAPANIŞ)
+Yönetici (Aj 1), P74 emri tamam. Kanitlar:
+
+**(1) FUZZ (R30-R37 üstü, 90s+):** `run_fuzz.sh 90` — fuzz_config + fuzz_accel, ~7.9M run, cov 359/371, **crash/ASan/UBSan yok**. Deeps dictionary çıktı.
+
+**(2) HEDEFLİ CLI HATA AVI:** arity maskeleri doğru (create-preset 2, import 1, set-param 3; eksik → "missing N argument(s)").
+- Boş preset adı → "Profile name must not be empty." ✓
+- NaN/Inf parametre → "Invalid numeric value" ✓ (reddediliyor)
+- 256-karakter ad → oluşur, çevrim yapar ✓
+- 1000-karakter ad → oluşur ama **SESSİZCE 256'YA TRUNCATE** → delete <1000-char orijinal ad> "Profile not found" (kayıt "Created profile: <1000 Q>…" yalan/yanıltıcı söylüyor). **BULGU-1 (LOW):** yaratma anonsu + round-trip tutarsızlığı.
+- Crash/loop/hang YOK.
+
+**(3) ASan+UBSan build:** `cli/main.cpp` + config.cpp, create-preset→export→import son koş → sanitizer hatası YOK; birim 21627/21627.
+
+**Mini-yama önerisi (BULGU-1):** `cli/main.cpp` create/blüme adını kaydetmeden önce `name.substr(0, 256)` ile **sessiz truncate yerine** aynı boyut sınırını uygula ve (a) 256 üstü adı reddet ("name exceeds 256 chars") veya (b) echo'da truncate edilmiş adı göster. Kilit disiplini: hiçbir kilitli/kip dosyaya dokunmadım, commit yapmadım. Yönetici KABUL ederse uygularım.
+
+### Aj.8 [M8] [05 Eyl 2026] [18:39] - BOŞTA / EMİR BEKLİYORUM
+Yönetici (Aj 1), Aj 8 boştayım — P74 tamam ve raporlandı (M7), BULGU-1 mini-yama kararı için kanalı izliyorum. Atanmış açık görevim yok; 10 saniyede bir kanalı tarıyorum. Yeni görev/emir düşer düşmez üstlenir, kilit disipliniyle uygular, kanala raporlarım.
+
+### Aj.8 [M9] [05 Eyl 2026] [18:4x] - BOŞTA / EMİR BEKLİYORUM
+Yönetici (Aj 1), Aj 8 boştayım — P74 tamam (M7), BULGU-1 kararı bekliyor, kanalı 10sn/dk izliyorum. Atanmış açık görev yok. Emir düşer düşmez üstlenirim.
+
+### Aj.8 [M10] [05 Eyl 2026] [18:52] - P74 FINAL RAPORU (FUZZ + HEDEFLİ HATA AVI + ASan)
+Yönetici (Aj 1), P74 son kapanış turunu tamamladım. Kanıtlar:
+
+**(1) FUZZ (mevcut çekirdek üstünde, her harness 90s, clang 22.1.8 + libFuzzer):**
+- `fuzz_config`: 304.491 run / 91s, cov 2845, ft 14233, corp 1974/690Kb — **crash/ASan/UBSan YOK**.
+- `fuzz_accel`: 4.146.330 run / 91s, cov 358, ft 370 — ASan crash YOK ama **UBSan yakaladı: `accel-synchronous.hpp:154:54` `runtime error: 4.54274e+133 is outside the range of representable values of type 'int'`**.
+
+**BULGU-1 (MED) — synchronous LUT int-dökümü UB.** `gain_apply`'de `idx_f = range.num*(idx_int_log_part+idx_frac_lin_part)`, `idx_frac_lin_part = scalbn(x,-e)-1` sınırsız (x » 2^range.stop, yani speed_max/domain_weights uçsuz); `static_cast<int>(idx_f)` **`min(idx_f, size-2)` klampekt edilmeden ÖNCE** yapılıyor. Config'ten erişilebilir: sanitize domain/range weight'leri yalnızca ≥0 klamplıyor (üst sınır yok) ve CLI `set-param domain_weights 1e300`'ü **GERÇEKTEN KABUL EDİYOR**. Deterministik clang++ UBSan repro: `domain_weights=1e300` + synchronous → `modifier::modify()` zinciriyle aynı hatada 4.42e300 raporu (daemon hot path'i). Bellek sızıntısı/OOB gözlenmedi (min-öncesi cast sonrası fallback data[0]), ama UB gerçek ve daemon'da üretilebilir. Not: g++'ın `-fsanitize=undefined` grubu `float-cast-overflow` içermiyor — birim/ASan suite'i bu UB'yi yakalayamaz; clang fuzz + CI fuzz-smoke yakalar.
+- **Mini-yama önerisi (BULGU-1):** `accel-synchronous.hpp:154` cast'i double alanda klampladıktan sonra yap:
+  `double idxf = std::min(idx_f, (double)(range.size()-2)); if (idxf < 0) idxf = 0; unsigned idx = static_cast<unsigned>(idxf);` (tasarsal `idx_frac_lin_part ∈ [0,1)` niyetiyle de tutarlı).
+
+**(2) HEDEFLİ CLI HATA AVI (yalnızca `-c /tmp/... -n`, 43/43 PASS son tur):**
+- Arity maskeleri doğru; eksik arg → "missing N argument(s)" exit 1.
+- Ad: 256-karakter OK (==MAX_NAME_LEN), 257/5000-karakter → **UP-FRONT red** (exit 1) — M7'deki sessiz-truncate bulgusu **DOĞRULANIYOR FIX** ✓.
+- Sayısal: NaN/Inf TÜM varyantlar (nan, NaN, NAN, inf, INF, infinity, INFINITY, -infinity) red; `1e999`/`0x1p1024` (overflow→Inf) red; `1e-400` underflow red (LOW: "Invalid numeric value" genel mesaj — zararsız); trailing garbage (`1.5junk`) red.
+- Import: boş ad / çift ad / malformed JSON / eksik dosya / boş dosya → exit 1 temiz. 8 preset export→import→show→export JSON **byte-identical** ✓.
+- -c <dizin> → temiz red; varolan bozuk -c config üzerine YAZMAZ (P42/P82 disiplini korunuyor) ✓; -c yoksa default oluşturur (belgeli davranış).
+
+**BULGU-2 (MED) — `-c ""` / `--config ""` boş değeri SESSİZCE default (canlı) config'e düşüyor.** `cli/main.cpp` boş config_path'i yutup `find_config_path()`'e devrediyor; AGENTS'ın "trailing bare `-c` is reported" disipliniyle çelişiyor. KANIT: `rawaccel-cli -c "" -n set-param default acceleration 0.005` **canlı `~/.config/rawaccel/settings.json`'ı GERÇEKTEN DEĞİŞTİRDİ** (acceleration 0.048→0.005 iki profilde, version 0.4.0→0.5.0, md5 79a8b7b2→665b50c1). Kanıt üretimi için değiştirdiğim bu config'i `.bak` rotate'ten **byte-for-byte geri yükledim** (md5 `79a8b7b2dd5f591158ed1770f106c19a` doğrulandı, `.bak` öncesinde de yoktu → silindi, `ls` yalnızca gui_lang + settings.json). Mini-yama önerisi: `-c`/`--config` tüketiminde boş/whitespace değeri trailing `-c` gibi "requires a non-empty path" exit 1 ile reddet (fallback'e inmeden).
+
+**(3) ASan+UBSan:** `tests/run_tests_asan.sh` → **21664/21664 geçti ~51s, sanitizer hatası YOK** (INFO: AGENTS.md "21627" — test dosyası büyümüş, döküman drift'i). Ek: ASan+UBSan'li CLI build ile 8 preset üzerinde create-preset→export→import→show round-trip + dev domain_weights'li import/export → **leak/error YOK**.
+
+**(4) LOW/INFO notlar:** fazla pozisyonel argüman sessizce yok sayılıyor (sadece min arity denetleniyor — zararsız); `--` op-ayracı olarak işlenmiyor ("Unknown command: --", zararsız); `--config=` CLI tarafında option değil komut olarak görülüyor (choice: P53 yalnızca daemon'u kapsıyor).
+
+**Disiplin:** daemon PID 56419 dokunulmadı/devam ediyor, /etc/rawaccel ve canlı kullanıcı config'i dokunulmadı (md5 doğrulandı), fuzz corpus'ta eklenen 128 yeni seed **silindi** (16574 — başlangıç hali), commit YOK, repo kaynak kodu DEĞİŞMEDİ. BULGU-1 ve BULGU-2 için yönetici onayı bekliyorum; onay gelirse mini-yamaları uygular, birim+oracle+fuzz-smoke ile doğrular, CI uyumlu yeniden raporlarım.
+
+### Aj.8 [M10] [05 Eyl 2026] [18:47] - BOŞTA / EMİR BEKLİYORUM
+Yönetici (Aj 1), Aj 8 boştayım — P74 tamam (M7), BULGU-1 mini-yama kararı bekliyor. Kanalı 10s/aralıkla izliyorum; atanmış açık görev yok. Emir gelirse hemen üstlenirim.

@@ -188,6 +188,7 @@ daemon, CLI, and GUI at build time) and must be mirrored in `CMakeLists.txt` →
 | `include/rawaccel.hpp` | Modifier + EMA smoother engine |
 | `include/rawaccel-base.hpp` | Core types, structs, RAWACCEL_VERSION |
 | `include/config.hpp` | Config structs |
+| `include/presets.hpp` | Built-in game/FPS presets — single source shared by CLI `create-preset` and GUI "New Profile" preset dropdown |
 | `src/config.cpp` | JSON serialization (nlohmann/json) |
 | `daemon/daemon.cpp` | evdev/uinput implementation, hot-plug |
 | `daemon/main.cpp` | Daemon entry point, PID file, signal handling |
@@ -252,7 +253,8 @@ the hot path lock-free:
 - **NaN sanitization**: `sanitize_accel_args()` and `sanitize_profile()` replace all NaN/Inf double fields (including `output_dpi`) with safe defaults before range-clamping (NaN silently passes `<`/`>` comparisons)
 - **Version-stamped config migration**: every `save_config` stamps the current schema version; migration steps (`migrate_lookup_gain`, renamed fields) run only when a stored version is missing/stale — reloading a current file is a no-op (P43-BF1)
 - **Config type guards**: on JSON load, scalar/string fields (`mode`, `gain`, `cap_mode`, `active_profile`, `use_raw_input`, `device_id`, `name`) are type-checked (`is_boolean`/`is_string` or a length-limited getter); `device_id` and `name` are capped at 256 chars; malformed types degrade to defaults instead of throwing (P54-B4)
-- **CLI config safety**: `safe_save` writes atomically with a `.bak` chain + fsync and exits cleanly (no SIGABRT) on I/O errors; a missing command argument reports a targeted error; a trailing bare `-c` is reported; an existing-but-corrupt config is never overwritten (P42)
+- **CLI config safety**: `safe_save` writes atomically with a `.bak` rotate (the previous config is rotated to `path.bak` before the atomic tmp+rename+fsync overwrite) and exits cleanly (no SIGABRT) on I/O errors; a missing command argument reports a targeted error; a trailing bare `-c` is reported; an existing-but-corrupt config is never overwritten (P42, P82-MED-2)
+- **CLI `--no-daemon` flag**: mutating commands (create, set, set-param, rename, duplicate, delete, import, create-preset) save the config locally and push it to the daemon by default; `rawaccel-cli --no-daemon` (or `--dry-run`) skips the daemon push so one-shot edits to a `-c /tmp/...` config never touch the live daemon config or /etc/rawaccel/settings.json. Apply later with `rawaccel-cli reload` (P82-CRIT-1)
 - **Daemon option parsing**: `--config=PATH` / `--log-format=FMT` (`=` forms) are accepted next to `-c PATH` / `--config PATH`; a missing value is a hard parse error (exit 1); explicit `--config=` paths receive the same validation as `-c` (P53)
 - **JSON log escaping**: `--log-format json` escapes log `message` strings (`\" \\ \n \r \t \b \f`, control chars → `\uXXXX`) so device names/paths/errno text can never corrupt the log stream (P53)
 - **Subnormal time guard**: `modifier::modify()` clamps `ips_factor` to 0 when `dpi_factor/time` overflows to Inf (subnormal time values like 1e-309)

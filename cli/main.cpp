@@ -1,4 +1,5 @@
 #include "../include/config.hpp"
+#include "../include/presets.hpp"
 #include "../include/rawaccel.hpp"
 #include "../include/nlohmann/json.hpp"
 #include <iostream>
@@ -148,6 +149,29 @@ static bool daemon_apply_config(const app_config& cfg) {
     std::string resp = daemon_ipc_send(req);
     if (resp.find("\"ok\":true") != std::string::npos) return true;
     return daemon_reload_via_any_path();
+}
+
+// ── Global CLI flags ──────────────────────────────────────────────────────────
+
+/// When true, mutating commands save the config locally but do NOT push it to
+/// the running daemon — the user can review/apply later with `rawaccel-cli
+/// reload`.  P82-CRIT-1: opt-in guard so a one-shot `-c /tmp/t.json create x`
+/// (whose working copy lives outside the daemon's own config path) does not
+/// silently clobber the live daemon config unless the user explicitly wants it.
+static bool g_no_daemon = false;
+
+/// Apply a config change to the running daemon, honoring the global --no-daemon
+/// flag.  When the flag is set the change is written to the local config file
+/// only; the user can later push it with `rawaccel-cli reload` (or rerun
+/// without --no-daemon).  P82-CRIT-1.
+static void daemon_apply_if_enabled(const app_config& cfg) {
+    if (g_no_daemon) {
+        std::cout << "Config updated locally (not applied to daemon — "
+                     "use 'rawaccel-cli reload' or remove --no-daemon)\n";
+        return;
+    }
+    if (daemon_apply_config(cfg))
+        std::cout << "Daemon reloaded.\n";
 }
 
 /// Print a uniform "couldn't reach daemon" diagnostic.  Suggests the right
@@ -310,11 +334,7 @@ static int cmd_set(app_config& cfg, const std::string& config_path, const std::s
             std::cout << "Active profile set to: " << name << "\n";
             // Push the new config to the daemon (IPC set_config) so it takes
             // effect even when the daemon reads a different file (systemd /etc).
-            if (daemon_apply_config(cfg)) {
-                std::cout << "Daemon reloaded.\n";
-            } else {
-                std::cout << "Note: daemon not running or not signaled.\n";
-            }
+            daemon_apply_if_enabled(cfg);
             return 0;
         }
     }
@@ -328,6 +348,15 @@ static int cmd_create(app_config& cfg, const std::string& config_path, const std
     // first nameless profile creating ambiguity.  Reject up front.
     if (name.empty()) {
         std::cerr << "Profile name must not be empty.\n";
+        return 1;
+    }
+    // P82-MED-1: a >256-char name persists full now but the load-side cap
+    // (MAX_DP_NAME=256 in config.cpp) silently truncates it to 256 on any
+    // reload+resave.  Reject up front so the stored name always matches what
+    // the user supplied.  256 chars is allowed (round-trips intact).
+    if (name.size() > MAX_NAME_LEN) {
+        std::cerr << "Profile name too long: " << name.size()
+                  << " chars (max " << MAX_NAME_LEN << ").\n";
         return 1;
     }
     // Check duplicate
@@ -346,8 +375,7 @@ static int cmd_create(app_config& cfg, const std::string& config_path, const std
     cfg.profiles.push_back(dp);
     if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Created profile: " << name << "\n";
-    if (daemon_apply_config(cfg))
-        std::cout << "Daemon reloaded.\n";
+    daemon_apply_if_enabled(cfg);
     return 0;
 }
 
@@ -366,8 +394,7 @@ static int cmd_delete(app_config& cfg, const std::string& config_path, const std
     std::cout << "Deleted profile: " << name << "\n";
     if (cfg.active_profile != name)
         std::cout << "Active profile is now: " << cfg.active_profile << "\n";
-    if (daemon_apply_config(cfg))
-        std::cout << "Daemon reloaded.\n";
+    daemon_apply_if_enabled(cfg);
     return 0;
 }
 
@@ -376,6 +403,12 @@ static int cmd_duplicate(app_config& cfg, const std::string& config_path,
     // Reject empty new name
     if (dst_name.empty()) {
         std::cerr << "Profile name must not be empty.\n";
+        return 1;
+    }
+    // P82-MED-1: symmetric cap with load-side (MAX_NAME_LEN).
+    if (dst_name.size() > MAX_NAME_LEN) {
+        std::cerr << "Profile name too long: " << dst_name.size()
+                  << " chars (max " << MAX_NAME_LEN << ").\n";
         return 1;
     }
     // Reject if destination already exists
@@ -406,158 +439,20 @@ static int cmd_duplicate(app_config& cfg, const std::string& config_path,
     cfg.profiles.push_back(std::move(dst));
     if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Duplicated profile: '" << src_name << "' → '" << dst_name << "'\n";
-    if (daemon_apply_config(cfg))
-        std::cout << "Daemon reloaded.\n";
+    daemon_apply_if_enabled(cfg);
     return 0;
-}
-
-/// Create a profile from a built-in preset.
-/// Presets: "gaming", "office", "precision", "disable", "cs2", "valorant", "apex", "fps"
-static device_profile make_preset(const std::string& preset_name, const std::string& profile_name) {
-    device_profile dp;
-    dp.name = profile_name;
-    dp.dev_cfg.dpi = 800;
-    dp.dev_cfg.polling_rate = 1000;
-    dp.prof.raw_passthrough = false;
-
-    if (preset_name == "gaming") {
-        // Classic acceleration — popular for FPS games
-        dp.prof.accel_x.mode = accel_mode::classic;
-        dp.prof.accel_y.mode = accel_mode::classic;
-        dp.prof.accel_x.gain = true;
-        dp.prof.accel_y.gain = true;
-        dp.prof.accel_x.acceleration = 0.005;
-        dp.prof.accel_y.acceleration = 0.005;
-        dp.prof.accel_x.exponent_classic = 2.0;
-        dp.prof.accel_y.exponent_classic = 2.0;
-        dp.prof.accel_x.limit = 1.8;
-        dp.prof.accel_y.limit = 1.8;
-        dp.prof.accel_x.input_offset = 0;
-        dp.prof.accel_y.input_offset = 0;
-        dp.prof.output_dpi = 1000;
-    } else if (preset_name == "office") {
-        // Light natural acceleration for general use
-        dp.prof.accel_x.mode = accel_mode::natural;
-        dp.prof.accel_y.mode = accel_mode::natural;
-        dp.prof.accel_x.gain = true;
-        dp.prof.accel_y.gain = true;
-        dp.prof.accel_x.limit = 1.3;
-        dp.prof.accel_y.limit = 1.3;
-        dp.prof.accel_x.decay_rate = 0.08;
-        dp.prof.accel_y.decay_rate = 0.08;
-        dp.prof.accel_x.motivity = 1.2;
-        dp.prof.accel_y.motivity = 1.2;
-        dp.prof.output_dpi = 1000;
-    } else if (preset_name == "precision") {
-        // Low acceleration for precision work (CAD, design)
-        dp.prof.accel_x.mode = accel_mode::classic;
-        dp.prof.accel_y.mode = accel_mode::classic;
-        dp.prof.accel_x.gain = true;
-        dp.prof.accel_y.gain = true;
-        dp.prof.accel_x.acceleration = 0.002;
-        dp.prof.accel_y.acceleration = 0.002;
-        dp.prof.accel_x.exponent_classic = 1.5;
-        dp.prof.accel_y.exponent_classic = 1.5;
-        dp.prof.accel_x.limit = 1.2;
-        dp.prof.accel_y.limit = 1.2;
-        dp.prof.output_dpi = 1000;
-    } else if (preset_name == "disable" || preset_name == "none" || preset_name == "off") {
-        // Raw passthrough — no acceleration
-        dp.prof.raw_passthrough = true;
-        dp.prof.accel_x.mode = accel_mode::noaccel;
-        dp.prof.accel_y.mode = accel_mode::noaccel;
-        dp.prof.output_dpi = 1000;
-    } else if (preset_name == "cs2") {
-        // CS2 tactical shooter: pro eDPI band 560-1000, classic curve, early kick-in.
-        // Low swap of slow movement = micro-adjust headshots stay 1:1, flicks ramp up.
-        dp.prof.accel_x.mode = accel_mode::classic;
-        dp.prof.accel_y.mode = accel_mode::classic;
-        dp.prof.accel_x.gain = true;
-        dp.prof.accel_y.gain = true;
-        dp.prof.accel_x.acceleration = 0.004;
-        dp.prof.accel_y.acceleration = 0.004;
-        dp.prof.accel_x.exponent_classic = 2.0;
-        dp.prof.accel_y.exponent_classic = 2.0;
-        dp.prof.accel_x.input_offset = 0;
-        dp.prof.accel_y.input_offset = 0;
-        dp.prof.accel_x.limit = 1.6;
-        dp.prof.accel_y.limit = 1.6;
-        dp.prof.accel_x.cap = { 18.0, 1.6 };
-        dp.prof.accel_y.cap = { 18.0, 1.6 };
-        dp.prof.accel_x.cap_mode_val = cap_mode::out;
-        dp.prof.accel_y.cap_mode_val = cap_mode::out;
-        dp.prof.output_dpi = 1000;
-    } else if (preset_name == "valorant") {
-        // Valorant (TenZ-inspired base): natural curve for smooth entry/exit,
-        // modest gain, high cap so panic flicks stay controlled but fast.
-        dp.prof.accel_x.mode = accel_mode::natural;
-        dp.prof.accel_y.mode = accel_mode::natural;
-        dp.prof.accel_x.gain = true;
-        dp.prof.accel_y.gain = true;
-        dp.prof.accel_x.limit = 1.3;
-        dp.prof.accel_y.limit = 1.3;
-        dp.prof.accel_x.decay_rate = 0.08;
-        dp.prof.accel_y.decay_rate = 0.08;
-        dp.prof.accel_x.motivity = 1.2;
-        dp.prof.accel_y.motivity = 1.2;
-        dp.prof.accel_x.input_offset = 0.02;
-        dp.prof.accel_y.input_offset = 0.02;
-        dp.prof.accel_x.cap = { 30.0, 2.0 };
-        dp.prof.accel_y.cap = { 30.0, 2.0 };
-        dp.prof.accel_x.cap_mode_val = cap_mode::out;
-        dp.prof.accel_y.cap_mode_val = cap_mode::out;
-        dp.prof.output_dpi = 1000;
-    } else if (preset_name == "apex") {
-        // Apex Legends: tracking-heavy + verticality. Power mode ramps fast for
-        // 180° flicks while light smoothing keeps track. output_offset floor ~0.9
-        // keeps slow micro-aim close to 1:1 (avoid sub-1:1 muddy feel at 2-10 mm/s).
-        dp.prof.accel_x.mode = accel_mode::power;
-        dp.prof.accel_y.mode = accel_mode::power;
-        dp.prof.accel_x.gain = true;
-        dp.prof.accel_y.gain = true;
-        dp.prof.accel_x.scale = 2.2;
-        dp.prof.accel_y.scale = 2.2;
-        dp.prof.accel_x.exponent_power = 0.8;
-        dp.prof.accel_y.exponent_power = 0.8;
-        dp.prof.accel_x.input_offset = 0.02;
-        dp.prof.accel_y.input_offset = 0.02;
-        dp.prof.accel_x.output_offset = 0.9;
-        dp.prof.accel_y.output_offset = 0.9;
-        dp.prof.accel_x.cap = { 28.0, 2.2 };
-        dp.prof.accel_y.cap = { 28.0, 2.2 };
-        dp.prof.accel_x.cap_mode_val = cap_mode::out;
-        dp.prof.accel_y.cap_mode_val = cap_mode::out;
-        dp.prof.output_dpi = 1000;
-    } else if (preset_name == "fps") {
-        // Generic FPS: balanced classic curve, moderate acceleration and cap.
-        // Safe starting point for most shooters / aim trainers.
-        dp.prof.accel_x.mode = accel_mode::classic;
-        dp.prof.accel_y.mode = accel_mode::classic;
-        dp.prof.accel_x.gain = true;
-        dp.prof.accel_y.gain = true;
-        dp.prof.accel_x.acceleration = 0.005;
-        dp.prof.accel_y.acceleration = 0.005;
-        dp.prof.accel_x.exponent_classic = 2.0;
-        dp.prof.accel_y.exponent_classic = 2.0;
-        dp.prof.accel_x.input_offset = 0.01;
-        dp.prof.accel_y.input_offset = 0.01;
-        dp.prof.accel_x.limit = 1.8;
-        dp.prof.accel_y.limit = 1.8;
-        dp.prof.accel_x.cap = { 20.0, 1.8 };
-        dp.prof.accel_y.cap = { 20.0, 1.8 };
-        dp.prof.accel_x.cap_mode_val = cap_mode::out;
-        dp.prof.accel_y.cap_mode_val = cap_mode::out;
-        dp.prof.output_dpi = 1000;
-    } else {
-        dp.name.clear(); // signal unknown preset
-    }
-    return dp;
 }
 
 static int cmd_create_preset(app_config& cfg, const std::string& config_path,
                              const std::string& preset_name, const std::string& profile_name) {
     if (profile_name.empty()) {
         std::cerr << "Profile name must not be empty.\n";
+        return 1;
+    }
+    // P82-MED-1: symmetric cap with load-side (MAX_NAME_LEN).
+    if (profile_name.size() > MAX_NAME_LEN) {
+        std::cerr << "Profile name too long: " << profile_name.size()
+                  << " chars (max " << MAX_NAME_LEN << ").\n";
         return 1;
     }
     // Check duplicate
@@ -576,8 +471,7 @@ static int cmd_create_preset(app_config& cfg, const std::string& config_path,
     cfg.profiles.push_back(dp);
     if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Created profile '" << profile_name << "' from preset '" << preset_name << "'\n";
-    if (daemon_apply_config(cfg))
-        std::cout << "Daemon reloaded.\n";
+    daemon_apply_if_enabled(cfg);
     return 0;
 }
 
@@ -945,8 +839,7 @@ static int cmd_set_param(app_config& cfg, const std::string& config_path,
     // e.g. `dpi 999999` → 32000, or resolved speed_min/speed_max ordering).
     std::cout << "Set " << key << " = " << stored_value_str(*dp, key)
               << " in profile '" << profile_name << "'\n";
-    if (daemon_apply_config(cfg))
-        std::cout << "Daemon reloaded.\n";
+    daemon_apply_if_enabled(cfg);
     return 0;
 }
 
@@ -1026,8 +919,7 @@ static int cmd_import(app_config& cfg, const std::string& config_path, const std
         return 1;
     }
     std::cout << "Imported profile: " << dp.name << "\n";
-    if (daemon_apply_config(cfg))
-        std::cout << "Daemon reloaded.\n";
+    daemon_apply_if_enabled(cfg);
     return 0;
 }
 
@@ -1044,6 +936,12 @@ static int cmd_rename(app_config& cfg, const std::string& config_path, const std
     // Reject empty new name
     if (new_name.empty()) {
         std::cerr << "Profile name must not be empty.\n";
+        return 1;
+    }
+    // P82-MED-1: symmetric cap with load-side (MAX_NAME_LEN).
+    if (new_name.size() > MAX_NAME_LEN) {
+        std::cerr << "Profile name too long: " << new_name.size()
+                  << " chars (max " << MAX_NAME_LEN << ").\n";
         return 1;
     }
     // Reject if new name already exists
@@ -1068,8 +966,7 @@ static int cmd_rename(app_config& cfg, const std::string& config_path, const std
     }
     if (!safe_save(cfg, config_path)) return 1;
     std::cout << "Renamed profile: '" << old_name << "' → '" << new_name << "'\n";
-    if (daemon_apply_config(cfg))
-        std::cout << "Daemon reloaded.\n";
+    daemon_apply_if_enabled(cfg);
     return 0;
 }
 
@@ -1242,6 +1139,8 @@ Options:
   -c, --config PATH             Config file path
   -h, --help                    Show this help
   -V, --version                 Show version
+  -n, --no-daemon, --dry-run    Save config changes locally only — do NOT push
+                                them to the running daemon (default: live-apply)
 
 Parameters (for set-param):
   raw               true|false|1|0  (raw passthrough — bypass all processing)
@@ -1320,6 +1219,10 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "-V") == 0 || strcmp(argv[i], "--version") == 0) {
             std::cout << "rawaccel-cli " << VERSION << "\n";
             return 0;
+        } else if (strcmp(argv[i], "-n") == 0 ||
+                   strcmp(argv[i], "--no-daemon") == 0 ||
+                   strcmp(argv[i], "--dry-run") == 0) {
+            g_no_daemon = true;
         } else {
             args.push_back(argv[i]);
         }

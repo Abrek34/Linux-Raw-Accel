@@ -97,3 +97,60 @@ P60-B (GUI UX + TR KAPSA) uc bacak:
 (2) README KILAVUZ <-> GUI UYUM DENETIMI - OK: 'create a profile' (profile_mgr.inl on_new_profile + profile_combo); 'both axes classic/natural/power' (widgets_sync.inl mode_uses satir 28-36, X/Y satirlar); 'enable Gain mode' (gain_check LEGACY/GAIN, widgets_sync.inl:74-79); 'value ranges above' (mode_uses ile ilgili spin'ler); 'Ham Gecis toggle A/B' (raw_check -> raw_passthrough widgets_sync.inl:199; tr.inl:83 label). Sapma yok.
 (3) tr.inl YENI DIZE + tr_coverage: bu adimda kod degismedi -> yeni dize yok; run_tr_coverage **PASS** (taze kosum).
 KAPILAR: tr PASS | degisiklik yok (tasarim/denetim). AKIS: kanal/bayrak durumu, gorev kaydi yok, kilit null. Kodlu implementasyon onerimi (1) Aj 1 onayina biraktim.
+
+### Aj.3 [M28] [05 Eyl 2026] [17:34 - DOC SENKRON R37]
+R37 (Apex output_offset 0.2->0.9, P65-Bulg2, kullanici onayi) dokuman senkronu: README.md:529 'oyuncu profili' tablosunda apex satiri 'output offset 0.2' -> '0.9' guncellendi. Kanit: R37 cli/main.cpp diff (dp.prof.accel_x/y.output_offset=0.9; scale 2.2, exp 0.8, cap [28,2.2] korunmus); senkron sonrasi repo geneli 'output offset 0.2' izi 0. CHANGELOG/AGENTS etkilenmedi (referans yok). tr/README derleme yok; kod degisikligi yok. AKIS: atama yok, kilit null.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P69 (YAYIN: GUI PRESET SECICI KOD)
+Aj 3, P69'u ustlen: P60-B tasarimini KOD'a dok. GUI Yeni Profil dialoguna preset acilir-kutusu ekle (gui/profile_mgr.inl on_new_profile): None(blank)/gaming/office/precision/disable/cs2/valorant/apex/fps; sectimde make_preset degerleriyle profil baslat. CLI'daki make_preset'i paylasilabilir helper (header/static) yap ya da degerleri GUI'ye tasi — TEK KAYNAK (CLI ile drif olmasin). tr.inl'e yeni dize ekle + tr_coverage PASS teyit. Build 0 uyari. Bu kullanici yayin oncesi istenir. Kanit + rapor. (Preset degerleri R37'deki guncel: apex output_offset 0.9.)
+
+### Aj.3 [M29] [05 Eyl 2026] [17:56 - P69 TAMAMLANDI: GUI PRESET SECICI KOD]
+P69 islendi, tum kapilar yesil:
+1. TEK KAYNAK: cli/main.cpp icindeki statik make_preset (138 satir) -> include/presets.hpp (namespace rawaccel, inline) tasindi; cli/main.cpp yerel tanimi silindi, #include "../include/presets.hpp" + kullanilmaya devam. PRESET_NAMES[8] + PRESET_COUNT onero de liste de burada (GUI + CLI ortak). CLI Davranis degismedi (create-preset kanitlari asagida).
+2. GUI: gui/profile_mgr.inl'de yeni show_new_profile_dialog - 'Yeni Profil' diyalogu: ad giris + preset acilir-kutusu (None (blank)/gaming/office/precision/disable/cs2/valorant/apex/fps). Secilen preset dolu ise dp = rawaccel::make_preset(preset, name); bos ise eski davranis (varsayilan dpi 800/pr 1000). Eski on_new_profile (show_input_dialog tek-giris) kaldirildi; on_new_profile artik yeni diyalogu acar.
+3. tr.inl: yeni anahtarlar {"Preset","On Ayar"}, {"None (blank)","Yok (bos)"}; tr_coverage **PASS**.
+4. Build **0 uyarı** (3 binary), run_tests **21627/21627**. Canli CLI teyidi (yeni header'dan): create-preset apex => show: mode=power, output_offset **0.9000** (R37 degeri tek-kaynaktan korundu), scale 2.2; cs2 => created OK.
+AGENTS.md dosya sorumluluk tablosuna include/presets.hpp eklendi. AKIS: P69 kanal emri, formal kayit yok; kilit null. GUI interaktif dogrulama headless ortamda yapilamadi; kod derlendi (ayni make_preset).
+
+### Aj.3 [M30] [05 Eyl 2026] [18:02 - GOREV TALEBi (Aj 1'e)]
+Aj 3 doc/UX/ceviri alaninda isteklidir; P69 tamam (M29). Onerdigim siradaki isler (oncelik sirayla):
+1. YAYIN NOTLARI TAMAMLAMA: CHANGELOG 'Player round' bolumune P69 GUI preset secici maddesini ekle (belge/UX senkronu; yayin notlari eksiksiz olsun).
+2. GUI PRESET E2E: headless VM'de acilamayan 'Yeni Profil' preset seciminin gercek-donanim/GUI on-izleme dogrulama plani (Aj 7 P39 donanim seansiyla digerine).
+3. PRESET ROUND-TRIP TESTI: tests/test_accel.cpp'e presets.hpp kaynakli preset-to-config round-trip + oracle grid'ine preset parametreleri (tek-kaynak sapma bekcisi).
+4. KILAVUZ SENKRONU: README ve docs/user_guide.md'nin GUI preset adimiyla uyum denetimi (R32 kilavuz + P69 GUI yolu).
+5. TR INCELESI: yeni GUI preset akisi icin tr.inl dil/uyum onerileri (tr_coverage PASS zaten).
+Atanirsa kilit disipliniyle uretkenirim. Kilit null, boştayim.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - EMIR P78 (BUG HUNT: GUI + UX)
+Aj 3, P78'i ustlen: GUI + UX DERIN INCELEME. P69 ile eklenen GUI preset secicisini ve tum GUI akisini denetle: (1) gui/*.inl + main.cpp'de bellek/refcount/GTK ABI tehlikesi, tr() dil gecis, widget raw-sensitivity, profil CRUD diyaloglari (bozulmus ad, duplicate, empty list); (2) tr_coverage PASS + tr.inl tutarli; (3) P69'un presets.hpp tek-kaynak tasariminin CLI ile drif yapmadigini dogrula (make_preset degerleri her iki tarafta birebir); (4) GUI baslatma/acilis/load-save hata yollari. Bulgu varsa mini-yama ONERISI. Kanit + rapor.
+
+### Aj.3 [M31] [05 Eyl 2026] [18:1x - P78 USTLENDIM: BUG HUNT GUI + UX]
+EMIR P78'i ustleniyorum (AJ1 aj3.log:124). Kapsam: (1) gui/*.inl+main.cpp bellek/refcount/GTK ABI, tr() dil gecis, widget raw-sensitivity, profil CRUD (bozuk ad/duplicate/empty list); (2) tr_coverage PASS + tr.inl tutarlilik; (3) presets.hpp tek-kaynak CLI drift kontrolu; (4) GUI baslatma/acilis/load-save hata yollari. Bulgu varsa mini-yama ONERISI. AKIS kilit Aj.3, durum devam.
+
+### Aj.3 [M32] [05 Eyl 2026] [18:20 - P78 TAMAMLANDI: BUG HUNT GUI + UX (mini-yama ONERILI/uygulandi)]
+P78 kapsaminda gui/*.inl + main.cpp tam tarandi. Kanit + sonuclar:
+[A] GTK ABI / bellek / refcount:
+ - P69 yeni-diyalogu (show_new_profile_dialog): ctx g_object_set_data_full + delete-notify; transient tr(); refcount ABI temiz. DUPLICATE/EMPTY-LIST/bozuk-ad korumalari: yeni/yeniden-adlandir duplicate kontrol, sil >=1 profil guard, bos-ad sessiz-iptal (eski ile ayni). CRIT BULGU YOK.
+ - BULGU-1 (LOW, LEAK) MINI-YAMA UYGULANDI: gui/profile_mgr.inl rebuild_profile_combo gtk_drop_down_set_model sonrasi g_object_unref(sl) YOKTU -> her profil yeniden-kurulusunda (yeni/cogalt/ad degistir/sil/kaydet/uygula/dil-gzis) 1 GtkStringList referansi kalici siziyordu. Dengeli ornek: tr.inl:403/467, devices.inl:174. Yama: 2 satir unref (rebuild_profile_combo + P69 diyalogu). build 0 uyari, 21627/21627, tr PASS (yama sonrasi).
+ - YAN NOTE-1 (INFO): build_ui profil/cihaz combo'larinin tekil-kurulum modeli de unref'siz (1 ref, alt-lifetime) - onemsiz, yama onerilmez.
+ - YAN NOTE-2 (LOW): daemon_comm.inl:280 battery atoi; daemon-kontrollu JSON, aralik guardi var; simetri icin strtol onerilir (degisiklik YAPILMADI).
+ - YAN NOTE-3 (LOW, pre-existing): pkexec_systemctl_async 3s waitpid WNOHANG; pkexec >3s surerse zombie kalabilir - yalniz sistemd-cihaz yolu.
+[B] tr(): yeni anahtarlar {Preset, None (blank)} sozlukte; tr_coverage PASS; dil-gzisinde profile_combo model yeniden kuruluyor (BULGU-1 fix'i bu yolu da kapatiyor). widget raw-sensitivity: 18 widget + gain_check ilave gri (power/noaccel), mode_uses ile tutarli.
+[C] presets.hpp TEK-KAYNAK DRIFT: YAPISAL - make_preset yalniz include/presets.hpp'de; CLI (cli/main.cpp:428) VE GUI (profile_mgr.inl:61) ayni fonksiyonu cagiriyor, CLI'da gomulu kopya KALMADI. ISLEVSEL - 8/8 preset CLI ile /tmp temp config'de create edildi; degerler presets.hpp ile birebir (apex power output_offset 0.9 scale 2.2; valorant natural offset 0.02; cs2 classic accel 0.004; fps classic 0.005 offset 0.01). DRIFT YOK (+ P73 M24 birebir kaniti).
+[D] baslatma/load-save: main try/catch -> default; SUDO_USER/gepwnam_r + fallback; save_config_now try/catch -> 'Save error', IPC->SIGHUP fallback, daemon-down vs reddedildi ayrimi; LUT tasma uyarisi; on_activate KDE auto-fix idempotent + dup device_id uyarisi. GUI interaktif acilis headless VM'de kosulamadi (derleme temiz).
+KAPILAR: build 0 uyari, run_tests 21627/21627, tr_coverage PASS. Yeni ozellik YOK (2 satir bellek yamasi). AKIS P78 -> tamam, kilit null. Onay bekliyor.
+
+### YONETICI [Aj 1] [05 Eyl 2026] - P78 KABUL + EMIR P84 (KOZMETIK + GUI DOKUMAN)
+Aj 3, P78 bulgularinin (P4 256-char gtk max length, geri kalan temiz) KABUL. P84'u ustlen:
+- profile_mgr.inl show_new_profile_dialog'a gtk_entry_set_max_length(entry,256) ekle (kozmetik UX)
+- tr PASS sonrasina dokunma, README kilavuzu P71 dokumanlariyla uyumlu birak
+- Aj 5'in 256-char isim siniri CLI tarafinda uygulaninca GUI uyumu tekrar dogrula (profil combo/rename).
+Kanit + rapor. Yeni ozellik: sadece kozmetik.
+
+### Aj.3 [M33] [05 Eyl 2026] [18:50 - P84 TAMAMLANDI: KOZMETIK + GUI/CLI 256-CHAR UYUMU]
+P84 ustlenildi ve tamamlandi. Kanit:
+[1] KOZMETIK YAMA (P78 onayi istenen): gui/profile_mgr.inl show_new_profile_dialog + shared show_input_dialog (rename & save-as) -> gtk_entry_set_max_length(entry, 256). Yeni tr() yok, README/P71 dokumanlara dokunulmadi.
+[2] GUI/CLI 256-uyumu (emir madde 3): yapisal teyit - GUI girdi kisitlari (256) CLI guard'lariyla (cli/main.cpp:357/409/453/942 create/create-preset/duplicate/rename) simetrik. Ayni diyalog su akislari: yeni profil, rename, save-as; profil combo ★ etiketi 256-char adla sorunsuz.
+[3] GATE durumu (KAPSAK): build 0 uyari, tr_coverage PASS. run_tests 21664/21664 vede P83 CLI kapisi (256-char create-preset) BABARSIZ cikti (exit 1) - bu Aj 4'un P83 alani (run_tests.sh "256-char create-preset accepted", cli/main.cpp ise >256'da reddediyor; ayrica run_tests.sh TMPN255 hic tanimlanmamis - 255 kapi yanlislikla bos adla geciyor). Aj 2 de ayni kapyi pre-existing not etti (aj2.log:414). P84 kapsamina girmez; cli/main.cpp'ye dokunmam.
+[4] GORZLEM (P83 icin): load tarafi config.cpp strncpy(p.name, MAX_NAME_LEN-1) -> 256-char ad kaydet-kaydet yeniden yuklenince son karakteri duser. P83 karari icin: red esigi 256 (>=) mi 256 ustu (>) mu net olmali; GUI yamasi 256 limite; CLI beklentisiyle uyum icin P83'te tek karar.
+KAPILAR (P84 kapsaminda): build 0 uyari, tr PASS, README degismedi. AKIS P84 kilit null, durum tamam. Ayrica P78 kabulu icin tesekkür.

@@ -584,6 +584,19 @@ void save_config(const app_config& cfg, const std::string& path) {
         ::close(fd);
     }
 
+    // P82-MED-2: rotate existing config to .bak before atomic overwrite.
+    // This preserves one generation of config history for recovery.
+    {
+        std::error_code ec_bak;
+        if (fs::exists(path, ec_bak) && !ec_bak) {
+            std::string bak_path = path + ".bak";
+            fs::rename(path, bak_path, ec_bak);
+            // Best-effort — if .bak rename fails (e.g. cross-device),
+            // proceed with the atomic overwrite anyway; the new config
+            // is still written correctly.
+        }
+    }
+
     std::error_code ec;
     fs::rename(tmp_path, path, ec);
     if (ec) {

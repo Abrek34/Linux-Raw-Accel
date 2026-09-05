@@ -321,6 +321,8 @@ static const char* tr(const char* key) {
             {"Reset",                      "Sıfırla"},
             {"New Profile",                "Yeni Profil"},
             {"Profile name (e.g. gaming)", "Profil adı (ör. oyun)"},
+            {"Preset",                     "Ön Ayar"},
+            {"None (blank)",               "Yok (boş)"},
             {"Rename Profile",             "Profili Yeniden Adlandır"},
             {"New name",                   "Yeni ad"},
             {"Delete Profile",             "Profili Sil"},

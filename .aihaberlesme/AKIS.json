@@ -1,613 +1,641 @@
 {
-  "format_version": 1,
-  "guncelleme": "2026-09-05 18:3x +03 (Aj6 M19: P72 tamam, kilit yok)",
-  "referans": "aihaberlesme.md — insan okumalı kanonik anlatım; AKIS.json makine-okunur durum deposudur.",
-  "kurallar": {
-    "protokol_md": "aihaberlesme.md",
-    "kilit": "Bir dosya üzerinde çalışmadan önce o gorevin 'kilit' alanina Aj.N yazilir; bitince kaldirilir. Serbest calisma alanlari ve yeni dosyalar kilit gerektirmez.",
-    "mesaj_format": "### Aj.N [MN] [gün ay yıl] [saat]",
-    "yeni_ozellik_yok": false
+ "format_version": 1,
+ "guncelleme": "2026-09-05 19:01 +03 (Aj0: P86 TAMAM kaydi - son acik fix kapandi)",
+ "referans": "aihaberlesme.md — insan okumalı kanonik anlatım; AKIS.json makine-okunur durum deposudur.",
+ "kurallar": {
+  "protokol_md": "aihaberlesme.md",
+  "kilit": "Bir dosya üzerinde çalışmadan önce o gorevin 'kilit' alanina Aj.N yazilir; bitince kaldirilir. Serbest calisma alanlari ve yeni dosyalar kilit gerektirmez.",
+  "mesaj_format": "### Aj.N [MN] [gün ay yıl] [saat]",
+  "yeni_ozellik_yok": false
+ },
+ "ajanlar": {
+  "1": {
+   "rol": "YONETICI - tek yonetici: emir verir, gorev dagitir, kabul kapisini acar/kapatir, son karari verir",
+   "durum": "aktif"
   },
-  "ajanlar": {
-    "1": {
-      "rol": "YONETICI - tek yonetici: emir verir, gorev dagitir, kabul kapisini acar/kapatir, son karari verir",
-      "durum": "aktif"
-    },
-    "2": {
-      "rol": "Kod inceleme / test / QA / guvenlik - Aj 1 emriyle calisir",
-      "durum": "P68 tamam (M29: config senkron + stale kilit fix); P77 atandi - BUG HUNT CORE ALGO (rapor bekleniyor)"
-    },
-    "3": {
-      "rol": "Ozellik / UX / dokumantasyon / ceviri - Aj 1 emriyle calisir",
-      "durum": "P78 tamam (M32: GUI+UX bug-hunt, BULGU-1 bellek yamasi unref x2, presets drift YOK)"
-    },
-    "4": {
-      "rol": "Referans oracle / paketleme (PKGBUILD) / raporlama - Aj 1 emriyle calisir",
-      "durum": "P70 tamam (M25: release paket 0.5.0-1); P79 TAMAM (M27, kilit dustu) - emir bekliyor"
-    },
-    "5": {
-      "rol": "Referans capraz-kontrol / bagimsiz dogrulama - Aj 1 emriyle calisir",
-      "durum": "P80 tamam (M21, kilit Aj.5 takdirde) - gorev bekliyor"
-    },
-    "6": {
-      "rol": "Sistem dayanikliligi / IPC & guvenlik denetimi - Aj 1 emriyle calisir",
-      "durum": "P72 tamam (M19: kurulum akisi + hata senaryolari + journald + oneriler; kabul kapisina hazir)"
-    },
-    "7": {
-      "rol": "Performans / mikro-optimizasyon / kurulum-akis dogrulamasi - Aj 1 emriyle calisir",
-      "durum": "bos - emir bekliyor (M24, P73 tamam)"
-    },
-    "0": {
-      "rol": "Haberlesme agi yoneticisi (kanal moderasyonu) - Aj 1 emriyle calisir",
-      "durum": "P67 tamam (M15); P75 kanal final icra edildi (M30)"
-    },
-    "8": {
-      "rol": "Emir uygulayici - Aj 1 yonetici emirlerini uygular, dogrular, raporlar",
-      "durum": "P65 tamam (M5/M6); P74 TAMAM (M7, BULGU-1 LOW onerisi ADMIN kararina bagli) - emir bekliyor"
-    }
+  "2": {
+   "rol": "Kod inceleme / test / QA / guvenlik - Aj 1 emriyle calisir",
+   "durum": "P68 tamam (M29); P77 KABUL + P81 tamam (M31/M32) - gorev bekliyor"
   },
-  "gorevler": [
-    {
-      "gorev": "T16",
-      "sahip": "1",
-      "durum": "tamam (P30 evrimlestirdi; kilit bosaltildi)",
-      "kilit": null,
-      "baslik": "Canlı uçtan uca yeniden doğrulama: virtmouse → ivmeli çıkış, set_config canlı davranış, kwinrc/kcminputrc Flat koruması"
-    },
-    {
-      "gorev": "T17",
-      "sahip": "2",
-      "durum": "tamam",
-      "kilit": null,
-      "baslik": "Bağımsız QA paneli + inceleme kararları (send() kısmi gönderim, refresh_language)"
-    },
-    {
-      "gorev": "T18",
-      "sahip": "3",
-      "durum": "tamam",
-      "kilit": null,
-      "baslik": "Belge/UX senkronu + çeviri denetimi + GUI dili canlı doğrulama"
-    },
-    {
-      "gorev": "T19",
-      "sahip": "4",
-      "durum": "tamam",
-      "kilit": null,
-      "baslik": "Oracle tekrar koşusu + PKGBUILD temiz paket doğrulaması"
-    },
-    {
-      "gorev": "T20",
-      "sahip": "5",
-      "durum": "tamam",
-      "kilit": null,
-      "baslik": "Yönetici kabul kapısı + gözetim + kalan kararların toplanması"
-    },
-    {
-      "gorev": "T21",
-      "sahip": "6",
-      "durum": "tamam",
-      "kilit": null,
-      "baslik": "Sistem dayanıklılığı: uzun-kosu, IPC güvenliği, journalctl analizi, hotplug yeniden doğrulama"
-    },
-    {
-      "gorev": "T22",
-      "sahip": "7",
-      "durum": "tamam",
-      "kilit": null,
-      "baslik": "Performans/mikro-denetim + setup.sh multi-distro dallarının statik doğrulaması + sıfırdan-makine senaryosu çıktısı"
-    },
-    {
-      "gorev": "T23",
-      "sahip": "2",
-      "durum": "tamam (M23: build.sh B1/B2 yamalari zaten uygulanmis, CMake hizali, portable build gecti)",
-      "kilit": null,
-      "baslik": "build.sh B1/B2 mini-yama: _FORTIFY_SOURCE kosullu tanim + fcf-protection x86 kosullu (CMake ile hizalama); komit oncesi varsa test bekci"
-    },
-    {
-      "gorev": "T24",
-      "sahip": "6",
-      "durum": "tamam (Aj7 M15: 8 senaryo, 21627/21627, build 0 uyari)",
-      "kilit": null,
-      "baslik": "Yagmur testi: SYN_DROPPED + soket timeout sentetik senaryolari (test_accel.cpp'ye yeni olay dizileri), daemon log politika (journald) denetimi"
-    },
-    {
-      "gorev": "T25",
-      "sahip": "4",
-      "durum": "tamam (Aj1 devraldi: ci.yml oracle adimi mevcut(50-53); paket 0.4.0 arsiv dogrulandi - ELF pie/stripped, makepkg 7.1.0, bin+servis+udev+polkit iceriyor)",
-      "kilit": null,
-      "baslik": "CI'ya oracle adimi eklenmesi (ci.yml) + paketleme hijyeni: packaging/tezgah testi ve rawaccel-linux-0.4.0 paketi dogrulamasi"
-    },
-    {
-      "gorev": "T26",
-      "sahip": "3",
-      "durum": "tamam (Aj3: AGENTS test sayilari + README, tr PASS, GUI dil teyidi)",
-      "kilit": null,
-      "baslik": "Dokumantasyon senkronu (README/AGENTS) + tr.inl/tr_coverage PASS teyidi + GUI canli dil gecis yeniden dogrulamasi"
-    },
-    {
-      "gorev": "T27",
-      "sahip": "5",
-      "durum": "kapatildi (ADMIN): T23-T26 + P35 sonuclari kabul, build/test/oracle/tr YESIL, 0.5.0 commit c22072b atildi; push OAuth workflow scope engeli nedeniyle kullanici onayina bagli",
-      "kilit": null,
-      "baslik": "Goruntu/yonetici kapisi: T23-T26 sonuclari kabul/kapati, paket CI yeşili, son hali GitHub main'de saglama"
-    },
-    {
-      "gorev": "T28",
-      "sahip": "7",
-      "durum": "tamam (M23: RAWACCEL_PORTABLE=1 build OK, uyari/error taramasi temiz disinda config.cpp:298 aj4 bolgesi)",
-      "kilit": null,
-      "baslik": "Canli performans profil: daemon hot-path (evdev->EMA->uinput) tekrar olcumu + portable build dogrulamasi (RAWACCEL_PORTABLE=1)"
-    },
-    {
-      "gorev": "T29",
-      "sahip": "1",
-      "durum": "tamam (M23: uninstall temiz, reinstall eksiksiz, IPC pong+status+3 cihaz canli; T16/T21 regresyon OK)",
-      "kilit": null,
-      "baslik": "Canli kurulum-akisi denetimi: setup.sh temiz/--uninstall/--reinstall silsile + T16/T21 regresyon hizli kontrolu (yeni ozellik YOK)"
-    },
-    {
-      "gorev": "P30",
-      "sahip": "1",
-      "durum": "tamam (telemetri IPC calisti, canli dogrulandi; P35 kabul kapisina devir)",
-      "kilit": null,
-      "baslik": "KUYRUK ANALIZI: p99/max (183/426us) kaynagini bul (uinput tampon dolulugu vs epoll/ikinci okuma vs scheduler) + telemetri IPC tasarimi"
-    },
-    {
-      "gorev": "P31",
-      "sahip": "7",
-      "durum": "tamam",
-      "kilit": null,
-      "baslik": "HOT-PATH BENCHMARK: evdev->EMA->uinput_write zamanini olay bazinda ayristiran mini arac; 100k olayli istatistik"
-    },
-    {
-      "gorev": "P32",
-      "sahip": "6",
-      "durum": "tamam (IPC hareket dongusunu kesmiyor; avg gap +1.1% gurultu)",
-      "kilit": null,
-      "baslik": "IPC GECIKME ETKISI: status/GUI sorgularinin hareket dongusunu (epoll timeout/forgiveness) kesip kesmedigini deneysel test"
-    },
-    {
-      "gorev": "P33",
-      "sahip": "2",
-      "durum": "tamam",
-      "kilit": null,
-      "baslik": "OYUNCU DOGRULUK: oracle'i oyun hiz araliginda (500-4000 ips) daraltilmis grid; kalan 27 sapmanin hissiyat denetimi + TOL raporu"
-    },
-    {
-      "gorev": "P34",
-      "sahip": "3",
-      "durum": "tamam",
-      "kilit": null,
-      "baslik": "UX/DOC: dusuk gecikme modu & guvenli varsayilanlar dokumantasyonu; README 'oyuncu profili' kesit duzenleme"
-    },
-    {
-      "gorev": "P35",
-      "sahip": "5",
-      "durum": "tamam (YONETICI-ADMIN: 21627/21627 + ASan+UBSan 21627/21627 + oracle OK 588/27 + tr PASS + build 0 uyari; Aj5 M15 yeniden bagimsiz panel KABUL; GitHub main senkron + gercek-fare dogrulamasi R24/P39 sonrasi)",
-      "kilit": null,
-      "baslik": "YONETICI KAPISI: P30-P34 sonuclari kabul, gercek-fare dogrulamasi (this makine), GitHub main senkron"
-    },
-    {
-      "gorev": "R24",
-      "sahip": "ADMIN",
-      "durum": "tamam (commit c22072b, push yapildi - push OAuth workflow scope duzeltildi 63032f6)",
-      "kilit": null,
-      "baslik": "YONETICI: P35 kabulu sonrasi tek commit (0.5.0 bump + bu gorev) + push origin/main; CHANGELOG (Aj3 devri); pkgver bump dogrulama (Aj4 devri); T27 kapanis"
-    },
-    {
-      "gorev": "R25",
-      "sahip": "ADMIN",
-      "durum": "tamam (commit c5fd8d3)",
-      "kilit": null,
-      "baslik": "YONETICI: T27 admin gate kapanisi + R24 durum dokumantasyonu"
-    },
-    {
-      "gorev": "R26",
-      "sahip": "ADMIN",
-      "durum": "tamam (commit c4179cf - tek yonetici Aj 1)",
-      "kilit": null,
-      "baslik": "YONETICI: kanal hiyerarsisi - tek yonetici Aj 1, diger ajanlar emir uygulayici"
-    },
-    {
-      "gorev": "R27",
-      "sahip": "ADMIN",
-      "durum": "tamam (commit c0f910d - kanal senkronu)",
-      "kilit": null,
-      "baslik": "Kanal senkronu: Aj5 P35 kabul raporu + fuzz corpus/binary refresh"
-    },
-    {
-      "gorev": "R28",
-      "sahip": "ADMIN",
-      "durum": "tamam (commit 63032f6 - push main GITHUB'DA, origin/main = HEAD)",
-      "kilit": null,
-      "baslik": "Push origin/main basarili (OAuth workflow scope duzeltildi)"
-    },
-    {
-      "gorev": "R29",
-      "sahip": "ADMIN",
-      "durum": "devam",
-      "kilit": "ADMIN",
-      "baslik": "OYUNCU TURU: kullanici onayi - sadece hareket/ivme DEGIL, mouse'a dair her sey. Yeni ozellik politikasi aktif (yeni_ozellik_yok=false). Oyun profilleri, mouse buton/DPI shift, dusuk gecikme modu, gercek-fare dogrulamasi hedeflenir."
-    },
-    {
-      "gorev": "P57",
-      "sahip": "7",
-      "durum": "tamam",
-      "kilit": null,
-      "baslik": "OYUNCU 1: Canli daemon performans inti + P39 donanim plani uygulanabirligi (VM siniri belirle, virtmouse ile oyun-hizi yuk senaryolari)"
-    },
-    {
-      "gorev": "P58",
-      "sahip": "2",
-      "durum": "tamam (M24: analiz tamam, 28 sapma tamami hissedilemez, esport grid boslugu P63'e devredildi)",
-      "kilit": null,
-      "baslik": "OYUNCU 2: Oyuncu-dogruluk grid'i daralt (500-4000 ips espor araligi), gecikme p99 kaynak analizi, mevcut 27 sapmanin hissiyat denetimi"
-    },
-    {
-      "gorev": "P59",
-      "sahip": "6",
-      "durum": "tamam (Aj6)",
-      "kilit": null,
-      "baslik": "OYUNCU 3: Uzun oyun-oturumu kararliligi (daemon RSS/CPU/thread 2+ saat), IPC & guvenlik derin denetimi, hotplug stresi"
-    },
-    {
-      "gorev": "P60",
-      "sahip": "3",
-      "durum": "tamam (P60-A M26: 8 preset + README oyuncu kilavuzu; P60-B M27: GUI UX tasarim + README uyum + tr denetim; kodlu preset secici P69'da islendi)",
-      "kilit": null,
-      "baslik": "OYUNCU 4: Hazir oyun profili setleri (CS2/Valorant/Apex/FPS genel) + README 'oyuncu kılavuzu' + GUI UX iyilestirmeleri"
-    },
-    {
-      "gorev": "P61",
-      "sahip": "4",
-      "durum": "tamam (M21+M22: oracle P60 presetleriyle birebir 672 satir/28 sapma OK; makepkg 0.5.0 paketi create-preset+validate PASS; round-trip kalici; daemon parse OK; CI oracle adimi yerinde)",
-      "kilit": null,
-      "baslik": "OYUNCU 5: Oracle/paket genisleme: yeni oyuncu ozellikleri icin oracle kapsami + 0.5.0 paketinin oyun profilleriyle uyum teyidi"
-    },
-    {
-      "gorev": "P62",
-      "sahip": "5",
-      "durum": "tamam (M19: bagimsiz kabul paneli R37 yesil + CLI preset round-trip + gercek-fare hissiyati sean plani; KABUL onerisi ADMIN onayina bagli)",
-      "kilit": null,
-      "baslik": "OYUNCU 6: Bagimsiz oyuncu kabul paneli (P57-P61 sonuclari) + gercek-fare hissiyati oturumu (kullanici fare ile)"
-    },
-    {
-      "gorev": "P63",
-      "sahip": "4",
-      "durum": "tamam (M23: default_speeds 2000/3000/4000 eklendi; oracle 768 satir/31 sapma RESULT OK; esport bandi 96 satir, 93 birebir, 3 belgeli)",
-      "kilit": null,
-      "baslik": "OYUNCU 7: Esport grid genisletme - oracle default_speeds'e 2000/3000/4000 (+known_deviations) + yeniden kos OK (P58 boslugu)"
-    },
-    {
-      "gorev": "P64",
-      "sahip": "7",
-      "durum": "tamam (M20: harness scripts/virtmouse-game.c repo'da, quick-run notu + README satiri, tekrar kosusu pan p50 1.75us P57 ile uyum, kod degisikligi YOK)",
-      "kilit": null,
-      "baslik": "OYUNCU 8: P57 virtmouse oyun-hizi harness'ini repo'ya tasi (scripts/virtmouse-game.c) + dokumante et"
-    },
-    {
-      "gorev": "P36",
-      "is": "Satur-satir kod inceleme (P30 telemetri + P31 arac)",
-      "durum": "tamam (inceleme raporu M18: 1 gercek acik + P31 onay)",
-      "kilit": null
-    },
-    {
-      "gorev": "P37",
-      "is": "Telemetri IPC + P31 dokumantasyonu (AGENTS/README)",
-      "durum": "tamam",
-      "kilit": null
-    },
-    {
-      "gorev": "P38",
-      "is": "Yeni daemon ile hotplug 4/4 + burst gurultu olcumu",
-      "durum": "tamam (hotplug 4/4 journal kanitli; IPC burst avg %-1.6 gurultu; RSS 6384kB stabil)",
-      "kilit": null
-    },
-    {
-      "gorev": "P39",
-      "is": "Gercek-donanim test plani (uinput WRITE A/B)",
-      "durum": "tamam (test plani dokumani kanala verildi; gercek kosum donanim erisimine bagli)",
-      "kilit": null
-    },
-    {
-      "gorev": "P40",
-      "is": "Taslak ilerleme raporu (P30-P36)",
-      "durum": "tamam",
-      "kilit": null
-    },
-    {
-      "gorev": "P41",
-      "is": "Bug Hunt: daemon run_loop/process_device/hotplug (race/FD/SYN_DROPPED)",
-      "durum": "devredildi (Aj2 rapor vermedi; bolge P47+P48.4 kapsaminda)",
-      "kilit": null
-    },
-    {
-      "gorev": "P42",
-      "is": "Bug Hunt: cli/main.cpp tamasi (arg/push/cikti/exit)",
-      "durum": "tamam",
-      "kilit": null
-    },
-    {
-      "gorev": "P43",
-      "is": "Bug Hunt: config.cpp+config.hpp round-trip/sanitize/dosya-guvenligi",
-      "durum": "tamam (5 bulgu; Bulgu-1 fix P49/M21 ile kapandi: version okuma + regression)",
-      "kilit": null
-    },
-    {
-      "gorev": "P44",
-      "is": "Bug Hunt: gui/.inl+main (GTK ABI/refcount/tr senkr)",
-      "durum": "tamam (M9: G1 CRIT- pkexec_systemctl_async hep false -> cift-baslatma; GTK ABI/refcount/tr temiz)",
-      "kilit": null
-    },
-    {
-      "gorev": "P45",
-      "is": "Bug Hunt: include/accel-*+motion_math+lat_stats (accuracy/OVF/LUT)",
-      "durum": "tamam (oracle PASS; temiz; 2 dusuk oneri + P43-BF1 CI kriki M10)",
-      "kilit": null
-    },
-    {
-      "gorev": "P46",
-      "is": "Bug Hunt: daemon main/daemon.hpp/IPC socket+zaten yazilan telemetri seqlock",
-      "durum": "tamam (M15: 2 dusuk-risk bulgu, seqlock teyidi)",
-      "kilit": null
-    },
-    {
-      "gorev": "P47",
-      "is": "Ikinci-göz: Aj1 run_loop/hotplug/start lifecycle capraz denetim",
-      "durum": "tamam (M16)",
-      "kilit": null
-    },
-    {
-      "gorev": "P48",
-      "is": "Aj6 YEDEK talep: P44 G1 fix testi + 30dk uzun-kosu + journald policy",
-      "durum": "devredildi Aj1 -> tamam (M24: G1 kod dogru fix gerekmez, uzun-kosu RSS 6300kB sabit/cpu 0.5/journald 0 hata, P41 kanti P47)",
-      "kilit": null
-    },
-    {
-      "gorev": "P49",
-      "is": "Aj4 talebi #2/#4: oracle+tr son teyit (kabul kapsam) + P43-BF1 test senkronu (test_accel LUT sort)",
-      "durum": "tamam | tr_coverage PASS eklendi; tum teyit yesil",
-      "kilit": null
-    },
-    {
-      "gorev": "P50",
-      "is": "Aj7: O1 lat_stats guard / O2 LUT dx>0 / O3 guard final kari + P39 plan teyit",
-      "durum": "tamam (M: O1/O2/O3 KABUL, P39 teyit)",
-      "kilit": null
-    },
-    {
-      "gorev": "P51",
-      "is": "Aj1: sprint bulgu fix'leri cakisma/entegrasyon envanteri + tek-commit paket onerisi",
-      "durum": "tamam (M24: envanter + cakisma analizi; 8-dosya tek commit paketi onerisi)",
-      "kilit": null
-    },
-    {
-      "gorev": "P52",
-      "is": "Aj3 P42 3-fix entegrasyon: cli diff envanteri + P35 tek-commit paketine hazirlik",
-      "durum": "tamam (M17: cli +80/-21, build 0 uyari, 21591/21591, oracle OK, tr PASS)",
-      "kilit": null
-    },
-    {
-      "gorev": "P53",
-      "is": "BF fix: daemon/main.cpp M15 - f json log JSON-escape + --flag=value arg parse",
-      "durum": "tamam",
-      "kilit": null
-    },
-    {
-      "gorev": "P54",
-      "is": "BF fix: config.cpp B2 OVF clamp + B3 SEC tmp + B4 tip guard + B5 size_t",
-      "durum": "tamam (M16: B2/B3/B4/B5 yama; build 0 uyari, 21604/21604, oracle OK, tr PASS, ASan+UBSan yesil)",
-      "kilit": null
-    },
-    {
-      "gorev": "P55",
-      "is": "BF fix: lat_stats.hpp O1 guard + accel-lookup.hpp O2 dx>0 + O3 kozmetik",
-      "durum": "tamam (M13: kod+kanit+oracle/tr PASS; kapinin onkochu Aj4 P54 test derlemasi)",
-      "kilit": null
-    },
-    {
-      "gorev": "P56",
-      "is": "BF: Aj1 P51 paket kapanisi + daemon telemetri/run_loop teyit",
-      "durum": "tamam (M24: telemetri/run_loop teyidi + P48 devri)",
-      "kilit": null
-    },
-    {
-      "gorev": "P64",
-      "sahip": "7",
-      "durum": "tamam (M20: harness scripts/virtmouse-game.c repo'da, quick-run notu + README satiri, tekrar kosusu pan p50 1.75us P57 ile uyum, kod degisikligi YOK)",
-      "kilit": null,
-      "baslik": "HARNESS YAYGINLASI: P57 virtmouse oyun-hizi harness'ini repo'ya tasi (scripts/virtmouse-game.c + quick-run notu + README test satiri) + tek gun-hizi orneklemesi tekrar kossun (calisan kod degisikligi YOK)"
-    },
-    {
-      "gorev": "P66",
-      "sahip": "2",
-      "kilit": null,
-      "durum": "tamam (M26: build 0 uyari, 21627/21627, ASan 21627/21627, oracle 768/31 OK, tr PASS, 4 preset oracle ile birebir)",
-      "baslik": "Oyuncu turu bagimsiz QA kesisimi: build/run_tests/ASan/oracle/tr reposu R33-R35"
-    },
-    {
-      "gorev": "P70",
-      "sahip": "4",
-      "durum": "tamam (M25: makepkg 0.5.0-1 403717B, 3xPIE+RELRO+BIND_NOW, preset apex 0.9 dogru, CHANGELOG R30-R37 senkron, 21627/21627, oracle 768/31 OK, tr PASS)",
-      "kilit": null,
-      "baslik": "YAYIN: release paket hazirligi - PKGBUILD/.SRCINFO 0.5.0 dogrulama + makepkg temiz paket + icerik + CI uyumu + CHANGELOG R30-R37 senkron"
-    },
-    {
-      "gorev": "P65",
-      "sahip": "8",
-      "kilit": null,
-      "durum": "tamam (M5/M6: bagimsiz hata avi R30-R35; Bulgu-1 import arity fix R36, Bulgu-2 apex output_offset 0.9 R37, Bulgu-3/4 LEAVE; R37 sonrasi tam teyit yesil)",
-      "baslik": "OYUNCU TURU BAGIMSIZ HATA AVI: preset parametre mantigi + create-preset/show/export round-trip + oracle grid + arac/kod uyari ve bellek taramasi"
-    },
-    {
-      "gorev": "P67",
-      "sahip": "0",
-      "kilit": null,
-      "durum": "tamam (M15: /etc vs ~/.config kapsam denetimi - o an icerik esit, yalniz version 0.4.0/0.5.0 farki; P59 stale kilit tespiti; tek-yazar disiplini onerisi yoneticiye raporlandi)",
-      "baslik": "KANAL SENKRON + AYRISMA KONTROLU: iki config karsilastirma + log/AKIS senkron + tek-yazar onerisi (salt okunur)"
-    },
-    {
-      "gorev": "P68",
-      "sahip": "2",
-      "kilit": null,
-      "durum": "tamam (M29: /etc 0.5.0'a tasindi + SIGHUP reload + diff/md5 esit + P59 stale kilit temizlendi; UYARI: sonrasi /etc harici yaziciyla 0.4.0/3-profil'e geri dondu - P75 config ayrisim raporunda belgelendi)",
-      "baslik": "YAYIN TEMIZLIGI: config senkron + stale kilit fix (daemon /etc'yi 0.5.0'a tasi, reload, iki config esitlenssin)"
-    },
-    {
-      "gorev": "P69",
-      "sahip": "3",
-      "kilit": null,
-      "durum": "tamam (M29: make_preset -> include/presets.hpp tek-kaynak, GUI 'Yeni Profil' preset acilir-kutusu, tr.inl yeni anahtar, build 0 uyari, run_tests 21627/21627, CLI create-preset teyidi; GUI interaktif dogrulama headless icinde kosulamadi)",
-      "baslik": "YAYIN: GUI PRESET SECICI KOD (P60-B tasarimin koda dokumu + CLI/GUI tek kaynak + tr PASS)"
-    },
-    {
-      "gorev": "P71",
-      "sahip": "5",
-      "kilit": null,
-      "durum": "tamam (M20: docs/real_hardware_test.md A/B kiti + user_guide.md; degerler presets.hpp ve latency README ile birebir teyit, yayina hazir)",
-      "baslik": "YAYIN: GERCEK-FARE OTURUM KITI + KULLANICI REHBERI (default 1:1 dogrula -> preset 5-10dk -> latency p95 -> his sonuc)"
-    },
-    {
-      "gorev": "P72",
-      "sahip": "6",
-      "kilit": null,
-      "durum": "tamam (Aj6 M19: setup.sh eksiksiz, B1 eski ~/.local/bin 0.3.0 golgelemesi ONEMLI, B2-B4 iyilestirme onerileri)",
-      "baslik": "YAYIN: FIRST-RUN + KULLANICI SIKAYETI ONLEME (setup.sh temiz akis, /dev/input erisim, daemon kapali CLI, tekrar-baslatma)"
-    },
-    {
-      "gorev": "P73",
-      "sahip": "7",
-      "kilit": null,
-      "durum": "tamam (M24: GUI+CLI cagrilabilir, 4 oyun preset round-trip R30/R37 ile birebir, pan p50 2.25 / flick p50 3.75 P57 uyumlu, temizlendi aktif=default)",
-      "baslik": "YAYIN: GUI + CLI + CURVE CANLI DOGRULAMA (create-preset -> set -> status -> export, lat pan/flick, aktif=default(1:1) birak)"
-    },
-    {
-      "gorev": "P74",
-      "sahip": "8",
-      "kilit": null,
-      "durum": "tamam (M7: fuzz 90s+ 7.9M run cov 359/371 crash yok; CLI arity/boundary temiz; BULGU-1 LOW: >256-char ad sessiz truncate + yaniltici create anonsu, mini-yama onerisi ADMIN kararina bagli)",
-      "baslik": "YAYIN: FUZZ + HATA AVI KAPANISI (run_fuzz + hedefli boundary taramasi + mini-yama onerisi)"
-    },
-    {
-      "gorev": "P75",
-      "sahip": "0",
-      "kilit": null,
-      "durum": "tamam (M30: kanal final - AKIS gorevleri ajN.log'lar ile esitlendi, P60/P62 stale kilit dustu, P65-P69 kayitlari eklendi, P71-P74 atandi/rapor yok; config ayrisimi VETO edildi: /etc 0.4.0/3-profil vs ~/.config 0.5.0/13-profil; tek-kanon onerisi yoneticiye aj0.log'da)",
-      "baslik": "YAYIN ONCESI KANAL FINAL (P75): AKIS esitleme + config yetki karari onerisi + aj0.log raporu"
-    },
-    {
-      "gorev": "P77",
-      "sahip": "2",
-      "kilit": null,
-      "durum": "atandi (emir aj2.log'da, RAPOR YOK; derin algo bug-hunt: accel-*.hpp/motion_math/lat_stats NaN-Inf-sinir-LUT-EMA + oracle-bagimsiz mini C++ tarama)",
-      "baslik": "BUG HUNT: CORE ALGO - uc fazlari sınır kontrolu, sinir degerler, LUT lookup, EMA smoother; bulgu varsa mini-yama ONERISI (kod/yonetici)"
-    },
-    {
-      "gorev": "P78",
-      "sahip": "3",
-      "kilit": null,
-      "durum": "tamam (M32: BUG HUNT GUI+UX - BULGU-1 LOW bellek fix unref, CRIT yok, tr PASS, presets drift YOK, 21627/21627)",
-      "baslik": "BUG HUNT: GUI + UX - P69 preset secici ve tum GUI akisi denetimi; bulgu varsa mini-yama ONERISI"
-    },
-    {
-      "gorev": "P79",
-      "sahip": "4",
-      "kilit": null,
-      "durum": "tamam (M27: TOL 1e-9..1e-12 OK gizli drift yok; 8 preset round-trip birebir NaN/Inf 0; 0.4.0->0.5.0 aciliyor version damgali; paket==build-manual davranis ayni; 21627/21627 tr PASS)",
-      "baslik": "ORACLE + ROUND-TRIP DERIN KOSU - TOL duyarliligi, round-trip surprizleri, config schema ayrisima, paket ikilileri"
-    },
-    {
-      "gorev": "P80",
-      "sahip": "5",
-      "kilit": "Aj.5",
-      "durum": "tamam (M21: CLI+IPC+filesystem bug-hunt; kurulu 0.3.0/0.4.0 vs agac 0.5.0 sürüm drifti B1 YUKSEK; güvenlik testleri gecti; panel yesil)",
-      "baslik": "BUG HUNT: CLI + IPC + FILESYSTEM - komut yollari, IPC guvenligi, config/dosya sistemi; severity + mini-yama ONERISI"
+  "3": {
+   "rol": "Ozellik / UX / dokumantasyon / ceviri - Aj 1 emriyle calisir",
+   "durum": "P84 tamam (M33: kozmetik max_length 256 yamasi, tr PASS, build 0 uyari) - gorev bekliyor"
+  },
+  "4": {
+   "rol": "Referans oracle / paketleme (PKGBUILD) / raporlama - Aj 1 emriyle calisir",
+   "durum": "P70 tamam (M25); P79 TAMAM (M27); P83 TAMAM (M28) - emir bekliyor"
+  },
+  "5": {
+   "rol": "Referans capraz-kontrol / bagimsiz dogrulama - Aj 1 emriyle calisir",
+   "durum": "P82 tamam (M22, kilit null) - gorev bekliyor"
+  },
+  "6": {
+   "rol": "Sistem dayanikliligi / IPC & guvenlik denetimi - Aj 1 emriyle calisir",
+   "durum": "P86 TAMAM (M22: UB fix, 21669/21669, kilit dustu) - bos, emir bekliyor"
+  },
+  "7": {
+   "rol": "Performans / mikro-optimizasyon / kurulum-akis dogrulamasi - Aj 1 emriyle calisir",
+   "durum": "bos - emir bekliyor (M24, P73 tamam)"
+  },
+  "0": {
+   "rol": "Haberlesme agi yoneticisi (kanal moderasyonu) - Aj 1 emriyle calisir",
+   "durum": "P67 tamam (M15); P75 tamam (M30); P87 kanal final senkron icra edildi"
+  },
+  "8": {
+   "rol": "Emir uygulayici - Aj 1 yonetici emirlerini uygular, dogrular, raporlar",
+   "durum": "P74 TAMAM (M10 final + 2 yeni MED bulgu ADMIN kararinda); bos - emir bekliyor"
+  }
+ },
+ "gorevler": [
+  {
+   "gorev": "T16",
+   "sahip": "1",
+   "durum": "tamam (P30 evrimlestirdi; kilit bosaltildi)",
+   "kilit": null,
+   "baslik": "Canlı uçtan uca yeniden doğrulama: virtmouse → ivmeli çıkış, set_config canlı davranış, kwinrc/kcminputrc Flat koruması"
+  },
+  {
+   "gorev": "T17",
+   "sahip": "2",
+   "durum": "tamam",
+   "kilit": null,
+   "baslik": "Bağımsız QA paneli + inceleme kararları (send() kısmi gönderim, refresh_language)"
+  },
+  {
+   "gorev": "T18",
+   "sahip": "3",
+   "durum": "tamam",
+   "kilit": null,
+   "baslik": "Belge/UX senkronu + çeviri denetimi + GUI dili canlı doğrulama"
+  },
+  {
+   "gorev": "T19",
+   "sahip": "4",
+   "durum": "tamam",
+   "kilit": null,
+   "baslik": "Oracle tekrar koşusu + PKGBUILD temiz paket doğrulaması"
+  },
+  {
+   "gorev": "T20",
+   "sahip": "5",
+   "durum": "tamam",
+   "kilit": null,
+   "baslik": "Yönetici kabul kapısı + gözetim + kalan kararların toplanması"
+  },
+  {
+   "gorev": "T21",
+   "sahip": "6",
+   "durum": "tamam",
+   "kilit": null,
+   "baslik": "Sistem dayanıklılığı: uzun-kosu, IPC güvenliği, journalctl analizi, hotplug yeniden doğrulama"
+  },
+  {
+   "gorev": "T22",
+   "sahip": "7",
+   "durum": "tamam",
+   "kilit": null,
+   "baslik": "Performans/mikro-denetim + setup.sh multi-distro dallarının statik doğrulaması + sıfırdan-makine senaryosu çıktısı"
+  },
+  {
+   "gorev": "T23",
+   "sahip": "2",
+   "durum": "tamam (M23: build.sh B1/B2 yamalari zaten uygulanmis, CMake hizali, portable build gecti)",
+   "kilit": null,
+   "baslik": "build.sh B1/B2 mini-yama: _FORTIFY_SOURCE kosullu tanim + fcf-protection x86 kosullu (CMake ile hizalama); komit oncesi varsa test bekci"
+  },
+  {
+   "gorev": "T24",
+   "sahip": "6",
+   "durum": "tamam (Aj7 M15: 8 senaryo, 21627/21627, build 0 uyari)",
+   "kilit": null,
+   "baslik": "Yagmur testi: SYN_DROPPED + soket timeout sentetik senaryolari (test_accel.cpp'ye yeni olay dizileri), daemon log politika (journald) denetimi"
+  },
+  {
+   "gorev": "T25",
+   "sahip": "4",
+   "durum": "tamam (Aj1 devraldi: ci.yml oracle adimi mevcut(50-53); paket 0.4.0 arsiv dogrulandi - ELF pie/stripped, makepkg 7.1.0, bin+servis+udev+polkit iceriyor)",
+   "kilit": null,
+   "baslik": "CI'ya oracle adimi eklenmesi (ci.yml) + paketleme hijyeni: packaging/tezgah testi ve rawaccel-linux-0.4.0 paketi dogrulamasi"
+  },
+  {
+   "gorev": "T26",
+   "sahip": "3",
+   "durum": "tamam (Aj3: AGENTS test sayilari + README, tr PASS, GUI dil teyidi)",
+   "kilit": null,
+   "baslik": "Dokumantasyon senkronu (README/AGENTS) + tr.inl/tr_coverage PASS teyidi + GUI canli dil gecis yeniden dogrulamasi"
+  },
+  {
+   "gorev": "T27",
+   "sahip": "5",
+   "durum": "kapatildi (ADMIN): T23-T26 + P35 sonuclari kabul, build/test/oracle/tr YESIL, 0.5.0 commit c22072b atildi; push OAuth workflow scope engeli nedeniyle kullanici onayina bagli",
+   "kilit": null,
+   "baslik": "Goruntu/yonetici kapisi: T23-T26 sonuclari kabul/kapati, paket CI yeşili, son hali GitHub main'de saglama"
+  },
+  {
+   "gorev": "T28",
+   "sahip": "7",
+   "durum": "tamam (M23: RAWACCEL_PORTABLE=1 build OK, uyari/error taramasi temiz disinda config.cpp:298 aj4 bolgesi)",
+   "kilit": null,
+   "baslik": "Canli performans profil: daemon hot-path (evdev->EMA->uinput) tekrar olcumu + portable build dogrulamasi (RAWACCEL_PORTABLE=1)"
+  },
+  {
+   "gorev": "T29",
+   "sahip": "1",
+   "durum": "tamam (M23: uninstall temiz, reinstall eksiksiz, IPC pong+status+3 cihaz canli; T16/T21 regresyon OK)",
+   "kilit": null,
+   "baslik": "Canli kurulum-akisi denetimi: setup.sh temiz/--uninstall/--reinstall silsile + T16/T21 regresyon hizli kontrolu (yeni ozellik YOK)"
+  },
+  {
+   "gorev": "P30",
+   "sahip": "1",
+   "durum": "tamam (telemetri IPC calisti, canli dogrulandi; P35 kabul kapisina devir)",
+   "kilit": null,
+   "baslik": "KUYRUK ANALIZI: p99/max (183/426us) kaynagini bul (uinput tampon dolulugu vs epoll/ikinci okuma vs scheduler) + telemetri IPC tasarimi"
+  },
+  {
+   "gorev": "P31",
+   "sahip": "7",
+   "durum": "tamam",
+   "kilit": null,
+   "baslik": "HOT-PATH BENCHMARK: evdev->EMA->uinput_write zamanini olay bazinda ayristiran mini arac; 100k olayli istatistik"
+  },
+  {
+   "gorev": "P32",
+   "sahip": "6",
+   "durum": "tamam (IPC hareket dongusunu kesmiyor; avg gap +1.1% gurultu)",
+   "kilit": null,
+   "baslik": "IPC GECIKME ETKISI: status/GUI sorgularinin hareket dongusunu (epoll timeout/forgiveness) kesip kesmedigini deneysel test"
+  },
+  {
+   "gorev": "P33",
+   "sahip": "2",
+   "durum": "tamam",
+   "kilit": null,
+   "baslik": "OYUNCU DOGRULUK: oracle'i oyun hiz araliginda (500-4000 ips) daraltilmis grid; kalan 27 sapmanin hissiyat denetimi + TOL raporu"
+  },
+  {
+   "gorev": "P34",
+   "sahip": "3",
+   "durum": "tamam",
+   "kilit": null,
+   "baslik": "UX/DOC: dusuk gecikme modu & guvenli varsayilanlar dokumantasyonu; README 'oyuncu profili' kesit duzenleme"
+  },
+  {
+   "gorev": "P35",
+   "sahip": "5",
+   "durum": "tamam (YONETICI-ADMIN: 21627/21627 + ASan+UBSan 21627/21627 + oracle OK 588/27 + tr PASS + build 0 uyari; Aj5 M15 yeniden bagimsiz panel KABUL; GitHub main senkron + gercek-fare dogrulamasi R24/P39 sonrasi)",
+   "kilit": null,
+   "baslik": "YONETICI KAPISI: P30-P34 sonuclari kabul, gercek-fare dogrulamasi (this makine), GitHub main senkron"
+  },
+  {
+   "gorev": "R24",
+   "sahip": "ADMIN",
+   "durum": "tamam (commit c22072b, push yapildi - push OAuth workflow scope duzeltildi 63032f6)",
+   "kilit": null,
+   "baslik": "YONETICI: P35 kabulu sonrasi tek commit (0.5.0 bump + bu gorev) + push origin/main; CHANGELOG (Aj3 devri); pkgver bump dogrulama (Aj4 devri); T27 kapanis"
+  },
+  {
+   "gorev": "R25",
+   "sahip": "ADMIN",
+   "durum": "tamam (commit c5fd8d3)",
+   "kilit": null,
+   "baslik": "YONETICI: T27 admin gate kapanisi + R24 durum dokumantasyonu"
+  },
+  {
+   "gorev": "R26",
+   "sahip": "ADMIN",
+   "durum": "tamam (commit c4179cf - tek yonetici Aj 1)",
+   "kilit": null,
+   "baslik": "YONETICI: kanal hiyerarsisi - tek yonetici Aj 1, diger ajanlar emir uygulayici"
+  },
+  {
+   "gorev": "R27",
+   "sahip": "ADMIN",
+   "durum": "tamam (commit c0f910d - kanal senkronu)",
+   "kilit": null,
+   "baslik": "Kanal senkronu: Aj5 P35 kabul raporu + fuzz corpus/binary refresh"
+  },
+  {
+   "gorev": "R28",
+   "sahip": "ADMIN",
+   "durum": "tamam (commit 63032f6 - push main GITHUB'DA, origin/main = HEAD)",
+   "kilit": null,
+   "baslik": "Push origin/main basarili (OAuth workflow scope duzeltildi)"
+  },
+  {
+   "gorev": "R29",
+   "sahip": "ADMIN",
+   "durum": "devam",
+   "kilit": "ADMIN",
+   "baslik": "OYUNCU TURU: kullanici onayi - sadece hareket/ivme DEGIL, mouse'a dair her sey. Yeni ozellik politikasi aktif (yeni_ozellik_yok=false). Oyun profilleri, mouse buton/DPI shift, dusuk gecikme modu, gercek-fare dogrulamasi hedeflenir."
+  },
+  {
+   "gorev": "P57",
+   "sahip": "7",
+   "durum": "tamam",
+   "kilit": null,
+   "baslik": "OYUNCU 1: Canli daemon performans inti + P39 donanim plani uygulanabirligi (VM siniri belirle, virtmouse ile oyun-hizi yuk senaryolari)"
+  },
+  {
+   "gorev": "P58",
+   "sahip": "2",
+   "durum": "tamam (M24: analiz tamam, 28 sapma tamami hissedilemez, esport grid boslugu P63'e devredildi)",
+   "kilit": null,
+   "baslik": "OYUNCU 2: Oyuncu-dogruluk grid'i daralt (500-4000 ips espor araligi), gecikme p99 kaynak analizi, mevcut 27 sapmanin hissiyat denetimi"
+  },
+  {
+   "gorev": "P59",
+   "sahip": "6",
+   "durum": "tamam (Aj6)",
+   "kilit": null,
+   "baslik": "OYUNCU 3: Uzun oyun-oturumu kararliligi (daemon RSS/CPU/thread 2+ saat), IPC & guvenlik derin denetimi, hotplug stresi"
+  },
+  {
+   "gorev": "P60",
+   "sahip": "3",
+   "durum": "tamam (P60-A M26: 8 preset + README oyuncu kilavuzu; P60-B M27: GUI UX tasarim + README uyum + tr denetim; kodlu preset secici P69'da islendi)",
+   "kilit": null,
+   "baslik": "OYUNCU 4: Hazir oyun profili setleri (CS2/Valorant/Apex/FPS genel) + README 'oyuncu kılavuzu' + GUI UX iyilestirmeleri"
+  },
+  {
+   "gorev": "P61",
+   "sahip": "4",
+   "durum": "tamam (M21+M22: oracle P60 presetleriyle birebir 672 satir/28 sapma OK; makepkg 0.5.0 paketi create-preset+validate PASS; round-trip kalici; daemon parse OK; CI oracle adimi yerinde)",
+   "kilit": null,
+   "baslik": "OYUNCU 5: Oracle/paket genisleme: yeni oyuncu ozellikleri icin oracle kapsami + 0.5.0 paketinin oyun profilleriyle uyum teyidi"
+  },
+  {
+   "gorev": "P62",
+   "sahip": "5",
+   "durum": "tamam (M19: bagimsiz kabul paneli R37 yesil + CLI preset round-trip + gercek-fare hissiyati sean plani; KABUL onerisi ADMIN onayina bagli)",
+   "kilit": null,
+   "baslik": "OYUNCU 6: Bagimsiz oyuncu kabul paneli (P57-P61 sonuclari) + gercek-fare hissiyati oturumu (kullanici fare ile)"
+  },
+  {
+   "gorev": "P63",
+   "sahip": "4",
+   "durum": "tamam (M23: default_speeds 2000/3000/4000 eklendi; oracle 768 satir/31 sapma RESULT OK; esport bandi 96 satir, 93 birebir, 3 belgeli)",
+   "kilit": null,
+   "baslik": "OYUNCU 7: Esport grid genisletme - oracle default_speeds'e 2000/3000/4000 (+known_deviations) + yeniden kos OK (P58 boslugu)"
+  },
+  {
+   "gorev": "P64",
+   "sahip": "7",
+   "durum": "tamam (M20: harness scripts/virtmouse-game.c repo'da, quick-run notu + README satiri, tekrar kosusu pan p50 1.75us P57 ile uyum, kod degisikligi YOK)",
+   "kilit": null,
+   "baslik": "OYUNCU 8: P57 virtmouse oyun-hizi harness'ini repo'ya tasi (scripts/virtmouse-game.c) + dokumante et"
+  },
+  {
+   "gorev": "P36",
+   "is": "Satur-satir kod inceleme (P30 telemetri + P31 arac)",
+   "durum": "tamam (inceleme raporu M18: 1 gercek acik + P31 onay)",
+   "kilit": null
+  },
+  {
+   "gorev": "P37",
+   "is": "Telemetri IPC + P31 dokumantasyonu (AGENTS/README)",
+   "durum": "tamam",
+   "kilit": null
+  },
+  {
+   "gorev": "P38",
+   "is": "Yeni daemon ile hotplug 4/4 + burst gurultu olcumu",
+   "durum": "tamam (hotplug 4/4 journal kanitli; IPC burst avg %-1.6 gurultu; RSS 6384kB stabil)",
+   "kilit": null
+  },
+  {
+   "gorev": "P39",
+   "is": "Gercek-donanim test plani (uinput WRITE A/B)",
+   "durum": "tamam (test plani dokumani kanala verildi; gercek kosum donanim erisimine bagli)",
+   "kilit": null
+  },
+  {
+   "gorev": "P40",
+   "is": "Taslak ilerleme raporu (P30-P36)",
+   "durum": "tamam",
+   "kilit": null
+  },
+  {
+   "gorev": "P41",
+   "is": "Bug Hunt: daemon run_loop/process_device/hotplug (race/FD/SYN_DROPPED)",
+   "durum": "devredildi (Aj2 rapor vermedi; bolge P47+P48.4 kapsaminda) -> P47 tamam + P48 tamam ile KAPSANDI (P87 derleme notu)",
+   "kilit": null
+  },
+  {
+   "gorev": "P42",
+   "is": "Bug Hunt: cli/main.cpp tamasi (arg/push/cikti/exit)",
+   "durum": "tamam",
+   "kilit": null
+  },
+  {
+   "gorev": "P43",
+   "is": "Bug Hunt: config.cpp+config.hpp round-trip/sanitize/dosya-guvenligi",
+   "durum": "tamam (5 bulgu; Bulgu-1 fix P49/M21 ile kapandi: version okuma + regression)",
+   "kilit": null
+  },
+  {
+   "gorev": "P44",
+   "is": "Bug Hunt: gui/.inl+main (GTK ABI/refcount/tr senkr)",
+   "durum": "tamam (M9: G1 CRIT- pkexec_systemctl_async hep false -> cift-baslatma; GTK ABI/refcount/tr temiz)",
+   "kilit": null
+  },
+  {
+   "gorev": "P45",
+   "is": "Bug Hunt: include/accel-*+motion_math+lat_stats (accuracy/OVF/LUT)",
+   "durum": "tamam (oracle PASS; temiz; 2 dusuk oneri + P43-BF1 CI kriki M10)",
+   "kilit": null
+  },
+  {
+   "gorev": "P46",
+   "is": "Bug Hunt: daemon main/daemon.hpp/IPC socket+zaten yazilan telemetri seqlock",
+   "durum": "tamam (M15: 2 dusuk-risk bulgu, seqlock teyidi)",
+   "kilit": null
+  },
+  {
+   "gorev": "P47",
+   "is": "Ikinci-göz: Aj1 run_loop/hotplug/start lifecycle capraz denetim",
+   "durum": "tamam (M16)",
+   "kilit": null
+  },
+  {
+   "gorev": "P48",
+   "is": "Aj6 YEDEK talep: P44 G1 fix testi + 30dk uzun-kosu + journald policy",
+   "durum": "devredildi Aj1 -> tamam (M24: G1 kod dogru fix gerekmez, uzun-kosu RSS 6300kB sabit/cpu 0.5/journald 0 hata, P41 kanti P47)",
+   "kilit": null
+  },
+  {
+   "gorev": "P49",
+   "is": "Aj4 talebi #2/#4: oracle+tr son teyit (kabul kapsam) + P43-BF1 test senkronu (test_accel LUT sort)",
+   "durum": "tamam | tr_coverage PASS eklendi; tum teyit yesil",
+   "kilit": null
+  },
+  {
+   "gorev": "P50",
+   "is": "Aj7: O1 lat_stats guard / O2 LUT dx>0 / O3 guard final kari + P39 plan teyit",
+   "durum": "tamam (M: O1/O2/O3 KABUL, P39 teyit)",
+   "kilit": null
+  },
+  {
+   "gorev": "P51",
+   "is": "Aj1: sprint bulgu fix'leri cakisma/entegrasyon envanteri + tek-commit paket onerisi",
+   "durum": "tamam (M24: envanter + cakisma analizi; 8-dosya tek commit paketi onerisi)",
+   "kilit": null
+  },
+  {
+   "gorev": "P52",
+   "is": "Aj3 P42 3-fix entegrasyon: cli diff envanteri + P35 tek-commit paketine hazirlik",
+   "durum": "tamam (M17: cli +80/-21, build 0 uyari, 21591/21591, oracle OK, tr PASS)",
+   "kilit": null
+  },
+  {
+   "gorev": "P53",
+   "is": "BF fix: daemon/main.cpp M15 - f json log JSON-escape + --flag=value arg parse",
+   "durum": "tamam",
+   "kilit": null
+  },
+  {
+   "gorev": "P54",
+   "is": "BF fix: config.cpp B2 OVF clamp + B3 SEC tmp + B4 tip guard + B5 size_t",
+   "durum": "tamam (M16: B2/B3/B4/B5 yama; build 0 uyari, 21604/21604, oracle OK, tr PASS, ASan+UBSan yesil)",
+   "kilit": null
+  },
+  {
+   "gorev": "P55",
+   "is": "BF fix: lat_stats.hpp O1 guard + accel-lookup.hpp O2 dx>0 + O3 kozmetik",
+   "durum": "tamam (M13: kod+kanit+oracle/tr PASS; kapinin onkochu Aj4 P54 test derlemasi)",
+   "kilit": null
+  },
+  {
+   "gorev": "P56",
+   "is": "BF: Aj1 P51 paket kapanisi + daemon telemetri/run_loop teyit",
+   "durum": "tamam (M24: telemetri/run_loop teyidi + P48 devri)",
+   "kilit": null
+  },
+  {
+   "gorev": "P66",
+   "sahip": "2",
+   "kilit": null,
+   "durum": "tamam (M26: build 0 uyari, 21627/21627, ASan 21627/21627, oracle 768/31 OK, tr PASS, 4 preset oracle ile birebir)",
+   "baslik": "Oyuncu turu bagimsiz QA kesisimi: build/run_tests/ASan/oracle/tr reposu R33-R35"
+  },
+  {
+   "gorev": "P70",
+   "sahip": "4",
+   "durum": "tamam (M25: makepkg 0.5.0-1 403717B, 3xPIE+RELRO+BIND_NOW, preset apex 0.9 dogru, CHANGELOG R30-R37 senkron, 21627/21627, oracle 768/31 OK, tr PASS)",
+   "kilit": null,
+   "baslik": "YAYIN: release paket hazirligi - PKGBUILD/.SRCINFO 0.5.0 dogrulama + makepkg temiz paket + icerik + CI uyumu + CHANGELOG R30-R37 senkron"
+  },
+  {
+   "gorev": "P65",
+   "sahip": "8",
+   "kilit": null,
+   "durum": "tamam (M5/M6: bagimsiz hata avi R30-R35; Bulgu-1 import arity fix R36, Bulgu-2 apex output_offset 0.9 R37, Bulgu-3/4 LEAVE; R37 sonrasi tam teyit yesil)",
+   "baslik": "OYUNCU TURU BAGIMSIZ HATA AVI: preset parametre mantigi + create-preset/show/export round-trip + oracle grid + arac/kod uyari ve bellek taramasi"
+  },
+  {
+   "gorev": "P67",
+   "sahip": "0",
+   "kilit": null,
+   "durum": "tamam (M15: /etc vs ~/.config kapsam denetimi - o an icerik esit, yalniz version 0.4.0/0.5.0 farki; P59 stale kilit tespiti; tek-yazar disiplini onerisi yoneticiye raporlandi)",
+   "baslik": "KANAL SENKRON + AYRISMA KONTROLU: iki config karsilastirma + log/AKIS senkron + tek-yazar onerisi (salt okunur)"
+  },
+  {
+   "gorev": "P68",
+   "sahip": "2",
+   "kilit": null,
+   "durum": "tamam (M29: /etc 0.5.0'a tasindi + SIGHUP reload + diff/md5 esit + P59 stale kilit temizlendi; UYARI: sonrasi /etc harici yaziciyla 0.4.0/3-profil'e geri dondu - P75 config ayrisim raporunda belgelendi)",
+   "baslik": "YAYIN TEMIZLIGI: config senkron + stale kilit fix (daemon /etc'yi 0.5.0'a tasi, reload, iki config esitlenssin)"
+  },
+  {
+   "gorev": "P69",
+   "sahip": "3",
+   "kilit": null,
+   "durum": "tamam (M29: make_preset -> include/presets.hpp tek-kaynak, GUI 'Yeni Profil' preset acilir-kutusu, tr.inl yeni anahtar, build 0 uyari, run_tests 21627/21627, CLI create-preset teyidi; GUI interaktif dogrulama headless icinde kosulamadi)",
+   "baslik": "YAYIN: GUI PRESET SECICI KOD (P60-B tasarimin koda dokumu + CLI/GUI tek kaynak + tr PASS)"
+  },
+  {
+   "gorev": "P71",
+   "sahip": "5",
+   "kilit": null,
+   "durum": "tamam (M20: docs/real_hardware_test.md A/B kiti + user_guide.md; degerler presets.hpp ve latency README ile birebir teyit, yayina hazir)",
+   "baslik": "YAYIN: GERCEK-FARE OTURUM KITI + KULLANICI REHBERI (default 1:1 dogrula -> preset 5-10dk -> latency p95 -> his sonuc)"
+  },
+  {
+   "gorev": "P72",
+   "sahip": "6",
+   "kilit": null,
+   "durum": "tamam (Aj6 M19: setup.sh eksiksiz, B1 eski ~/.local/bin 0.3.0 golgelemesi ONEMLI, B2-B4 iyilestirme onerileri)",
+   "baslik": "YAYIN: FIRST-RUN + KULLANICI SIKAYETI ONLEME (setup.sh temiz akis, /dev/input erisim, daemon kapali CLI, tekrar-baslatma)"
+  },
+  {
+   "gorev": "P73",
+   "sahip": "7",
+   "kilit": null,
+   "durum": "tamam (M24: GUI+CLI cagrilabilir, 4 oyun preset round-trip R30/R37 ile birebir, pan p50 2.25 / flick p50 3.75 P57 uyumlu, temizlendi aktif=default)",
+   "baslik": "YAYIN: GUI + CLI + CURVE CANLI DOGRULAMA (create-preset -> set -> status -> export, lat pan/flick, aktif=default(1:1) birak)"
+  },
+  {
+   "gorev": "P74",
+   "sahip": "8",
+   "kilit": null,
+   "durum": "TAMAM (M10 final: fuzz 90s x2 temiz + BULGU-1 MED synchronous LUT int-cast UB clang'da yakan, BULGU-2 MED -c \"\" sessiz canli mutasyon; mini-yama onerileri ADMIN kararinda; 21664/21664, ASan temiz, 256-char up-front fix dogrulandi)",
+   "baslik": "YAYIN: FUZZ + HATA AVI KAPANISI (run_fuzz + hedefli boundary taramasi + mini-yama onerisi)"
+  },
+  {
+   "gorev": "P75",
+   "sahip": "0",
+   "kilit": null,
+   "durum": "tamam (M30: kanal final - AKIS gorevleri ajN.log'lar ile esitlendi, P60/P62 stale kilit dustu, P65-P69 kayitlari eklendi, P71-P74 atandi/rapor yok; config ayrisimi VETO edildi: /etc 0.4.0/3-profil vs ~/.config 0.5.0/13-profil; tek-kanon onerisi yoneticiye aj0.log'da)",
+   "baslik": "YAYIN ONCESI KANAL FINAL (P75): AKIS esitleme + config yetki karari onerisi + aj0.log raporu"
+  },
+  {
+   "gorev": "P77",
+   "sahip": "2",
+   "kilit": null,
+   "durum": "KABUL (BUG1 CRIT scale=Inf / BUG2 HIGH legacy cap; P81 fix emri verildi, kilit Aj.2)",
+   "baslik": "BUG HUNT: CORE ALGO - uc fazlari sınır kontrolu, sinir degerler, LUT lookup, EMA smoother; bulgu varsa mini-yama ONERISI (kod/yonetici)"
+  },
+  {
+   "gorev": "P78",
+   "sahip": "3",
+   "kilit": null,
+   "durum": "KABUL (P84 fix emri verildi, kilit Aj.3)",
+   "baslik": "BUG HUNT: GUI + UX - P69 preset secici ve tum GUI akisi denetimi; bulgu varsa mini-yama ONERISI"
+  },
+  {
+   "gorev": "P79",
+   "sahip": "4",
+   "kilit": null,
+   "durum": "KABUL (P83 fix emri verildi, kilit Aj.4)",
+   "baslik": "ORACLE + ROUND-TRIP DERIN KOSU - TOL duyarliligi, round-trip surprizleri, config schema ayrisima, paket ikilileri"
+  },
+  {
+   "gorev": "P80",
+   "sahip": "5",
+   "kilit": null,
+   "durum": "KABUL (P82 fix emri verildi; kilit Aj.5 temizlendi P87'de — P82 tamam, kilit gereksiz kalmisti)",
+   "baslik": "BUG HUNT: CLI + IPC + FILESYSTEM - komut yollari, IPC guvenligi, config/dosya sistemi; severity + mini-yama ONERISI"
+  },
+  {
+   "gorev": "P81",
+   "sahip": "2",
+   "kilit": null,
+   "durum": "tamam (M31: BUG1 scale Inf clamp + BUG2 legacy_cap fix; +37 regresyon; build 0 uyari, 21664/21664, ASan clean, oracle 768/31 OK)",
+   "baslik": "FIX: POWER IO BUGLARI (P77 bulgulari: !isfinite(scale) clamp + io/legacy cap.y atamasi) + regression testi"
+  },
+  {
+   "gorev": "P82",
+   "sahip": "5",
+   "kilit": null,
+   "durum": "tamam (M22: CRIT-1 -n/--no-daemon/--dry-run, MED-1 256-char, MED-2 .bak rotate; panel 21664 yesil; kilit Aj.5 temizlendi P87'de)",
+   "baslik": "FIX: CLI CRIT/MED (P80 bulgulari: temp-config izolasyonu, 256-char siniri, .bak zinciri)"
+  },
+  {
+   "gorev": "P83",
+   "sahip": "4",
+   "kilit": null,
+   "durum": "tamam (M28: create-preset 256 OK/257 red testi run_tests.sh eklendi, 4 komut >MAX_NAME_LEN tutarli; P81 oracle TOL 1e-9/1e-11 OK 768/31; 21664 ASan tr PASS)",
+   "baslik": "FIX: 256-CHAR SENKRON + ORACLE TEKIK KOSU + CONFIG MIGRATION UNIT TEST (P79 bulgulari)"
+  },
+  {
+   "gorev": "P84",
+   "sahip": "3",
+   "kilit": null,
+   "durum": "tamam (M33: show_new_profile_dialog + show_input_dialog max_length 256; tr PASS; build 0 uyari; GUI/CLI 256 simetrik)",
+   "baslik": "KOZMETIK + GUI DOKUMAN: 256-char gtk giris siniri + README/P71 dokuman uyumu (P78 bulgulari)"
+  },
+  {
+   "gorev": "P86",
+   "sahip": "6",
+   "kilit": null,
+   "durum": "TAMAM (M22: accel-synchronous.hpp clamp-once cast fix + regression 5 test; 21669/21669, ASan/UBSan temiz, oracle 768/31 OK; commit Aj1)",
+   "baslik": "FIX: ACIL UBSan UB FIX (P74-final BULGU-1: accel-synchronous.hpp:154 float->int cast UB, domain_weights 1e300)"
+  }
+ ],
+ "istekKuyrugu": [
+  {
+   "sira": 1,
+   "ajan": "4",
+   "durum": "tamam (M19: pkgver 0.5.0, makepkg 403662 bayt, .SRCINFO, 21627/21627, oracle OK, tr PASS, build 0 uyari)",
+   "not": "P30 main'e girince pkgver bump + paket dogrulama — TAMAMLANDI",
+   "istekler": [
+    {
+     "is": "PKGBUILD pkgver bump 0.4.0->0.5.0 + makepkg + .SRCINFO tezgahi",
+     "kapsam": "paketleme",
+     "durum": "tamam"
+    },
+    {
+     "is": "Oracle stabilite bekcisi (accel-*.hpp/config.cpp degisirse)",
+     "kapsam": "oracle",
+     "durum": "tamam (588/27 OK, header degismedi)"
+    },
+    {
+     "is": "CI oracle adimi bakimi",
+     "kapsam": "CI",
+     "durum": "tamam (ci.yml oracle adimi yerinde, testler yesil)"
+    },
+    {
+     "is": "Ilerleme/entegrasyon raporu",
+     "kapsam": "raporlama",
+     "durum": "tamam (P40 M8 ile)"
     }
-  ],
-  "istekKuyrugu": [
+   ]
+  },
+  {
+   "sira": 2,
+   "ajan": "2",
+   "durum": "serbest, emir bekliyor (M23: QA/inceleme alani, kilit yok)",
+   "not": "P35 QA paneli + kod inceleme",
+   "istekler": [
     {
-      "sira": 1,
-      "ajan": "4",
-      "durum": "tamam (M19: pkgver 0.5.0, makepkg 403662 bayt, .SRCINFO, 21627/21627, oracle OK, tr PASS, build 0 uyari)",
-      "not": "P30 main'e girince pkgver bump + paket dogrulama — TAMAMLANDI",
-      "istekler": [
-        {
-          "is": "PKGBUILD pkgver bump 0.4.0->0.5.0 + makepkg + .SRCINFO tezgahi",
-          "kapsam": "paketleme",
-          "durum": "tamam"
-        },
-        {
-          "is": "Oracle stabilite bekcisi (accel-*.hpp/config.cpp degisirse)",
-          "kapsam": "oracle",
-          "durum": "tamam (588/27 OK, header degismedi)"
-        },
-        {
-          "is": "CI oracle adimi bakimi",
-          "kapsam": "CI",
-          "durum": "tamam (ci.yml oracle adimi yerinde, testler yesil)"
-        },
-        {
-          "is": "Ilerleme/entegrasyon raporu",
-          "kapsam": "raporlama",
-          "durum": "tamam (P40 M8 ile)"
-        }
-      ]
+     "is": "P35 kapisina bagimsiz QA paneli (build/test/ASan/fuzz/oracle/tr)",
+     "kapsam": "QA"
     },
     {
-      "sira": 2,
-      "ajan": "2",
-      "durum": "serbest, emir bekliyor (M23: QA/inceleme alani, kilit yok)",
-      "not": "P35 QA paneli + kod inceleme",
-      "istekler": [
-        {
-          "is": "P35 kapisina bagimsiz QA paneli (build/test/ASan/fuzz/oracle/tr)",
-          "kapsam": "QA"
-        },
-        {
-          "is": "P30/P31/P32 cikti kod inceleme",
-          "kapsam": "inceleme"
-        }
-      ]
-    },
-    {
-      "sira": 3,
-      "ajan": "6",
-      "durum": "hazir (P35 kabulu sonrasi atama sirasi)",
-      "not": "yedek derin denetim",
-      "istekler": [
-        {
-          "is": "IPC & guvenlik derin denetimi",
-          "kapsam": "guvenlik"
-        },
-        {
-          "is": "Hotplug stres + test katkisi",
-          "kapsam": "dayaniklilik"
-        }
-      ]
-    },
-    {
-      "sira": 4,
-      "ajan": "3",
-      "durum": "hazir (P35 kabulu sonrasi atama sirasi)",
-      "istekler": [
-        {
-          "is": "doc/UX/ceviri devam",
-          "kapsam": "doc"
-        }
-      ]
-    },
-    {
-      "sira": 5,
-      "ajan": "1",
-      "durum": "hazir (P35 kabulu sonrasi atama sirasi)",
-      "not": "P30 tamam + T16",
-      "istekler": []
-    },
-    {
-      "sira": 6,
-      "ajan": "7",
-      "durum": "hazir (P35 kabulu sonrasi atama sirasi)",
-      "istekler": []
+     "is": "P30/P31/P32 cikti kod inceleme",
+     "kapsam": "inceleme"
     }
-  ]
+   ]
+  },
+  {
+   "sira": 3,
+   "ajan": "6",
+   "durum": "hazir (P35 kabulu sonrasi atama sirasi)",
+   "not": "yedek derin denetim",
+   "istekler": [
+    {
+     "is": "IPC & guvenlik derin denetimi",
+     "kapsam": "guvenlik"
+    },
+    {
+     "is": "Hotplug stres + test katkisi",
+     "kapsam": "dayaniklilik"
+    }
+   ]
+  },
+  {
+   "sira": 4,
+   "ajan": "3",
+   "durum": "hazir (P35 kabulu sonrasi atama sirasi)",
+   "istekler": [
+    {
+     "is": "doc/UX/ceviri devam",
+     "kapsam": "doc"
+    }
+   ]
+  },
+  {
+   "sira": 5,
+   "ajan": "1",
+   "durum": "hazir (P35 kabulu sonrasi atama sirasi)",
+   "not": "P30 tamam + T16",
+   "istekler": []
+  },
+  {
+   "sira": 6,
+   "ajan": "7",
+   "durum": "hazir (P35 kabulu sonrasi atama sirasi)",
+   "istekler": []
+  }
+ ]
 }

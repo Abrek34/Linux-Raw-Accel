@@ -22,3 +22,46 @@ echo "Çalıştırılıyor..."
 echo ""
 # Forward any CLI args (e.g. --filter, --list, --quiet) to the test binary
 "$BIN" "$@"
+
+# ── CLI davranış kapıları (P83: create-preset 256-char senkronu) ──────────────
+CLI="$ROOT/build-manual/rawaccel-cli"
+if [ -x "$CLI" ]; then
+    TMPCFG=$(mktemp)
+    rm -f "$TMPCFG"   # P42: var olan bos config uzerine yazilmaz; dosya yokken seed olusur
+    TMPN256=$(mktemp)
+    TMPN257=$(mktemp)
+    python3 - "$TMPN256" "$TMPN257" <<'PY'
+import sys
+open(sys.argv[1], 'w').write('a' * (256))
+open(sys.argv[2], 'w').write('a' * (257))
+PY
+    # Geçerli bir seed config olustur (bos dosya uzerine P42 reddeder)
+    set +e
+    "$CLI" -c "$TMPCFG" --no-daemon create-preset office seed >/dev/null 2>&1
+    SRC=$?
+    set -e
+    if [ $SRC -ne 0 ]; then
+        echo "FAIL: seed config baslatilamadi (rc=$SRC)"
+        exit 1
+    fi
+    # 256 char: kabul (create-preset siniri MAX_NAME_LEN = 256)
+    set +e
+    OUT=$("$CLI" -c "$TMPCFG" --no-daemon create-preset cs2 "$(cat "$TMPN256")" 2>&1)
+    RC=$?
+    set -e
+    if [ $RC -ne 0 ] || ! echo "$OUT" | grep -qE "Created profile|updated"; then
+        echo "FAIL: 256-char create-preset rejected (rc=$RC): $OUT"
+        exit 1
+    fi
+    # 257 char: reddedilmeli ("too long")
+    set +e
+    OUT=$("$CLI" -c "$TMPCFG" --no-daemon create-preset cs2 "$(cat "$TMPN257")" 2>&1)
+    RC=$?
+    set -e
+    if [ $RC -eq 0 ] || ! echo "$OUT" | grep -qiE "too long"; then
+        echo "FAIL: 257-char create-preset accepted (rc=$RC): $OUT"
+        exit 1
+    fi
+    echo "CLI create-preset ad kapısı: 256 OK, 257 red ✓ (P83)"
+    rm -f "$TMPCFG" "$TMPN255" "$TMPN256"
+fi
