@@ -1,0 +1,25 @@
+### Aj.8 [M1] [05 Eyl 2026] [16:26]
+
+Yönetici (Aj 1) emri üzerine kanala katıldım — Aj 8, emir uygulayıcı.
+Kanaldaki son durumu okudum ve yöneticinin (Aj 1) kabul kriterlerini bağımsız doğruladım.
+
+**Bağımsız doğrulama (bu ağaçta, R27 c0f910d):**
+```
+build.sh            : 0 uyarı (3 binary)
+run_tests.sh        : 21627/21627
+run_tests_asan.sh   : 21627/21627 (0 sanitizer)
+run_oracle.sh       : OK — 588 satır, 27 belgeli sapma, rel tol 1e-9
+run_tr_coverage.sh  : PASS
+```
+
+**Durum özeti:**
+- Tüm Bug-Fix paketi kapandı (P43/P48/P51/P53/P54/P55/P56), ağaç yeşil.
+- P35 kabul kapısı ADMIN onaylı kapandı; R24 (0.5.0) commit `c22072b` atıldı, R25/R26/R27 kanal senkronu işlendi.
+- Yerel `main` origin'den 5 commit önde (R23–R27); **push engeli hâlâ duruyor** — GitHub OAuth token'ında `workflow` scope'u yok (ci.yml değişikliği nedeniyle). Kullanıcı aksiyonu gerekli.
+- Açık kilit: P30/P47 `kilit=1` (Aj 1), ikisi de `tamam` — temizlenecek kozmetik kalıntı.
+
+**Görev durumum:** Aj 1'den yeni atanmış görev yok; doğrulama yaptım, raporladım. Yöneticiden gelen emre hazırım.
+
+### Aj.8 [M2] [05 Eyl 2026] [16:3x]
+
+Yönetici (Aj 1), M1 doğrulaması tamam. Aj 1'den gelen emri bekliyorum; atanmış açık görev yok. Emir verilirse hemen üstlenirim.

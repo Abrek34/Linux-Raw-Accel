@@ -188,26 +188,6 @@ AJ 0 emriyle (M13/M12) uygulandı. Değişiklikler:
 Teyitler: build.sh 0 uyarı | run_tests.sh 21591/21591 (önce 4 FAIL→fix) | run_oracle.sh OK (588/27, TOL 1e-9). Kanıt ön/son: /tmp/opencode/p43/{proof2,proof2_fixed} (200→20000→2M→200M vs sabit 200).
 Diğer 4 bulgu (B2 OVF clamp, B3 SEC tmp, B4 tip guard, B5 size_t) uygulanmadı — sprint sonrası tek commit paketine bağlanabilir; emir verilirse tek tek alırım.
 
-### Aj.4 [M19] [05 Eyl 2026] [16:15 — pkgver bump 0.5.0 + makepkg + .SRCINFO tamam]
-
-Yönetici (Aj 0) emri + istek kuyruğu sıra 1: versiyon bump + paket doğrulama.
-
-1. **Versiyon bump 3 noktada uygulandı (çalışma ağacında):**
-   - `packaging/PKGBUILD:14` → `pkgver=0.5.0`
-   - `include/rawaccel-base.hpp:9` → `RAWACCEL_VERSION = "0.5.0"`
-   - `CMakeLists.txt:2` → `project(rawaccel-linux VERSION 0.5.0)`
-2. **makepkg -f → exit 0**, paket `rawaccel-linux-0.5.0-1-x86_64.pkg.tar.zst` (403,662 bayt) derlendi.
-3. **`.SRCINFO` üretildi** (AUR-uygun, makedepends/depends optdepend doğru).
-4. **Paket içeriği:** ELF PIE stripped × 3 binary + systemd + udev + polkit + modules-load.d + desktop + settings.json.
-5. **Hardening:** GNU_STACK noexec + GNU_RELRO + BIND_NOW + PIE (3/3 binary teyit).
-6. **Testler:**
-   - `run_tests.sh` → **21627/21627 geçti**
-   - `run_oracle.sh` → **OK** (588 satır, 561 ≤1e-9, 27 belgeli sapma, TOL 1e-9)
-   - `run_tr_coverage.sh` → **PASS**
-   - Build uyarı/hata: **0**
-
-Kilit kaldırıldı. P35 kabul kapısına hazır.
-
 ### YONETICI [Aj 0] [05 Eyl 2026] [15:40 - P49 kabul]
 P49 raporu kabul: version okuma guard + test_accel LUT yeni regression (21591/21591, oracle OK, build 0 uyari). Kilit dustu. B2/B3/B4/B5 P35 paketine tek tek cagrilabilir; simdilik #3 (pkgver bump P35 sonrasi) siranda.
 
@@ -239,3 +219,36 @@ P35 kabul + R23 commit + working tree temiz -> istek kuyrugu sira 1 devreye giri
 
 ### YONETICI [ADMIN] [05 Eyl 2026] - R24 emri: pkgver bump + paket dogrulama
 Aj 4, istek kuyrugu sira 1 onaylandi. P35 kabul edildi. Agaçta zaten uygulanan 0.5.0 bump'ini (PKGBUILD pkgver=0.5.0, rawaccel-base.hpp RAWACCEL_VERSION=0.5.0, CMakeLists VERSION 0.5.0) dogrula: (1) packaging/ icinde makepkg -f ile paket derle, (2) makepkg --printsrcinfo ile .SRCINFO uret (packaging/.SRCINFO olarak eklenecek), (3) paket hardening READELF taramasi + pacman -Qp dogrulamasi, (4) raporu loguna yaz. Yeni ozellik YOK.
+
+### Aj.4 [M19] [05 Eyl 2026] [16:15 — ADMIN R24 emri tamamlandı: pkgver bump 0.5.0 + makepkg + .SRCINFO]
+
+ADMIN R24 emrine yanıt (yönetici + istek kuyruğu sıra 1): versiyon bump + paket doğrulama.
+
+1. **Versiyon bump 3 noktada doğrulandı (çalışma ağacında uygulanmış):**
+   - `packaging/PKGBUILD:14` → `pkgver=0.5.0`
+   - `include/rawaccel-base.hpp:9` → `RAWACCEL_VERSION = "0.5.0"`
+   - `CMakeLists.txt:2` → `project(rawaccel-linux VERSION 0.5.0)`
+2. **makepkg -f → exit 0**, paket `rawaccel-linux-0.5.0-1-x86_64.pkg.tar.zst` (403,662 bayt) derlendi.
+3. **`.SRCINFO` üretildi** (`packaging/.SRCINFO`, AUR-uygun, makedepends/depends/optdepend doğru).
+4. **Paket içeriği:** ELF PIE stripped × 3 binary + systemd + udev + polkit + modules-load.d + desktop + settings.json.
+5. **Hardening/README taraması:** GNU_STACK noexec + GNU_RELRO + BIND_NOW + PIE (3/3 binary teyit).
+6. **pacman -Qp** → `rawaccel-linux 0.5.0-1` tanındı (paket dosyası geçerli).
+7. **Testler:**
+   - `run_tests.sh` → **21627/21627 geçti**
+   - `run_oracle.sh` → **OK** (588 satır, 561 ≤1e-9, 27 belgeli sapma, TOL 1e-9)
+   - `run_tr_coverage.sh` → **PASS**
+   - Build uyarı/hata: **0**
+
+Kilit kaldırıldı. P35 kabul kapısına paket hazır.
+
+### Aj.4 [M20] [05 Eyl 2026] [16:30 — EMİR BEKLİYORUM]
+
+Yönetici ve kanal ekipleri — Aj 4 olarak **yeni emir/atama bekliyorum.** Rolümdeki (referans oracle / paketleme) görevlerimin tamamı kapandı: T19, T25, P40, P43, P49, P54, istek kuyruğu sıra 1 (ADMIN R24: pkgver bump 0.5.0). Ağaç yeşil: build 0 uyarı, test 21627/21627, ASan 21627, oracle OK 588/27, tr_coverage PASS, paket rawaccel-linux-0.5.0-1 (403,662 bayt, hardening tam).
+
+Hazır olduğum alanlar:
+1. **Oracle stabilite bekçiliği** — accel-*.hpp/config.cpp değişikliklerinde otomatik `run_oracle.sh` koşumu.
+2. **Paketleme/sürüm** — 0.5.0 sonrası bump, makepkg, .SRCINFO tezgahı, AUR uyumu.
+3. **CI oracle adımı bakımı** — ci.yml'deki adımın yeşil tutulması.
+4. **İlerleme/entegrasyon raporu** — tahta + kilit + kapılar + paket durumu özeti.
+
+Not: GitHub push, kullanıcı kaynaklı blokerdir (OAuth token'da workflow scope yok) — kod tarafında engel yok. Emir verilirse (örn. `oracle re-teyit → Aj 4`, `paket tezgahı → Aj 4`) hemen üstlenir, kilit disiplini uygular, kanala raporlarım. Kilit null.

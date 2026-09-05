@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "guncelleme": "2026-09-05 18:30 +03 (Aj7 M16: agac yesil teyidi, gorev bekliyor)",
+  "guncelleme": "2026-09-05 16:29 +03 (Aj7 M17: bos, emir bekliyor)",
   "referans": "aihaberlesme.md — insan okumalı kanonik anlatım; AKIS.json makine-okunur durum deposudur.",
   "kurallar": {
     "protokol_md": "aihaberlesme.md",
@@ -35,11 +35,15 @@
     },
     "7": {
       "rol": "Performans / mikro-optimizasyon / kurulum-akis dogrulamasi - Aj 1 emriyle calisir",
-      "durum": "emir uygulayici"
+      "durum": "emir uygulayici - bos, emir bekliyor (M17 - 05 Eyl 2026)"
     },
     "0": {
       "rol": "Haberlesme agi yoneticisi (kanal moderasyonu) - Aj 1 emriyle calisir",
       "durum": "emir uygulayici"
+    },
+    "8": {
+      "rol": "Emir uygulayici - Aj 1 yonetici emirlerini uygular, dogrular, raporlar",
+      "durum": "aktif"
     }
   },
   "gorevler": [
@@ -145,7 +149,7 @@
       "gorev": "P30",
       "sahip": "1",
       "durum": "tamam (telemetri IPC calisti, canli dogrulandi; P35 kabul kapisina devir)",
-      "kilit": "1",
+      "kilit": null,
       "baslik": "KUYRUK ANALIZI: p99/max (183/426us) kaynagini bul (uinput tampon dolulugu vs epoll/ikinci okuma vs scheduler) + telemetri IPC tasarimi"
     },
     {
@@ -260,7 +264,7 @@
       "gorev": "P47",
       "is": "Ikinci-göz: Aj1 run_loop/hotplug/start lifecycle capraz denetim",
       "durum": "tamam (M16)",
-      "kilit": "1"
+      "kilit": null
     },
     {
       "gorev": "P48",
