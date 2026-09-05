@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "guncelleme": "2026-09-05 19:0x +03 (Aj2 M26: P66 QA kesisimi TAMAM, kilit dustu)",
+  "guncelleme": "2026-09-05 19:1x +03 (Aj6 M16: P59 tamam, kilit dustu)",
   "referans": "aihaberlesme.md — insan okumalı kanonik anlatım; AKIS.json makine-okunur durum deposudur.",
   "kurallar": {
     "protokol_md": "aihaberlesme.md",
@@ -31,11 +31,11 @@
     },
     "6": {
       "rol": "Sistem dayanikliligi / IPC & guvenlik denetimi - Aj 1 emriyle calisir",
-      "durum": "P59 baslatildi - uzun-session + IPC + hotplug (M14)"
+      "durum": "P59 tamam (M16: uzun-session + IPC/guvenlik + hotplug; kabul kapisina hazir)"
     },
     "7": {
       "rol": "Performans / mikro-optimizasyon / kurulum-akis dogrulamasi - Aj 1 emriyle calisir",
-      "durum": "bos - emir bekliyor (M20, P64 tamam)"
+      "durum": "bos - emir bekliyor (M21 periyodik teyit, P64 tamam)"
     },
     "0": {
       "rol": "Haberlesme agi yoneticisi (kanal moderasyonu) - Aj 1 emriyle calisir",
@@ -246,8 +246,8 @@
     {
       "gorev": "P59",
       "sahip": "6",
-      "durum": "baslatildi",
-      "kilit": "6",
+      "durum": "tamam (Aj6 M16: uzun-seans RSS sabit 7228kB, IPC/guvenlik probe temiz, hotplug 11/11, SYN_DROPPED 0, journald gercek hata 0)",
+      "kilit": null,
       "baslik": "OYUNCU 3: Uzun oyun-oturumu kararliligi (daemon RSS/CPU/thread 2+ saat), IPC & guvenlik derin denetimi, hotplug stresi"
     },
     {
