@@ -509,33 +509,44 @@ CI and must not drift outside `tests/oracle/known_deviations.txt`.
 
 ## Player profile (oyuncu profili)
 
-Built-in **`gaming`** preset (FPS / aim-focused, classic acceleration):
+RawAccel Linux ships game-specific presets for common competitive titles. These
+are tuned starting points — research-backed, then adjust by feel:
 
-| Param | Value |
-|-------|-------|
-| mode | classic (X + Y) |
-| gain | on (both axes) |
-| acceleration | 0.005 |
-| exponent_classic | 2.0 |
-| limit | 1.8 |
-| output_dpi | 1000 |
-| device dpi / polling | 800 / 1000 Hz |
+| Preset | Mode | Use case |
+|--------|------|----------|
+| `gaming` | classic | General FPS / aim trainers: classic curve, limit 1.8 |
+| `cs2` | classic | Tactical shooter (pro eDPI band 560–1000): early kick-in, cap 1.6 |
+| `valorant` | natural | Smooth entry/exit (TenZ-style base): light gain, high cap 2.0 |
+| `apex` | power | Tracking + verticality: fast 180° flicks, output offset 0.2 |
+| `fps` | classic | Balanced FPS starting point (moderate accel + cap 1.8) |
+| `office` | natural | Light desktop acceleration (limit 1.3) |
+| `precision` | classic | CAD / design work (low accel 0.002) |
+| `disable` | raw | Raw passthrough — 1:1, no acceleration |
 
 ```bash
 # Create from preset (CLI)
-rawaccel-cli create-preset gaming fps
-rawaccel-cli set fps
+rawaccel-cli create-preset cs2 cs2-pro        # CS2 tactical
+rawaccel-cli create-preset valorant val       # Valorant smooth
+rawaccel-cli create-preset apex apex          # Apex tracking
+rawaccel-cli create-preset fps fps            # generic FPS
+rawaccel-cli set cs2-pro                      # activate
 ```
 
-Or in the GUI: create a profile, set both axes to **Classic**, enable **Gain mode**
-and start from the values above. Use the **Ham Geçiş** (Raw Passthrough) toggle to
-A/B-test raw vs accelerated until the curve *feels* right (param meanings in `## Parameters`).
+Or in the GUI: create a profile, set both axes to the preset's mode (classic /
+natural / power), enable **Gain mode** and start from the value ranges above.
+Use the **Ham Geçiş** (Raw Passthrough) toggle to A/B-test raw vs accelerated
+until the curve *feels* right (param meanings in `## Parameters`).
 
 Tips:
 - Set `dpi` / `polling_rate` to your mouse's real values — ips math is only accurate
-  when these are correct.
+  when these are correct (most CS2 pros: 400 DPI, 1000 Hz; Valorant: 400–1600 DPI.
+  Compare eDPI, not DPI alone).
+- Valorant: start with `acceleration ≈ 0.05` (GUI slider), `limit 1.2–1.5`,
+  `input_offset 0.02–0.05` so micro-corrections stay 1:1.
+- CS2: keep `exponent_classic` at 2.0 and test `limit` between 1.4–1.8; raise
+  `input_offset` if slow aim feels floaty.
 - Lower `exponent_classic` → subtler curve; higher `limit` → more speed at high motion.
-- Other presets: `office` (natural, light), `precision` (low accel), `disable` (raw passthrough).
+- Per-game presets are meant as a *reference* — spend 30–60 min per config before judging
 
 ## Performance
 
