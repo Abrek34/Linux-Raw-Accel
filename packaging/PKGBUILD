@@ -12,7 +12,7 @@
 
 pkgname=rawaccel-linux
 pkgver=0.5.0
-pkgrel=2
+pkgrel=3
 pkgdesc="Raw Accel mouse acceleration daemon (Linux port): kernel-level uinput grab + GTK4 GUI + CLI"
 arch=('x86_64')
 url="https://github.com/rawaccel-linux/rawaccel-linux"
